@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config'
 import AliOSS from 'ali-oss'
 import { join } from 'path'
 import { to } from '.'
+import { createHash } from 'crypto'
 
 export class UpdaterUtil {
   private oss?: AliOSS
@@ -27,7 +28,8 @@ export class UpdaterUtil {
     if (!this.oss) {
       return { err: 'OSS initialization failed' }
     }
-    const filrName = `${Date.now()}.${file.originalname.split('.').pop()}`
+    const suffix = file.originalname.split('.').pop()
+    const filrName = `${createHash('md5').update(`${Date.now()}`).digest('hex')}.${suffix}`
     const ossDir = this.configService.get('OSS_DIR') || ''
     const ossUrl = this.configService.get('OSS_URL') || ''
     const ossPath = join(ossDir, dir, filrName)
