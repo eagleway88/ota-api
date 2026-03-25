@@ -77,6 +77,7 @@ export function createVersionTable(name: string) {
       { name: 'mandatory', type: 'tinyint', isNullable: true, comment: '是否强制更新', default: () => '1' },
       { name: 'install_url', type: 'varchar', isNullable: true, comment: '安装链接(全量更新时不为null)' },
       { name: 'package_url', type: 'varchar', isNullable: true, comment: '热更新链接(热更新时不为null)' },
+      { name: 'update_type', type: 'varchar', isNullable: true, comment: '更新类型(full=全量更新 hot=热更新)' },
       { name: 'channel', type: 'varchar', isNullable: true, comment: '渠道(appstore或其它,用于全量更新下发不同的链接)' },
       { name: 'platform', type: 'varchar', comment: '平台(多平台用逗号拼接ios,android)' },
       { name: 'ip', type: 'varchar', isNullable: true, comment: 'IP' },

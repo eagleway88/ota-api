@@ -10,6 +10,11 @@ export enum PlatformType {
   Mac = 'mac'
 }
 
+export enum UpdateType {
+  Full = 'full',
+  Hot = 'hot'
+}
+
 export class VersionDto {
   @IsNumber()
   @IsNotEmpty()
@@ -44,6 +49,8 @@ export class VersionDto {
   packageUrl?: string
   /** 渠道(appstore或其它,用于全量更新下发不同的链接) */
   channel?: string
+  /** 更新类型(full=全量更新 hot=热更新) */
+  updateType?: UpdateType
 }
 
 export class StatusDto {
@@ -102,6 +109,8 @@ export class SuccessDto extends OmitType(StatusDto, ['id']) {
 }
 
 export class ErrorDto extends OmitType(StatusDto, ['id']) {
+  id?: number
+
   @IsString()
   @IsNotEmpty()
   message: string
