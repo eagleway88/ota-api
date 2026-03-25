@@ -92,12 +92,18 @@ export class CheckDto extends OmitType(VersionDto, ['id', 'platform']) {
   id?: number
 }
 
-export class UploadDto extends OmitType(VersionDto, ['id']) {
+export class UploadDto extends OmitType(VersionDto, ['id', 'ver']) {
+  /** 版本号(1.0.0=100) */
+  @IsString()
+  @IsNotEmpty()
+  ver: string
+
   @ApiProperty({
     type: 'string',
     format: 'binary'
   })
   file: any
+
 }
 
 export class CreateDto extends OmitType(VersionDto, ['id']) {

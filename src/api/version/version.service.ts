@@ -60,10 +60,9 @@ export class VersionService {
 
       await this.syncTableColumns(queryRunner, table)
 
-      // 数据库存的是类似 ios,android 这样的逗号分隔字符串，
-      // 而 body.platform 只会是 ios / android 这种单值。
-      // 这里用 FIND_IN_SET 做集合包含判断，并先去掉空格，兼容 ios, android 这类脏数据。
-      const query = queryRunner.manager
+      // 先构造所有更新查询共用的基础条件：启用状态、平台命中、渠道命中。
+      // 后续在这个基础上再分别叠加“全量更新”与“热更新”的规则。
+      const baseQuery = queryRunner.manager
         .createQueryBuilder()
         .select('*')
         .from(table.name, 'version')
@@ -71,39 +70,44 @@ export class VersionService {
         .andWhere("FIND_IN_SET(:platform, REPLACE(version.platform, ' ', '')) > 0", {
           platform: body.platform
         })
-        // 查询比当前客户端版本更高的记录。
-        // 如果版本号相同，则继续比较自增 id，保证能取到更新发布的后续版本记录。
-        .andWhere(
-          '(version.ver > :ver OR (version.ver = :ver AND version.id > :id))',
-          {
-            ver: body.ver,
-            id: body.id || 0
-          }
-        )
 
       if (body.channel) {
-        // 传了 channel 时，优先命中该 channel 的版本；
-        // 同时保留 channel 为空的公共版本。
-        query.andWhere(
+        // 指定渠道时，优先匹配该渠道，同时兼容 channel 为空的公共版本。
+        baseQuery.andWhere(
           '(version.channel = :channel OR version.channel IS NULL OR version.channel = \"\")',
           { channel: body.channel }
         )
       }
 
-      // 排序规则：
-      // 1. 先取更高版本号；
-      // 2. 同版本号下，优先返回全量更新（update_type = full）；
-      // 3. 最后再按 id 倒序兜底，保证相同类型时返回最新一条。
-      const latest = await query
+      // 规则 1：如果存在比当前版本更高的全量更新，直接返回版本号最大的那条。
+      // 这样客户端会优先走完整升级链路，而不是继续停留在当前版本打热更新补丁。
+      const fullUpdate = await baseQuery
+        .clone()
+        .andWhere('version.update_type = :updateType', {
+          updateType: UpdateType.Full
+        })
+        .andWhere('version.ver > :ver', { ver: body.ver })
         .orderBy('version.ver', 'DESC')
-        .addOrderBy(
-          "CASE WHEN version.update_type = 'full' THEN 1 ELSE 0 END",
-          'DESC'
-        )
         .addOrderBy('version.id', 'DESC')
         .getRawOne()
 
-      return apiUtil.data(latest ? underlineToHump(latest) : null)
+      if (fullUpdate) {
+        return apiUtil.data(underlineToHump(fullUpdate))
+      }
+
+      // 规则 2：如果没有更高版本的全量更新，则只返回当前版本内可继续应用的热更新。
+      // 这里要求 version.id 大于客户端已应用的 id，避免重复下发旧热更新。
+      const hotUpdate = await baseQuery
+        .clone()
+        .andWhere('version.update_type = :updateType', {
+          updateType: UpdateType.Hot
+        })
+        .andWhere('version.ver = :ver', { ver: body.ver })
+        .andWhere('version.id > :id', { id: body.id || 0 })
+        .orderBy('version.id', 'DESC')
+        .getRawOne()
+
+      return apiUtil.data(hotUpdate ? underlineToHump(hotUpdate) : null)
     } finally {
       await queryRunner.release()
     }
@@ -209,7 +213,7 @@ export class VersionService {
     try {
       await this.ensureTable(queryRunner, table)
 
-      const insertPayload = this.compactObject(humpToUnderline(payload))
+      const insertPayload = this.prepareDynamicPayload(table, payload)
       const insertRes = await queryRunner.manager
         .createQueryBuilder()
         .insert()
@@ -229,7 +233,7 @@ export class VersionService {
         .where('id = :id', { id: insertId })
         .getRawOne()
 
-      return underlineToHump(created ?? { id: insertId, ...insertPayload })
+      return this.normalizeDynamicResult(table, created ?? { id: insertId, ...insertPayload })
     } finally {
       await queryRunner.release()
     }
@@ -246,7 +250,7 @@ export class VersionService {
         return apiUtil.error('Error record does not exist')
       }
 
-      const updatePayload = this.compactObject(humpToUnderline({ ...payload, id: undefined }))
+      const updatePayload = this.prepareDynamicPayload(table, { ...payload, id: undefined })
       const updateRes = await queryRunner.manager
         .createQueryBuilder()
         .update(table.name)
@@ -265,7 +269,7 @@ export class VersionService {
         .where('id = :id', { id })
         .getRawOne()
 
-      return underlineToHump(updated ?? { id, ...updatePayload })
+      return this.normalizeDynamicResult(table, updated ?? { id, ...updatePayload })
     } finally {
       await queryRunner.release()
     }
@@ -320,14 +324,75 @@ export class VersionService {
     )
   }
 
+  private prepareDynamicPayload(table: Table, payload: Record<string, any>) {
+    const compactedPayload = this.compactObject(humpToUnderline(payload))
+    const jsonColumnNames = new Set(
+      table.columns
+        .filter(column => column.type === 'json')
+        .map(column => column.name)
+    )
+
+    return Object.fromEntries(
+      Object.entries(compactedPayload).map(([key, value]) => {
+        if (!jsonColumnNames.has(key)) {
+          return [key, value]
+        }
+
+        return [key, this.stringifyJsonColumnValue(value)]
+      })
+    )
+  }
+
+  private normalizeDynamicResult(table: Table, record: Record<string, any>) {
+    const jsonColumnNames = new Set(
+      table.columns
+        .filter(column => column.type === 'json')
+        .map(column => column.name)
+    )
+
+    const normalizedRecord = Object.fromEntries(
+      Object.entries(record).map(([key, value]) => {
+        if (!jsonColumnNames.has(key)) {
+          return [key, value]
+        }
+
+        return [key, this.parseJsonColumnValue(value)]
+      })
+    )
+
+    return underlineToHump(normalizedRecord)
+  }
+
+  private stringifyJsonColumnValue(value: any) {
+    if (value === undefined) return value
+    if (value === null) return null
+
+    if (typeof value === 'string') {
+      try {
+        return JSON.stringify(JSON.parse(value))
+      } catch {
+        return JSON.stringify(value)
+      }
+    }
+
+    return JSON.stringify(value)
+  }
+
+  private parseJsonColumnValue(value: any) {
+    if (typeof value !== 'string') {
+      return value
+    }
+
+    try {
+      return JSON.parse(value)
+    } catch {
+      return value
+    }
+  }
+
   private normalizeExtras(extras?: string) {
     if (!extras) return undefined
 
-    try {
-      return JSON.parse(extras)
-    } catch {
-      return extras
-    }
-
+    return extras
   }
 }

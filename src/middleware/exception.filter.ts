@@ -2,7 +2,7 @@
 import { HttpException, HttpStatus } from '@nestjs/common'
 import { ExceptionFilter as NestExceptionFilter } from '@nestjs/common'
 import { Catch, ArgumentsHost } from '@nestjs/common'
-import { Response, Request } from 'express'
+import { Response } from 'express'
 
 @Catch()
 export class ExceptionFilter implements NestExceptionFilter {
@@ -11,7 +11,8 @@ export class ExceptionFilter implements NestExceptionFilter {
   async catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp()
     const res = ctx.getResponse<Response>()
-    const req = ctx.getRequest<Request>()
+    // const req = ctx.getRequest<Request>()
+    console.error('catch', exception)
     let message: undefined | string
     if (exception instanceof HttpException) {
       const status = exception.getStatus()

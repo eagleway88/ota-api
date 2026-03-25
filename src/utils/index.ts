@@ -31,16 +31,27 @@ export async function to<T, U = Error>(
     })
 }
 
+function isPlainObject(value: unknown): value is Record<string, any> {
+  if (Object.prototype.toString.call(value) !== '[object Object]') {
+    return false
+  }
+
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
 /**
  * 下划线转驼峰 (CamelCase)
  */
 export function underlineToHump(obj: any) {
-  if (typeof obj !== 'object' || obj === null) return obj;
+  if (obj === null || obj === undefined) return obj;
 
   // 递归处理数组或对象
   if (Array.isArray(obj)) {
     return obj.map(v => underlineToHump(v));
   }
+
+  if (!isPlainObject(obj)) return obj;
 
   return Object.keys(obj).reduce((newObj, key) => {
     // 使用正则匹配下划线，将其后第一个字母转为大写
@@ -54,11 +65,13 @@ export function underlineToHump(obj: any) {
  * 驼峰转下划线 (SnakeCase)
  */
 export function humpToUnderline(obj: any) {
-  if (typeof obj !== 'object' || obj === null) return obj;
+  if (obj === null || obj === undefined) return obj;
 
   if (Array.isArray(obj)) {
     return obj.map(v => humpToUnderline(v));
   }
+
+  if (!isPlainObject(obj)) return obj;
 
   return Object.keys(obj).reduce((newObj, key) => {
     // 使用正则匹配大写字母，并在其前添加下划线
