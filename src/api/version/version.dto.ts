@@ -7,7 +7,7 @@ export enum PlatformType {
   Android = 'android',
   Windows = 'windows',
   Linux = 'linux',
-  Mac = 'mac'
+  Macos = 'macos'
 }
 
 export enum UpdateType {
