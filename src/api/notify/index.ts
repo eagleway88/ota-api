@@ -17,4 +17,12 @@ export class NotifyController {
   send(@Req() req: Request, @Body() body: SendDto) {
     return this.service.send(req, body)
   }
+
+  @Public()
+  @Post('uid')
+  @ApiOperation({ summary: '发送通知(特定用户)' })
+  @ApiResult({ type: String })
+  uid(@Req() req: Request, @Body() body: SendDto) {
+    return this.service.uid(req, body)
+  }
 }

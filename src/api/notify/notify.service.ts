@@ -23,4 +23,14 @@ export class NotifyService {
     return apiUtil.data(body.type)
   }
 
+  async uid(req: Request, body: SendDto) {
+    const ip = fetchIP(req)
+    const ips = this.configService.get<string>('IPS')
+    if (ips && !ips.includes(ip)) {
+      return apiUtil.error('Permission denied')
+    }
+    await this.wsService.sendUidMessage(body.type, body.data)
+    return apiUtil.data(body.type)
+  }
+
 }

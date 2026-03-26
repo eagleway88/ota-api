@@ -3,7 +3,11 @@ import { SubscribeMessage } from '@nestjs/websockets'
 import { Server, Socket } from 'socket.io'
 
 type OtaMessage = {
-  name: string
+  ota: string
+}
+
+type UidMessage = {
+  uid: string
 }
 
 @WebSocketGateway(void 0, {
@@ -16,8 +20,12 @@ export class WsService {
 
   constructor() { }
 
-  private getOtaRoom(name: string) {
-    return `ota:${name}`
+  private getOtaRoom(ota: string) {
+    return `ota:${ota}`
+  }
+
+  private getUidRoom(uid: string) {
+    return `uid:${uid}`
   }
 
   async sendBroadcast(type: string, data?: any, clientId?: string) {
@@ -29,28 +37,52 @@ export class WsService {
     }
   }
 
-  async sendOtaMessage(name: string, data: any) {
-    this.server.to(this.getOtaRoom(name)).emit(name, data)
+  async sendUidMessage(uid: string, data: any) {
+    this.server.to(this.getUidRoom(uid)).emit(uid, data)
+  }
+
+  @SubscribeMessage('uid:subscribe')
+  async handleUidSubscribe(client: Socket, data: UidMessage) {
+    if (!data?.uid) {
+      return { event: 'uid:error', data: 'Uid is required' }
+    }
+
+    await client.join(this.getUidRoom(data.uid))
+    return { event: 'uid:subscribed', data: { uid: data.uid } }
+  }
+
+  @SubscribeMessage('uid:unsubscribe')
+  async handleUidUnsubscribe(client: Socket, data: UidMessage) {
+    if (!data?.uid) {
+      return { event: 'uid:error', data: 'Uid is required' }
+    }
+
+    await client.leave(this.getUidRoom(data.uid))
+    return { event: 'uid:unsubscribed', data: { uid: data.uid } }
+  }
+
+  async sendOtaMessage(ota: string, data: any) {
+    this.server.to(this.getOtaRoom(ota)).emit(ota, data)
   }
 
   @SubscribeMessage('ota:subscribe')
   async handleOtaSubscribe(client: Socket, data: OtaMessage) {
-    if (!data?.name) {
+    if (!data?.ota) {
       return { event: 'ota:error', data: 'Ota is required' }
     }
 
-    await client.join(this.getOtaRoom(data.name))
-    return { event: 'ota:subscribed', data: { ota: data.name } }
+    await client.join(this.getOtaRoom(data.ota))
+    return { event: 'ota:subscribed', data: { ota: data.ota } }
   }
 
   @SubscribeMessage('ota:unsubscribe')
   async handleOtaUnsubscribe(client: Socket, data: OtaMessage) {
-    if (!data?.name) {
+    if (!data?.ota) {
       return { event: 'ota:error', data: 'Ota is required' }
     }
 
-    await client.leave(this.getOtaRoom(data.name))
-    return { event: 'ota:unsubscribed', data: { ota: data.name } }
+    await client.leave(this.getOtaRoom(data.ota))
+    return { event: 'ota:unsubscribed', data: { ota: data.ota } }
   }
 
   @SubscribeMessage('message')
