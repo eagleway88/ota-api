@@ -26,9 +26,8 @@ export class VersionDto {
   id: number
 
   /** 版本号(1.0.0=100) */
-  @IsNumber()
   @IsNotEmpty()
-  ver: number
+  ver: number | string
 
   /** 应用名称 */
   @IsString()

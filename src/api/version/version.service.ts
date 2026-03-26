@@ -53,6 +53,11 @@ export class VersionService {
     const table = createVersionTable(body.name)
     const queryRunner = this.dataSource.createQueryRunner()
 
+    // 兼容旧版
+    if (typeof body.ver === 'string') {
+      body.ver = Number(body.ver.replaceAll('.', ''))
+    }
+
     await queryRunner.connect()
 
     try {
@@ -95,7 +100,12 @@ export class VersionService {
         .getRawOne()
 
       if (fullUpdate) {
-        return apiUtil.data(underlineToHump(fullUpdate))
+        // 兼容旧版全量更新
+        return apiUtil.data(underlineToHump({
+          ...fullUpdate,
+          type: 1, downloadUrl: fullUpdate.install_url,
+          isMandatory: 1
+        }))
       }
 
       // 规则 2：如果没有更高版本的全量更新，则只返回当前版本内可继续应用的热更新。
