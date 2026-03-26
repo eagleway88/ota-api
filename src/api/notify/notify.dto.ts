@@ -5,5 +5,7 @@ export class SendDto {
   @IsNotEmpty()
   type: string
 
-  data: any
+  data?: any
+
+  clientId?: string
 }

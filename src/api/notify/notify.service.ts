@@ -19,7 +19,7 @@ export class NotifyService {
     if (ips && !ips.includes(ip)) {
       return apiUtil.error('Permission denied')
     }
-    await this.wsService.sendBroadcast(body.type, body.data)
+    await this.wsService.sendBroadcast(body.type, body.data, body.clientId)
     return apiUtil.data(body.type)
   }
 

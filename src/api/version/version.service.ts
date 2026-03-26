@@ -44,7 +44,7 @@ export class VersionService {
       createTime: new Date()
     })
 
-    if (created) this.wsService.sendBroadcast(body.name, created)
+    if (created) await this.wsService.sendOtaMessage(body.name, created)
 
     return apiUtil.data(created)
   }
@@ -145,7 +145,7 @@ export class VersionService {
       ip: fetchIP(req),
       createTime: new Date()
     })
-    if (created) this.wsService.sendBroadcast(body.name, created)
+    if (created) await this.wsService.sendOtaMessage(body.name, created)
     return apiUtil.data(created)
 
   }
