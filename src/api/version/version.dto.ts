@@ -1,5 +1,5 @@
 
-import { IsString, IsNumber, IsNotEmpty } from 'class-validator'
+import { IsString, IsNumber, IsNotEmpty, IsOptional } from 'class-validator'
 import { ApiProperty, OmitType } from '@nestjs/swagger'
 
 export enum PlatformType {
@@ -13,6 +13,11 @@ export enum PlatformType {
 export enum UpdateType {
   Full = 'full',
   Hot = 'hot'
+}
+
+export enum AppErrorKind {
+  Crash = 'crash',
+  Error = 'error'
 }
 
 export class VersionDto {
@@ -120,4 +125,18 @@ export class ErrorDto extends OmitType(StatusDto, ['id']) {
   @IsString()
   @IsNotEmpty()
   message: string
+}
+
+export class AppErrorLogDto extends OmitType(StatusDto, ['id', 'verId']) {
+  @IsString()
+  @IsNotEmpty()
+  kind: AppErrorKind
+
+  @IsString()
+  @IsNotEmpty()
+  message: string
+
+  @IsOptional()
+  @IsString()
+  stack?: string
 }

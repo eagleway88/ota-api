@@ -3,16 +3,19 @@ import { Injectable } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource, QueryRunner, Table } from 'typeorm'
 import { Request } from 'express'
+import { createHash } from 'crypto'
 import { apiUtil } from '@/utils/api'
 import { ConfigService } from '@nestjs/config'
 import { UpdaterUtil } from '@/utils/updater'
 import {
+  createAppErrorLogTable,
   createErrorTable,
   createSuccessTable,
   createVersionTable
 } from '@/utils/version'
 import { fetchIP, humpToUnderline, underlineToHump } from '@/utils'
 import {
+  AppErrorLogDto,
   CheckDto,
   CreateDto,
   ErrorDto,
@@ -178,6 +181,69 @@ export class VersionService {
 
   }
 
+  async appError(req: Request, body: AppErrorLogDto) {
+    const table = createAppErrorLogTable(body.name)
+    const queryRunner = this.dataSource.createQueryRunner()
+
+    await queryRunner.connect()
+
+    try {
+      await this.ensureTable(queryRunner, table)
+
+      const now = new Date()
+      const extras = this.normalizeExtras(body.extras)
+      const errorHash = this.buildAppErrorHash(body)
+      const existing = await queryRunner.manager
+        .createQueryBuilder()
+        .select('*')
+        .from(table.name, table.name)
+        .where('error_hash = :errorHash', { errorHash })
+        .getRawOne()
+
+      if (existing) {
+        const updatePayload = this.prepareDynamicPayload(table, {
+          ip: fetchIP(req),
+          extras,
+          username: body.username,
+          updateTime: now
+        })
+
+        await queryRunner.manager
+          .createQueryBuilder()
+          .update(table.name)
+          .set(updatePayload)
+          .where('id = :id', { id: existing.id })
+          .execute()
+
+        await queryRunner.manager.increment(table.name, { id: existing.id }, 'report_count', 1)
+
+        const updated = await queryRunner.manager
+          .createQueryBuilder()
+          .select('*')
+          .from(table.name, table.name)
+          .where('id = :id', { id: existing.id })
+          .getRawOne()
+
+        return apiUtil.data(this.normalizeDynamicResult(table, updated ?? existing))
+      }
+
+      const created = await this.insertIntoDynamicTableByQueryRunner(queryRunner, table, {
+        ...body,
+        extras,
+        errorHash,
+        reportCount: 1,
+        ip: fetchIP(req),
+        updateTime: now,
+        createTime: now
+      })
+
+      return apiUtil.data(created)
+    } finally {
+      await queryRunner.release()
+    }
+
+  }
+
   private async assertVersionExists(name: string, id: number) {
     const table = createVersionTable(name)
     const queryRunner = this.dataSource.createQueryRunner()
@@ -211,32 +277,40 @@ export class VersionService {
     await queryRunner.connect()
 
     try {
-      await this.ensureTable(queryRunner, table)
-
-      const insertPayload = this.prepareDynamicPayload(table, payload)
-      const insertRes = await queryRunner.manager
-        .createQueryBuilder()
-        .insert()
-        .into(table.name)
-        .values(insertPayload)
-        .execute()
-
-      const insertId = insertRes.identifiers[0]?.id ?? insertRes.raw?.insertId
-      if (!insertId) {
-        return apiUtil.error('Insert data failed')
-      }
-
-      const created = await queryRunner.manager
-        .createQueryBuilder()
-        .select('*')
-        .from(table.name, table.name)
-        .where('id = :id', { id: insertId })
-        .getRawOne()
-
-      return this.normalizeDynamicResult(table, created ?? { id: insertId, ...insertPayload })
+      return await this.insertIntoDynamicTableByQueryRunner(queryRunner, table, payload)
     } finally {
       await queryRunner.release()
     }
+  }
+
+  private async insertIntoDynamicTableByQueryRunner(
+    queryRunner: QueryRunner,
+    table: Table,
+    payload: Record<string, any>
+  ) {
+    await this.ensureTable(queryRunner, table)
+
+    const insertPayload = this.prepareDynamicPayload(table, payload)
+    const insertRes = await queryRunner.manager
+      .createQueryBuilder()
+      .insert()
+      .into(table.name)
+      .values(insertPayload)
+      .execute()
+
+    const insertId = insertRes.identifiers[0]?.id ?? insertRes.raw?.insertId
+    if (!insertId) {
+      return apiUtil.error('Insert data failed')
+    }
+
+    const created = await queryRunner.manager
+      .createQueryBuilder()
+      .select('*')
+      .from(table.name, table.name)
+      .where('id = :id', { id: insertId })
+      .getRawOne()
+
+    return this.normalizeDynamicResult(table, created ?? { id: insertId, ...insertPayload })
   }
 
   private async updateDynamicTable(table: Table, id: number, payload: Record<string, any>) {
@@ -304,6 +378,13 @@ export class VersionService {
     if (table.name.endsWith('_version') && missingColumns.some(column => column.name === 'update_type')) {
       await this.backfillVersionUpdateType(queryRunner, table.name)
     }
+
+    if (
+      table.name.endsWith('_error_log')
+      && missingColumns.some(column => ['error_hash', 'report_count', 'update_time'].includes(column.name))
+    ) {
+      await this.backfillAppErrorLogColumns(queryRunner, table.name)
+    }
   }
 
   private async backfillVersionUpdateType(queryRunner: QueryRunner, tableName: string) {
@@ -315,6 +396,33 @@ export class VersionService {
          ELSE update_type
        END
        WHERE update_type IS NULL OR update_type = ''`
+    )
+  }
+
+  private async backfillAppErrorLogColumns(queryRunner: QueryRunner, tableName: string) {
+    await queryRunner.query(
+      `UPDATE ${tableName}
+       SET error_hash = MD5(CONCAT_WS('|',
+         IFNULL(name, ''),
+         IFNULL(platform, ''),
+         IFNULL(CAST(ver AS CHAR), ''),
+         IFNULL(kind, ''),
+         IFNULL(message, ''),
+         IFNULL(stack, '')
+       ))
+       WHERE error_hash IS NULL OR error_hash = ''`
+    )
+
+    await queryRunner.query(
+      `UPDATE ${tableName}
+       SET report_count = 1
+       WHERE report_count IS NULL OR report_count <= 0`
+    )
+
+    await queryRunner.query(
+      `UPDATE ${tableName}
+       SET update_time = create_time
+       WHERE update_time IS NULL`
     )
   }
 
@@ -394,5 +502,24 @@ export class VersionService {
     if (!extras) return undefined
 
     return extras
+  }
+
+  private buildAppErrorHash(body: AppErrorLogDto) {
+    const segments = [
+      body.name,
+      body.platform,
+      String(body.ver),
+      body.kind,
+      body.message,
+      body.stack ?? ''
+    ]
+
+    return createHash('md5')
+      .update(segments.map(segment => this.normalizeErrorHashSegment(segment)).join('|'))
+      .digest('hex')
+  }
+
+  private normalizeErrorHashSegment(value: string) {
+    return value.replace(/\r\n/g, '\n').trim()
   }
 }

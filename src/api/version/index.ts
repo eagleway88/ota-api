@@ -6,7 +6,15 @@ import type { Request } from 'express'
 import { VersionService } from './version.service'
 import { ApiResult, Public } from '@/decorators'
 import { FileInterceptor } from '@nestjs/platform-express'
-import { CheckDto, CreateDto, ErrorDto, VersionDto, SuccessDto, UploadDto } from './version.dto'
+import {
+  AppErrorLogDto,
+  CheckDto,
+  CreateDto,
+  ErrorDto,
+  VersionDto,
+  SuccessDto,
+  UploadDto
+} from './version.dto'
 
 @ApiTags('version')
 @Controller('version')
@@ -35,6 +43,14 @@ export class VersionController {
   @ApiResult({ type: String })
   error(@Req() req: Request, @Body() body: ErrorDto) {
     return this.service.error(req, body)
+  }
+
+  @Public()
+  @Post('app-error')
+  @ApiOperation({ summary: '上报应用闪退或运行时错误' })
+  @ApiResult({ type: AppErrorLogDto })
+  appError(@Req() req: Request, @Body() body: AppErrorLogDto) {
+    return this.service.appError(req, body)
   }
 
   @Post('create')
