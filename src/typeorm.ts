@@ -9,8 +9,8 @@ dotenv.config({ path: '.env' })
 
 log.log(`>> ORM_HOST=${process.env.ORM_HOST}`)
 log.log(`>> ORM_PORT=${process.env.ORM_PORT}`)
-log.log(`>> ORM_USERNAME=${process.env.ORM_USERNAME}`)
-log.log(`>> ORM_PASSWORD=${process.env.ORM_PASSWORD}`)
+// log.log(`>> ORM_USERNAME=${process.env.ORM_USERNAME}`)
+// log.log(`>> ORM_PASSWORD=${process.env.ORM_PASSWORD}`)
 log.log(`>> ORM_DATABASE=${process.env.ORM_DATABASE}`)
 
 export default new DataSource({

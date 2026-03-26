@@ -1,14 +1,41 @@
-import { Request } from 'express'
+import { isIP } from 'net'
+import type { Request } from 'express'
+
+function normalizeIpAddress(value?: string) {
+  if (!value) return ''
+  let ip = value.split(',')[0]?.trim() ?? ''
+  if (!ip) return ''
+
+  const bracketIpv6 = /^\[(.*)\]:(\d+)$/.exec(ip)
+  if (bracketIpv6?.[1]) {
+    ip = bracketIpv6[1]
+  } else if (
+    ip.includes('.') &&
+    ip.includes(':') &&
+    ip.indexOf(':') === ip.lastIndexOf(':')
+  ) {
+    ip = ip.split(':')[0] ?? ip
+  }
+
+  if (ip.startsWith('::ffff:')) {
+    const ipv4 = ip.slice('::ffff:'.length)
+    if (isIP(ipv4) === 4) ip = ipv4
+  }
+
+  if (ip === '::1' || ip === '127.0.0.1') return 'localhost'
+  return isIP(ip) ? ip : ''
+}
 
 export function fetchIP(req: Request) {
-  let xForwarded = req.headers['x-real-ip'] as string | undefined
-  if (!xForwarded) {
-    xForwarded = (req.headers['x-forwarded-for'] as string) || req.ip
-  }
-  if (!xForwarded) return ''
-  const arr = xForwarded.split(':')
-  const val = arr[arr.length - 1] || ''
-  return val === '1' ? 'localhost' : val
+  const xRealIp = normalizeIpAddress(req.headers['x-real-ip'] as string | undefined)
+  if (xRealIp) return xRealIp
+
+  const xForwardedFor = normalizeIpAddress(
+    req.headers['x-forwarded-for'] as string | undefined
+  )
+  if (xForwardedFor) return xForwardedFor
+
+  return normalizeIpAddress(req.ip)
 }
 
 /**
