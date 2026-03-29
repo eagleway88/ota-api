@@ -103,8 +103,9 @@ export class VersionService {
         // 兼容旧版全量更新
         return apiUtil.data(underlineToHump({
           ...fullUpdate,
-          type: 1, downloadUrl: fullUpdate.install_url,
-          isMandatory: 1
+          type: 1,
+          downloadUrl: fullUpdate.install_url,
+          isMandatory: fullUpdate.mandatory,
         }))
       }
 
@@ -120,7 +121,12 @@ export class VersionService {
         .orderBy('version.id', 'DESC')
         .getRawOne()
 
-      return apiUtil.data(hotUpdate ? underlineToHump(hotUpdate) : null)
+      return apiUtil.data(hotUpdate ? underlineToHump({
+        ...hotUpdate,
+        type: 0,
+        downloadUrl: hotUpdate.package_url,
+        isMandatory: hotUpdate.mandatory,
+      }) : null)
     } finally {
       await queryRunner.release()
     }
