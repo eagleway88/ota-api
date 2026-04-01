@@ -19,8 +19,13 @@ export class NotifyService {
     if (ips && !ips.includes(ip)) {
       return apiUtil.error('Permission denied')
     }
-    await this.wsService.sendBroadcast(body.type, body.data, body.clientId)
-    return apiUtil.data(body.type)
+    console.log('send', JSON.stringify(body))
+    const ids = await this.wsService.sendBroadcast(body.type, body.data, body.clientId)
+    if (body.clientId) {
+      return ids[body.clientId] ? apiUtil.data(body.type) : apiUtil.error('Send failed')
+    } else {
+      return apiUtil.data(body.type)
+    }
   }
 
   async uid(req: Request, body: SendDto) {
@@ -29,8 +34,9 @@ export class NotifyService {
     if (ips && !ips.includes(ip)) {
       return apiUtil.error('Permission denied')
     }
-    await this.wsService.sendUidMessage(body.type, body.data)
-    return apiUtil.data(body.type)
+    console.log('uid', JSON.stringify(body))
+    const bool = await this.wsService.sendUidMessage(body.type, body.data)
+    return bool ? apiUtil.data(body.type) : apiUtil.error('Send failed')
   }
 
 }

@@ -29,16 +29,19 @@ export class WsService {
   }
 
   async sendBroadcast(type: string, data?: any, clientId?: string) {
+    const ids: Record<string, boolean> = {}
     const sockets = await this.server.fetchSockets()
     for (const client of sockets) {
       if (!clientId || clientId === client.id) {
-        client.emit('message', { type, data })
+        const bool = client.emit('message', { type, data })
+        ids[client.id] = bool
       }
     }
+    return ids
   }
 
   async sendUidMessage(uid: string, data: any) {
-    this.server.to(this.getUidRoom(uid)).emit(uid, data)
+    return this.server.to(this.getUidRoom(uid)).emit(uid, data)
   }
 
   @SubscribeMessage('uid:subscribe')
@@ -62,7 +65,7 @@ export class WsService {
   }
 
   async sendOtaMessage(ota: string, data: any) {
-    this.server.to(this.getOtaRoom(ota)).emit(ota, data)
+    return this.server.to(this.getOtaRoom(ota)).emit(ota, data)
   }
 
   @SubscribeMessage('ota:subscribe')
