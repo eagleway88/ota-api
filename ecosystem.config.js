@@ -3,8 +3,9 @@ module.exports = {
     {
       name: 'ota-api', // 应用名称
       script: './dist/main.js', // 编译后的 NestJS 入口文件 [2]
-      instances: 'max', // 开启集群模式，'max'代表使用所有 CPU 核心 [9]
-      exec_mode: 'cluster', // 模式：cluster（集群）或 fork（单实例）
+      // instances: 'max', // 开启集群模式，'max'代表使用所有 CPU 核心 [9]
+      // 不能启用`cluster`，因为用到了ws.id
+      exec_mode: 'fork', // 模式：cluster（集群）或 fork（单实例）
 
       // // 环境变量
       // env: {
