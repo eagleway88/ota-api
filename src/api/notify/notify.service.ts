@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { apiUtil } from '@/utils/api'
 import { WsService } from '@/ws/ws.service'
 import { SendDto } from './notify.dto'
@@ -8,6 +8,7 @@ import { fetchIP } from '@/utils'
 
 @Injectable()
 export class NotifyService {
+  private readonly logger = new Logger(NotifyService.name, { timestamp: true })
   constructor(
     private readonly wsService: WsService,
     private readonly configService: ConfigService,
@@ -19,7 +20,7 @@ export class NotifyService {
     if (ips && !ips.includes(ip)) {
       return apiUtil.error('Permission denied')
     }
-    console.log('send', JSON.stringify(body))
+    this.logger.log('send:', JSON.stringify(body))
     const ids = await this.wsService.sendBroadcast(body.type, body.data, body.clientId)
     if (body.clientId) {
       return ids[body.clientId] ? apiUtil.data(body.type) : apiUtil.error('Send failed')
@@ -34,7 +35,7 @@ export class NotifyService {
     if (ips && !ips.includes(ip)) {
       return apiUtil.error('Permission denied')
     }
-    console.log('uid', JSON.stringify(body))
+    this.logger.log('uid:', JSON.stringify(body))
     const bool = await this.wsService.sendUidMessage(body.type, body.data)
     return bool ? apiUtil.data(body.type) : apiUtil.error('Send failed')
   }

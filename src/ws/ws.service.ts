@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common'
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets'
 import { SubscribeMessage } from '@nestjs/websockets'
 import { Server, Socket } from 'socket.io'
@@ -15,10 +16,16 @@ type UidMessage = {
   transports: ['websocket']
 })
 export class WsService {
+  private readonly logger = new Logger(WsService.name, { timestamp: true })
+
   @WebSocketServer()
   server: Server
 
   constructor() { }
+
+  handleConnection(client: Socket) {
+    this.logger.log(`client connected: ${client.id}`)
+  }
 
   private getOtaRoom(ota: string) {
     return `ota:${ota}`
