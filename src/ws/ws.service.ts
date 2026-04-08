@@ -4,16 +4,17 @@ import { SubscribeMessage } from '@nestjs/websockets'
 import { OtaVersionQueryService } from '@/api/version/ota-version-query.service'
 import { Server, Socket } from 'socket.io'
 
-type OtaMessage = {
-  ota: string
+type OtaNameMessage = {
+  otaName: string
   platform?: string
   channel?: string
   ver?: number
   id?: number
 }
 
-type UidMessage = {
-  uid: string
+type UserIdMessage = {
+  /** 可能会有多个项目对接，所以userId最好等于`otaName_userId`这样的形式订阅 */
+  userId: string
 }
 
 type UniqueIdMessage = {
@@ -36,56 +37,58 @@ export class WsService {
     this.logger.log(`client connected: ${client.id}`)
   }
 
-  private getOtaRoom(ota: string) {
-    return `ota:${ota}`
+  private getOtaNameRoom(otaName: string) {
+    return `otaName:${otaName}`
   }
 
-  private getUidRoom(uid: string) {
-    return `uid:${uid}`
+  private getUserIdRoom(userId: string) {
+    return `userId:${userId}`
   }
 
   private getUniqueIdRoom(uniqueId: string) {
     return `uniqueId:${uniqueId}`
   }
 
-  async sendBroadcast(type: string, data?: any, clientId?: string) {
+  async sendMessage(type: string, data?: any) {
     const ids: Record<string, boolean> = {}
     const sockets = await this.server.fetchSockets()
     for (const client of sockets) {
-      if (!clientId || clientId === client.id) {
-        const bool = client.emit('message', { type, data })
-        ids[client.id] = bool
-      }
+      const bool = client.emit('message', { type, data })
+      ids[client.id] = bool
     }
     return ids
   }
 
-  async sendUidMessage(uid: string, data: any) {
-    return this.server.to(this.getUidRoom(uid)).emit(uid, data)
+  async sendOtaNameMessage(otaName: string, data: any) {
+    return this.server.to(this.getOtaNameRoom(otaName)).emit(otaName, data)
+  }
+
+  async sendUserIdMessage(userId: string, data: any) {
+    return this.server.to(this.getUserIdRoom(userId)).emit(userId, data)
   }
 
   async sendUniqueIdMessage(uniqueId: string, data: any) {
     return this.server.to(this.getUniqueIdRoom(uniqueId)).emit(uniqueId, data)
   }
 
-  @SubscribeMessage('uid:subscribe')
-  async handleUidSubscribe(client: Socket, data: UidMessage) {
-    if (!data?.uid) {
-      return { event: 'uid:error', data: 'Uid is required' }
+  @SubscribeMessage('userId:subscribe')
+  async handleUidSubscribe(client: Socket, data: UserIdMessage) {
+    if (!data?.userId) {
+      return { event: 'userId:error', data: 'UserId is required' }
     }
 
-    await client.join(this.getUidRoom(data.uid))
-    return { event: 'uid:subscribed', data: { uid: data.uid } }
+    await client.join(this.getUserIdRoom(data.userId))
+    return { event: 'userId:subscribed', data: { uid: data.userId } }
   }
 
-  @SubscribeMessage('uid:unsubscribe')
-  async handleUidUnsubscribe(client: Socket, data: UidMessage) {
-    if (!data?.uid) {
-      return { event: 'uid:error', data: 'Uid is required' }
+  @SubscribeMessage('userId:unsubscribe')
+  async handleUidUnsubscribe(client: Socket, data: UserIdMessage) {
+    if (!data?.userId) {
+      return { event: 'userId:error', data: 'UserId is required' }
     }
 
-    await client.leave(this.getUidRoom(data.uid))
-    return { event: 'uid:unsubscribed', data: { uid: data.uid } }
+    await client.leave(this.getUserIdRoom(data.userId))
+    return { event: 'userId:unsubscribed', data: { uid: data.userId } }
   }
 
   @SubscribeMessage('uniqueId:subscribe')
@@ -108,44 +111,40 @@ export class WsService {
     return { event: 'uniqueId:unsubscribed', data: { uniqueId: data.uniqueId } }
   }
 
-  async sendOtaMessage(ota: string, data: any) {
-    return this.server.to(this.getOtaRoom(ota)).emit(ota, data)
-  }
-
-  @SubscribeMessage('ota:subscribe')
-  async handleOtaSubscribe(client: Socket, data: OtaMessage) {
-    if (!data?.ota) {
-      return { event: 'ota:error', data: 'Ota is required' }
+  @SubscribeMessage('otaName:subscribe')
+  async handleOtaNameSubscribe(client: Socket, data: OtaNameMessage) {
+    if (!data?.otaName) {
+      return { event: 'otaName:error', data: 'OtaName is required' }
     }
 
-    await client.join(this.getOtaRoom(data.ota))
+    await client.join(this.getOtaNameRoom(data.otaName))
 
     try {
       const latestOtaMessage = await this.otaVersionQueryService.findLatestAvailableVersion({
-        name: data.ota,
+        name: data.otaName,
         platform: data.platform!,
         channel: data.channel,
         ver: data.ver!,
         id: data.id
       })
       if (latestOtaMessage) {
-        client.emit(data.ota, latestOtaMessage)
+        client.emit(data.otaName, latestOtaMessage)
       }
     } catch (error) {
-      this.logger.error(`ota replay failed: ${data.ota}`, error instanceof Error ? error.stack : undefined)
+      this.logger.error(`otaName replay failed: ${data.otaName}`, error instanceof Error ? error.stack : undefined)
     }
 
-    return { event: 'ota:subscribed', data: { ota: data.ota } }
+    return { event: 'otaName:subscribed', data: { ota: data.otaName } }
   }
 
-  @SubscribeMessage('ota:unsubscribe')
-  async handleOtaUnsubscribe(client: Socket, data: OtaMessage) {
-    if (!data?.ota) {
-      return { event: 'ota:error', data: 'Ota is required' }
+  @SubscribeMessage('otaName:unsubscribe')
+  async handleOtaNameUnsubscribe(client: Socket, data: OtaNameMessage) {
+    if (!data?.otaName) {
+      return { event: 'otaName:error', data: 'OtaName is required' }
     }
 
-    await client.leave(this.getOtaRoom(data.ota))
-    return { event: 'ota:unsubscribed', data: { ota: data.ota } }
+    await client.leave(this.getOtaNameRoom(data.otaName))
+    return { event: 'otaName:unsubscribed', data: { ota: data.otaName } }
   }
 
   @SubscribeMessage('message')

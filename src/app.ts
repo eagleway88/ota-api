@@ -4,8 +4,8 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { join } from 'path'
 
 import { AdminModule } from './api/admin/admin.module'
-import { NotifyModule } from './api/notify/notify.module'
 import { VersionModule } from './api/version/version.module'
+import { MessageModule } from './api/message/message.module'
 
 @Module({
   imports: [
@@ -28,7 +28,7 @@ import { VersionModule } from './api/version/version.module'
       inject: [ConfigService]
     }),
     AdminModule,
-    NotifyModule,
+    MessageModule,
     VersionModule
   ],
   controllers: []

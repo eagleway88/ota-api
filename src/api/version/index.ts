@@ -6,15 +6,8 @@ import type { Request } from 'express'
 import { VersionService } from './version.service'
 import { ApiResult, Public } from '@/decorators'
 import { FileInterceptor } from '@nestjs/platform-express'
-import {
-  AppErrorLogDto,
-  CheckDto,
-  CreateDto,
-  ErrorDto,
-  VersionDto,
-  SuccessDto,
-  UploadDto
-} from './version.dto'
+import { AppErrorLogDto, CheckDto, CreateDto, } from './version.dto'
+import { ErrorDto, VersionDto, SuccessDto, UploadDto } from './version.dto'
 
 @ApiTags('version')
 @Controller('version')

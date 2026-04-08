@@ -15,7 +15,7 @@ type OtaVersionQuery = {
 
 @Injectable()
 export class OtaVersionQueryService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) { }
 
   async findLatestAvailableVersion(query: OtaVersionQuery) {
     if (!query.name || !query.platform || query.ver == null) {
@@ -62,6 +62,7 @@ export class OtaVersionQueryService {
       if (fullUpdate) {
         return underlineToHump({
           ...fullUpdate,
+          // 兼容旧版字段
           type: 1,
           downloadUrl: fullUpdate.install_url,
           isMandatory: fullUpdate.mandatory
@@ -80,11 +81,12 @@ export class OtaVersionQueryService {
 
       return hotUpdate
         ? underlineToHump({
-            ...hotUpdate,
-            type: 0,
-            downloadUrl: hotUpdate.package_url,
-            isMandatory: hotUpdate.mandatory
-          })
+          ...hotUpdate,
+          // 兼容旧版字段
+          type: 0,
+          downloadUrl: hotUpdate.package_url,
+          isMandatory: hotUpdate.mandatory
+        })
         : null
     } finally {
       await queryRunner.release()

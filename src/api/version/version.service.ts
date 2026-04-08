@@ -8,22 +8,11 @@ import { apiUtil } from '@/utils/api'
 import { ConfigService } from '@nestjs/config'
 import { UpdaterUtil } from '@/utils/updater'
 import { OtaVersionQueryService } from './ota-version-query.service'
-import {
-  createAppErrorLogTable,
-  createErrorTable,
-  createSuccessTable,
-  createVersionTable
-} from '@/utils/version'
+import { createAppErrorLogTable, createErrorTable, } from '@/utils/version'
+import { createSuccessTable, createVersionTable } from '@/utils/version'
 import { fetchIP, humpToUnderline, underlineToHump } from '@/utils'
-import {
-  AppErrorLogDto,
-  CheckDto,
-  CreateDto,
-  ErrorDto,
-  SuccessDto,
-  UpdateType,
-  UploadDto
-} from './version.dto'
+import { AppErrorLogDto, CheckDto, CreateDto, } from './version.dto'
+import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
 import { WsService } from '@/ws/ws.service'
 
 @Injectable()
@@ -46,7 +35,7 @@ export class VersionService {
       createTime: new Date()
     })
 
-    if (created) await this.wsService.sendOtaMessage(body.name, created)
+    if (created) await this.wsService.sendOtaNameMessage(body.name, created)
 
     return apiUtil.data(created)
   }
@@ -101,7 +90,7 @@ export class VersionService {
       ip: fetchIP(req),
       createTime: new Date()
     })
-    if (created) await this.wsService.sendOtaMessage(body.name, created)
+    if (created) await this.wsService.sendOtaNameMessage(body.name, created)
     return apiUtil.data(created)
 
   }
