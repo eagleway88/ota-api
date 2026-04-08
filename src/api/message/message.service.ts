@@ -6,6 +6,7 @@ import { SendUserIdDto, SendUniqueIdDto } from './message.dto'
 import { Request } from 'express'
 import { ConfigService } from '@nestjs/config'
 import { fetchIP } from '@/utils'
+import { LastMessageService } from './last-message.service'
 
 @Injectable()
 export class MessageService {
@@ -13,6 +14,7 @@ export class MessageService {
   constructor(
     private readonly wsService: WsService,
     private readonly configService: ConfigService,
+    private readonly lastMessageService: LastMessageService
   ) { }
 
   private checkPermission(req: Request) {
@@ -47,6 +49,7 @@ export class MessageService {
       return apiUtil.error('Permission denied')
     }
     this.logger.log('sendUserId:', JSON.stringify(body))
+    await this.lastMessageService.createUserId(body)
     const bool = await this.wsService.sendUserIdMessage(body.userId, body.data)
     return bool ? apiUtil.data(body.userId) : apiUtil.error('Send failed')
   }
@@ -56,7 +59,18 @@ export class MessageService {
       return apiUtil.error('Permission denied')
     }
     this.logger.log('sendUniqueId:', JSON.stringify(body))
+    await this.lastMessageService.createUniqueId(body)
     const bool = await this.wsService.sendUniqueIdMessage(body.uniqueId, body.data)
     return bool ? apiUtil.data(body.uniqueId) : apiUtil.error('Send failed')
+  }
+
+  async clearUserId(body: SendUserIdDto) {
+    await this.lastMessageService.deleteUserId(body)
+    return apiUtil.data(body.userId)
+  }
+
+  async clearUniqueId(body: SendUniqueIdDto) {
+    await this.lastMessageService.deleteUniqueId(body)
+    return apiUtil.data(body.uniqueId)
   }
 }

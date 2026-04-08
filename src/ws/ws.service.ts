@@ -3,6 +3,7 @@ import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets'
 import { SubscribeMessage } from '@nestjs/websockets'
 import { OtaVersionQueryService } from '@/api/version/ota-version-query.service'
 import { Server, Socket } from 'socket.io'
+import { LastMessageService } from '@/api/message/last-message.service'
 
 type OtaNameMessage = {
   otaName: string
@@ -31,7 +32,10 @@ export class WsService {
   @WebSocketServer()
   server: Server
 
-  constructor(private readonly otaVersionQueryService: OtaVersionQueryService) { }
+  constructor(
+    private readonly otaVersionQueryService: OtaVersionQueryService,
+    private readonly lastMessageService: LastMessageService
+  ) { }
 
   handleConnection(client: Socket) {
     this.logger.log(`client connected: ${client.id}`)
@@ -72,17 +76,27 @@ export class WsService {
   }
 
   @SubscribeMessage('userId:subscribe')
-  async handleUidSubscribe(client: Socket, data: UserIdMessage) {
+  async handleUserIdSubscribe(client: Socket, data: UserIdMessage) {
     if (!data?.userId) {
       return { event: 'userId:error', data: 'UserId is required' }
     }
 
     await client.join(this.getUserIdRoom(data.userId))
+
+    try {
+      const msg = await this.lastMessageService.queryUserId({ userId: data.userId })
+      if (msg && msg.content) {
+        client.emit(data.userId, msg.content)
+      }
+    } catch (error) {
+      this.logger.error(`userId replay failed: ${data.userId}`, error instanceof Error ? error.stack : undefined)
+    }
+
     return { event: 'userId:subscribed', data: { uid: data.userId } }
   }
 
   @SubscribeMessage('userId:unsubscribe')
-  async handleUidUnsubscribe(client: Socket, data: UserIdMessage) {
+  async handleUuserIdUnsubscribe(client: Socket, data: UserIdMessage) {
     if (!data?.userId) {
       return { event: 'userId:error', data: 'UserId is required' }
     }
@@ -98,6 +112,16 @@ export class WsService {
     }
 
     await client.join(this.getUniqueIdRoom(data.uniqueId))
+
+    try {
+      const msg = await this.lastMessageService.queryUniqueId({ uniqueId: data.uniqueId })
+      if (msg && msg.content) {
+        client.emit(data.uniqueId, msg.content)
+      }
+    } catch (error) {
+      this.logger.error(`uniqueId replay failed: ${data.uniqueId}`, error instanceof Error ? error.stack : undefined)
+    }
+
     return { event: 'uniqueId:subscribed', data: { uniqueId: data.uniqueId } }
   }
 

@@ -42,4 +42,20 @@ export class MessageController {
   sendUniqueId(@Req() req: Request, @Body() body: SendUniqueIdDto) {
     return this.service.sendUniqueId(req, body)
   }
+
+  @Public()
+  @Post('clear-user-id')
+  @ApiOperation({ summary: '清除特定用户通知' })
+  @ApiResult({ type: String })
+  clearUserId(@Body() body: SendUserIdDto) {
+    return this.service.clearUserId(body)
+  }
+
+  @Public()
+  @Post('clear-unique-id')
+  @ApiOperation({ summary: '清除特定设备通知' })
+  @ApiResult({ type: String })
+  clearUniqueId(@Body() body: SendUniqueIdDto) {
+    return this.service.clearUniqueId(body)
+  }
 }
