@@ -1,5 +1,7 @@
 import { Table } from "typeorm"
 
+export const VERSION_TABLE_AUTO_INCREMENT_START = 1000
+
 /** 
  * 除了字母（大小写）之外的所有字符替换为下划线 
  * */

@@ -9,7 +9,8 @@ import { ConfigService } from '@nestjs/config'
 import { UpdaterUtil } from '@/utils/updater'
 import { OtaVersionQueryService } from './ota-version-query.service'
 import { createAppErrorLogTable, createErrorTable, } from '@/utils/version'
-import { createSuccessTable, createVersionTable } from '@/utils/version'
+import { createSuccessTable, createVersionTable, } from '@/utils/version'
+import { VERSION_TABLE_AUTO_INCREMENT_START } from '@/utils/version'
 import { fetchIP, humpToUnderline, underlineToHump } from '@/utils'
 import { AppErrorLogDto, CheckDto, CreateDto, } from './version.dto'
 import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
@@ -308,6 +309,11 @@ export class VersionService {
     const hasTable = await queryRunner.hasTable(table.name)
     if (!hasTable) {
       await queryRunner.createTable(table, true)
+
+      if (table.name.endsWith('_version')) {
+        await this.ensureVersionTableAutoIncrement(queryRunner, table.name)
+      }
+
       return
     }
 
@@ -378,6 +384,12 @@ export class VersionService {
       `UPDATE ${tableName}
        SET update_time = create_time
        WHERE update_time IS NULL`
+    )
+  }
+
+  private async ensureVersionTableAutoIncrement(queryRunner: QueryRunner, tableName: string) {
+    await queryRunner.query(
+      `ALTER TABLE \`${tableName}\` AUTO_INCREMENT = ${VERSION_TABLE_AUTO_INCREMENT_START}`
     )
   }
 
