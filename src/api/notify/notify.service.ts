@@ -40,4 +40,15 @@ export class NotifyService {
     return bool ? apiUtil.data(body.type) : apiUtil.error('Send failed')
   }
 
+  async uniqueId(req: Request, body: SendDto) {
+    const ip = fetchIP(req)
+    const ips = this.configService.get<string>('IPS')
+    if (ips && !ips.includes(ip)) {
+      return apiUtil.error('Permission denied')
+    }
+    this.logger.log('uniqueId:', JSON.stringify(body))
+    const bool = await this.wsService.sendUniqueIdMessage(body.type, body.data)
+    return bool ? apiUtil.data(body.type) : apiUtil.error('Send failed')
+  }
+
 }

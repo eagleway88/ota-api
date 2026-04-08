@@ -7,6 +7,7 @@ import { createHash } from 'crypto'
 import { apiUtil } from '@/utils/api'
 import { ConfigService } from '@nestjs/config'
 import { UpdaterUtil } from '@/utils/updater'
+import { OtaVersionQueryService } from './ota-version-query.service'
 import {
   createAppErrorLogTable,
   createErrorTable,
@@ -30,6 +31,7 @@ export class VersionService {
   private updater?: UpdaterUtil
   constructor(
     private readonly wsService: WsService,
+    private readonly otaVersionQueryService: OtaVersionQueryService,
     private readonly configService: ConfigService,
     @InjectDataSource() private dataSource: DataSource,
   ) {
@@ -67,69 +69,17 @@ export class VersionService {
       }
 
       await this.syncTableColumns(queryRunner, table)
-
-      // 先构造所有更新查询共用的基础条件：启用状态、平台命中、渠道命中。
-      // 后续在这个基础上再分别叠加“全量更新”与“热更新”的规则。
-      const baseQuery = queryRunner.manager
-        .createQueryBuilder()
-        .select('*')
-        .from(table.name, 'version')
-        .where('version.enable = :enable', { enable: 1 })
-        .andWhere("FIND_IN_SET(:platform, REPLACE(version.platform, ' ', '')) > 0", {
-          platform: body.platform
-        })
-
-      if (body.channel) {
-        // 指定渠道时，优先匹配该渠道，同时兼容 channel 为空的公共版本。
-        baseQuery.andWhere(
-          '(version.channel = :channel OR version.channel IS NULL OR version.channel = \"\")',
-          { channel: body.channel }
-        )
-      }
-
-      // 规则 1：如果存在比当前版本更高的全量更新，直接返回版本号最大的那条。
-      // 这样客户端会优先走完整升级链路，而不是继续停留在当前版本打热更新补丁。
-      const fullUpdate = await baseQuery
-        .clone()
-        .andWhere('version.update_type = :updateType', {
-          updateType: UpdateType.Full
-        })
-        .andWhere('version.ver > :ver', { ver: body.ver })
-        .orderBy('version.ver', 'DESC')
-        .addOrderBy('version.id', 'DESC')
-        .getRawOne()
-
-      if (fullUpdate) {
-        // 兼容旧版全量更新
-        return apiUtil.data(underlineToHump({
-          ...fullUpdate,
-          type: 1,
-          downloadUrl: fullUpdate.install_url,
-          isMandatory: fullUpdate.mandatory,
-        }))
-      }
-
-      // 规则 2：如果没有更高版本的全量更新，则只返回当前版本内可继续应用的热更新。
-      // 这里要求 version.id 大于客户端已应用的 id，避免重复下发旧热更新。
-      const hotUpdate = await baseQuery
-        .clone()
-        .andWhere('version.update_type = :updateType', {
-          updateType: UpdateType.Hot
-        })
-        .andWhere('version.ver = :ver', { ver: body.ver })
-        .andWhere('version.id > :id', { id: body.id || 0 })
-        .orderBy('version.id', 'DESC')
-        .getRawOne()
-
-      return apiUtil.data(hotUpdate ? underlineToHump({
-        ...hotUpdate,
-        type: 0,
-        downloadUrl: hotUpdate.package_url,
-        isMandatory: hotUpdate.mandatory,
-      }) : null)
     } finally {
       await queryRunner.release()
     }
+
+    return apiUtil.data(await this.otaVersionQueryService.findLatestAvailableVersion({
+      name: body.name,
+      channel: body.channel,
+      platform: body.platform,
+      ver: body.ver,
+      id: body.id
+    }))
   }
 
   async upload(req: Request, file: any, body: UploadDto) {

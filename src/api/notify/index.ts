@@ -25,4 +25,12 @@ export class NotifyController {
   uid(@Req() req: Request, @Body() body: SendDto) {
     return this.service.uid(req, body)
   }
+
+  @Public()
+  @Post('unique-id')
+  @ApiOperation({ summary: '发送通知(特定设备)' })
+  @ApiResult({ type: String })
+  uniqueId(@Req() req: Request, @Body() body: SendDto) {
+    return this.service.uniqueId(req, body)
+  }
 }
