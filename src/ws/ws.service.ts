@@ -41,6 +41,14 @@ export class WsService {
     this.logger.log(`client connected: ${client.id}`)
   }
 
+  private getContent(content: string) {
+    try {
+      return JSON.parse(content)
+    } catch (e) {
+      return content
+    }
+  }
+
   private getOtaNameRoom(otaName: string) {
     return `otaName:${otaName}`
   }
@@ -86,7 +94,7 @@ export class WsService {
     try {
       const msg = await this.lastMessageService.queryUserId({ userId: data.userId })
       if (msg && msg.content) {
-        client.emit(data.userId, msg.content)
+        client.emit(data.userId, this.getContent(msg.content))
       }
     } catch (error) {
       this.logger.error(`userId replay failed: ${data.userId}`, error instanceof Error ? error.stack : undefined)
@@ -116,7 +124,7 @@ export class WsService {
     try {
       const msg = await this.lastMessageService.queryUniqueId({ uniqueId: data.uniqueId })
       if (msg && msg.content) {
-        client.emit(data.uniqueId, msg.content)
+        client.emit(data.uniqueId, this.getContent(msg.content))
       }
     } catch (error) {
       this.logger.error(`uniqueId replay failed: ${data.uniqueId}`, error instanceof Error ? error.stack : undefined)
