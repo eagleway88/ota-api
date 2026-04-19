@@ -8,6 +8,7 @@ import { LastMessageService } from '@/api/message/last-message.service'
 type OtaNameMessage = {
   otaName: string
   platform?: string
+  architecture?: string
   channel?: string
   ver?: number
   id?: number
@@ -155,6 +156,7 @@ export class WsService {
       const latestOtaMessage = await this.otaVersionQueryService.findLatestAvailableVersion({
         name: data.otaName,
         platform: data.platform!,
+        architecture: data.architecture,
         channel: data.channel,
         ver: data.ver!,
         id: data.id
