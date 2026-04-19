@@ -66,6 +66,7 @@ export class VersionService {
     return apiUtil.data(await this.otaVersionQueryService.findLatestAvailableVersion({
       name: body.name,
       channel: body.channel,
+      architecture: body.architecture,
       platform: body.platform,
       ver: body.ver,
       id: body.id

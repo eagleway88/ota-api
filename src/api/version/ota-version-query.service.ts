@@ -8,6 +8,7 @@ import { UpdateType } from './version.dto'
 type OtaVersionQuery = {
   name: string
   platform: string
+  architecture?: string
   channel?: string
   ver: number
   id?: number
@@ -41,6 +42,13 @@ export class OtaVersionQueryService {
         .andWhere("FIND_IN_SET(:platform, REPLACE(version.platform, ' ', '')) > 0", {
           platform: query.platform
         })
+
+      if (query.architecture) {
+        baseQuery.andWhere(
+          "(version.architecture IS NULL OR version.architecture = '' OR FIND_IN_SET(:architecture, REPLACE(version.architecture, ' ', '')) > 0)",
+          { architecture: query.architecture }
+        )
+      }
 
       if (query.channel) {
         baseQuery.andWhere(

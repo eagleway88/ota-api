@@ -111,6 +111,7 @@ export function createVersionTable(name: string) {
       { name: 'update_type', type: 'varchar', isNullable: true, comment: '更新类型(full=全量更新 hot=热更新)' },
       { name: 'channel', type: 'varchar', isNullable: true, comment: '渠道(appstore或其它,用于全量更新下发不同的链接)' },
       { name: 'platform', type: 'varchar', comment: '平台(多平台用逗号拼接ios,android)' },
+      { name: 'architecture', type: 'varchar', isNullable: true, comment: '架构(多架构用逗号拼接arm64,x64)' },
       { name: 'ip', type: 'varchar', isNullable: true, comment: 'IP' },
       { name: 'create_time', type: 'datetime', isNullable: true },
     ]

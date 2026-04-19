@@ -39,6 +39,11 @@ export class VersionDto {
   @IsNotEmpty()
   platform: string
 
+  /** 架构(多架构用逗号拼接arm64,x64) */
+  @IsOptional()
+  @IsString()
+  architecture?: string
+
   /** 更新描述 */
   desc?: string
   /** 文件大小 */
@@ -91,6 +96,11 @@ export class CheckDto extends OmitType(VersionDto, ['id', 'platform']) {
   @IsString()
   @IsNotEmpty()
   platform: PlatformType
+
+  /** 架构 */
+  @IsOptional()
+  @IsString()
+  architecture?: string
 
   /** 已更新的版本ID */
   id?: number
