@@ -27,6 +27,8 @@
 
 ## Project setup
 
+Use Node.js 16.20+ for local development and deployment.
+
 ```bash
 $ yarn install
 ```
