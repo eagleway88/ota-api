@@ -7,6 +7,9 @@
   "engines": {
     "node": ">=16.14"
   },
+  "resolutions": {
+    "@nestjs/schematics": "10.0.1"
+  },
   "license": "UNLICENSED",
   "scripts": {
     "build": "rimraf dist && nest build",
@@ -43,8 +46,8 @@
     "typeorm": "^0.3.28"
   },
   "devDependencies": {
-    "@nestjs/cli": "10.4.9",
-    "@nestjs/schematics": "10.2.3",
+    "@nestjs/cli": "10.1.18",
+    "@nestjs/schematics": "10.0.1",
     "@nestjs/testing": "10.4.16",
     "@typescript-eslint/eslint-plugin": "^6.21.0",
     "@typescript-eslint/parser": "^6.21.0",
