@@ -25,6 +25,8 @@ export class SendUserIdDto {
 
   data?: any
 
+  resend?: boolean
+
 }
 
 export class SendUniqueIdDto {
@@ -34,4 +36,5 @@ export class SendUniqueIdDto {
 
   data?: any
 
+  resend?: boolean
 }

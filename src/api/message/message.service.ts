@@ -48,8 +48,11 @@ export class MessageService {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
-    this.logger.log('sendUserId:', JSON.stringify(body))
-    await this.lastMessageService.createUserId(body)
+    // 不是所有消息都存
+    if (body.resend !== false) {
+      this.logger.log('sendUserId:', JSON.stringify(body))
+      await this.lastMessageService.createUserId(body)
+    }
     const bool = await this.wsService.sendUserIdMessage(body.userId, body.data)
     return bool ? apiUtil.data(body.userId) : apiUtil.error('Send failed')
   }
@@ -58,8 +61,11 @@ export class MessageService {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
-    this.logger.log('sendUniqueId:', JSON.stringify(body))
-    await this.lastMessageService.createUniqueId(body)
+    // 不是所有消息都存
+    if (body.resend !== false) {
+      this.logger.log('sendUniqueId:', JSON.stringify(body))
+      await this.lastMessageService.createUniqueId(body)
+    }
     const bool = await this.wsService.sendUniqueIdMessage(body.uniqueId, body.data)
     return bool ? apiUtil.data(body.uniqueId) : apiUtil.error('Send failed')
   }
