@@ -9,12 +9,7 @@ export type TargetedMessageEnvelope = {
 }
 
 export class SendGlobalDto {
-  @IsString()
-  @IsNotEmpty()
-  type: string
-
   data?: any
-
 }
 
 export class SendOtaNameDto {

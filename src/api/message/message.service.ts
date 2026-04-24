@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
 import { apiUtil } from '@/utils/api'
 import { WsService } from '@/ws/ws.service'
 import { SendGlobalDto, SendOtaNameDto, TargetedMessageEnvelope } from './message.dto'
@@ -10,7 +10,6 @@ import { LastMessageService } from './last-message.service'
 
 @Injectable()
 export class MessageService {
-  private readonly logger = new Logger(MessageService.name, { timestamp: true })
   constructor(
     private readonly wsService: WsService,
     private readonly configService: ConfigService,
@@ -46,16 +45,14 @@ export class MessageService {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
-    this.logger.log('sendGlobal:', JSON.stringify(body))
-    await this.wsService.sendMessage(body.type, body.data)
-    return apiUtil.data(body.type)
+    await this.wsService.sendMessage(body.data)
+    return apiUtil.data('success')
   }
 
   async sendOtaName(req: Request, body: SendOtaNameDto) {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
-    this.logger.log('sendOtaName:', JSON.stringify(body))
     const bool = await this.wsService.sendOtaNameMessage(body.otaName, body.data)
     return bool ? apiUtil.data(body.otaName) : apiUtil.error('Send failed')
   }
@@ -64,8 +61,6 @@ export class MessageService {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
-    this.logger.log('sendUserId:', JSON.stringify(body))
-
     const payload = body.resend
       ? await this.lastMessageService.createUserId(body, this.getResendTtlMs())
       : this.createTransientEnvelope(body.data)
@@ -80,8 +75,6 @@ export class MessageService {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
-    this.logger.log('sendUniqueId:', JSON.stringify(body))
-
     const payload = body.resend
       ? await this.lastMessageService.createUniqueId(body, this.getResendTtlMs())
       : this.createTransientEnvelope(body.data)

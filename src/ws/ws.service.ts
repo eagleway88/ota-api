@@ -54,11 +54,11 @@ export class WsService {
     return `uniqueId:${uniqueId}`
   }
 
-  async sendMessage(type: string, data?: any) {
+  async sendMessage(data?: any) {
     const ids: Record<string, boolean> = {}
     const sockets = await this.server.fetchSockets()
     for (const client of sockets) {
-      const bool = client.emit('message', { type, data })
+      const bool = client.emit('message', data)
       ids[client.id] = bool
     }
     return ids
