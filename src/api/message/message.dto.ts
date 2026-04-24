@@ -1,5 +1,13 @@
 import { IsNotEmpty, IsString } from 'class-validator'
 
+export type TargetedMessageEnvelope = {
+  messageId: string | null
+  data: any
+  updatedAt: string
+  expiresAt: string | null
+  ackRequired: boolean
+}
+
 export class SendGlobalDto {
   @IsString()
   @IsNotEmpty()
@@ -29,6 +37,16 @@ export class SendUserIdDto {
 
 }
 
+export class AckUserIdDto {
+  @IsString()
+  @IsNotEmpty()
+  userId: string
+
+  @IsString()
+  @IsNotEmpty()
+  messageId: string
+}
+
 export class SendUniqueIdDto {
   @IsString()
   @IsNotEmpty()
@@ -37,4 +55,30 @@ export class SendUniqueIdDto {
   data?: any
 
   resend?: boolean
+}
+
+export class AckUniqueIdDto {
+  @IsString()
+  @IsNotEmpty()
+  uniqueId: string
+
+  @IsString()
+  @IsNotEmpty()
+  messageId: string
+}
+
+class SendRes {
+  messageId?: string
+  data: any
+  updatedAt: string
+  expiresAt?: string
+  ackRequired: boolean
+}
+
+export class SendUserIdRes extends SendRes {
+  userId: string
+}
+
+export class SendUniqueIdRes extends SendRes {
+  uniqueId: string
 }

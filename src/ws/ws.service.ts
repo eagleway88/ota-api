@@ -4,6 +4,7 @@ import { SubscribeMessage } from '@nestjs/websockets'
 import { OtaVersionQueryService } from '@/api/version/ota-version-query.service'
 import { Server, Socket } from 'socket.io'
 import { LastMessageService } from '@/api/message/last-message.service'
+import { AckUniqueIdDto, AckUserIdDto, TargetedMessageEnvelope } from '@/api/message/message.dto'
 
 type OtaNameMessage = {
   otaName: string
@@ -22,7 +23,6 @@ type UserIdMessage = {
 type UniqueIdMessage = {
   uniqueId: string
 }
-
 @WebSocketGateway(void 0, {
   cors: '*',
   transports: ['websocket']
@@ -40,14 +40,6 @@ export class WsService {
 
   handleConnection(client: Socket) {
     this.logger.log(`client connected: ${client.id}`)
-  }
-
-  private getContent(content: string) {
-    try {
-      return JSON.parse(content)
-    } catch (e) {
-      return content
-    }
   }
 
   private getOtaNameRoom(otaName: string) {
@@ -76,11 +68,11 @@ export class WsService {
     return this.server.to(this.getOtaNameRoom(otaName)).emit(otaName, data)
   }
 
-  async sendUserIdMessage(userId: string, data: any) {
+  async sendUserIdMessage(userId: string, data: TargetedMessageEnvelope) {
     return this.server.to(this.getUserIdRoom(userId)).emit(userId, data)
   }
 
-  async sendUniqueIdMessage(uniqueId: string, data: any) {
+  async sendUniqueIdMessage(uniqueId: string, data: TargetedMessageEnvelope) {
     return this.server.to(this.getUniqueIdRoom(uniqueId)).emit(uniqueId, data)
   }
 
@@ -94,8 +86,8 @@ export class WsService {
 
     try {
       const msg = await this.lastMessageService.queryUserId({ userId: data.userId })
-      if (msg && msg.content) {
-        client.emit(data.userId, this.getContent(msg.content))
+      if (msg) {
+        client.emit(data.userId, msg)
       }
     } catch (error) {
       this.logger.error(`userId replay failed: ${data.userId}`, error instanceof Error ? error.stack : undefined)
@@ -124,8 +116,8 @@ export class WsService {
 
     try {
       const msg = await this.lastMessageService.queryUniqueId({ uniqueId: data.uniqueId })
-      if (msg && msg.content) {
-        client.emit(data.uniqueId, this.getContent(msg.content))
+      if (msg) {
+        client.emit(data.uniqueId, msg)
       }
     } catch (error) {
       this.logger.error(`uniqueId replay failed: ${data.uniqueId}`, error instanceof Error ? error.stack : undefined)
@@ -179,6 +171,42 @@ export class WsService {
 
     await client.leave(this.getOtaNameRoom(data.otaName))
     return { event: 'otaName:unsubscribed', data: { ota: data.otaName } }
+  }
+
+  @SubscribeMessage('userId:ack')
+  async handleUserIdAck(client: Socket, data: AckUserIdDto) {
+    if (!data?.userId || !data?.messageId) {
+      return { event: 'userId:error', data: 'UserId and messageId are required' }
+    }
+
+    const acked = await this.lastMessageService.ackUserId(data)
+    return {
+      event: 'userId:acked',
+      data: {
+        uid: data.userId,
+        messageId: data.messageId,
+        acked,
+        clientId: client.id
+      }
+    }
+  }
+
+  @SubscribeMessage('uniqueId:ack')
+  async handleUniqueIdAck(client: Socket, data: AckUniqueIdDto) {
+    if (!data?.uniqueId || !data?.messageId) {
+      return { event: 'uniqueId:error', data: 'UniqueId and messageId are required' }
+    }
+
+    const acked = await this.lastMessageService.ackUniqueId(data)
+    return {
+      event: 'uniqueId:acked',
+      data: {
+        uniqueId: data.uniqueId,
+        messageId: data.messageId,
+        acked,
+        clientId: client.id
+      }
+    }
   }
 
   @SubscribeMessage('message')

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { apiUtil } from '@/utils/api'
 import { WsService } from '@/ws/ws.service'
-import { SendGlobalDto, SendOtaNameDto } from './message.dto'
+import { SendGlobalDto, SendOtaNameDto, TargetedMessageEnvelope } from './message.dto'
 import { SendUserIdDto, SendUniqueIdDto } from './message.dto'
 import { Request } from 'express'
 import { ConfigService } from '@nestjs/config'
@@ -26,6 +26,22 @@ export class MessageService {
     return true
   }
 
+  private getResendTtlMs() {
+    // 过期时间 默认是 86400 秒，也就是 24 小时
+    const ttlSeconds = Number(this.configService.get('MESSAGE_RESEND_TTL_SECONDS') ?? 86400)
+    return Math.max(ttlSeconds, 1) * 1000
+  }
+
+  private createTransientEnvelope(data: any): TargetedMessageEnvelope {
+    return {
+      messageId: null,
+      data,
+      updatedAt: new Date().toISOString(),
+      expiresAt: null,
+      ackRequired: false
+    }
+  }
+
   async sendGlobal(req: Request, body: SendGlobalDto) {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
@@ -48,35 +64,31 @@ export class MessageService {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
-    // 不是所有消息都存
-    if (body.resend !== false) {
-      this.logger.log('sendUserId:', JSON.stringify(body))
-      await this.lastMessageService.createUserId(body)
-    }
-    const bool = await this.wsService.sendUserIdMessage(body.userId, body.data)
-    return bool ? apiUtil.data(body.userId) : apiUtil.error('Send failed')
+    this.logger.log('sendUserId:', JSON.stringify(body))
+
+    const payload = body.resend
+      ? await this.lastMessageService.createUserId(body, this.getResendTtlMs())
+      : this.createTransientEnvelope(body.data)
+
+    const bool = await this.wsService.sendUserIdMessage(body.userId, payload)
+    return bool
+      ? apiUtil.data({ userId: body.userId, ...payload })
+      : apiUtil.error('Send failed')
   }
 
   async sendUniqueId(req: Request, body: SendUniqueIdDto) {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
-    // 不是所有消息都存
-    if (body.resend !== false) {
-      this.logger.log('sendUniqueId:', JSON.stringify(body))
-      await this.lastMessageService.createUniqueId(body)
-    }
-    const bool = await this.wsService.sendUniqueIdMessage(body.uniqueId, body.data)
-    return bool ? apiUtil.data(body.uniqueId) : apiUtil.error('Send failed')
-  }
+    this.logger.log('sendUniqueId:', JSON.stringify(body))
 
-  async clearUserId(body: SendUserIdDto) {
-    await this.lastMessageService.deleteUserId(body)
-    return apiUtil.data(body.userId)
-  }
+    const payload = body.resend
+      ? await this.lastMessageService.createUniqueId(body, this.getResendTtlMs())
+      : this.createTransientEnvelope(body.data)
 
-  async clearUniqueId(body: SendUniqueIdDto) {
-    await this.lastMessageService.deleteUniqueId(body)
-    return apiUtil.data(body.uniqueId)
+    const bool = await this.wsService.sendUniqueIdMessage(body.uniqueId, payload)
+    return bool
+      ? apiUtil.data({ uniqueId: body.uniqueId, ...payload })
+      : apiUtil.error('Send failed')
   }
 }
