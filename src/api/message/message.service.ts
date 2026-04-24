@@ -49,7 +49,7 @@ export class MessageService {
       return apiUtil.error('Permission denied')
     }
     // 不是所有消息都存
-    if (body.resend !== false) {
+    if (body.resend) {
       this.logger.log('sendUserId:', JSON.stringify(body))
       await this.lastMessageService.createUserId(body)
     }
@@ -62,7 +62,7 @@ export class MessageService {
       return apiUtil.error('Permission denied')
     }
     // 不是所有消息都存
-    if (body.resend !== false) {
+    if (body.resend) {
       this.logger.log('sendUniqueId:', JSON.stringify(body))
       await this.lastMessageService.createUniqueId(body)
     }
