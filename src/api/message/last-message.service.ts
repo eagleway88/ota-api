@@ -28,18 +28,42 @@ export class LastMessageService {
     return typeof data === 'string' ? data : JSON.stringify(data)
   }
 
-  private toEnvelope(entity: UserIdMessage | UniqueIdMessage): TargetedMessageEnvelope {
+  private parseDate(value: Date | string | null | undefined) {
+    if (!value) {
+      return null
+    }
+
+    const date = value instanceof Date ? value : new Date(value)
+    return Number.isNaN(date.getTime()) ? null : date
+  }
+
+  private getEnvelopeDates(entity: UserIdMessage | UniqueIdMessage) {
+    const updatedAt = this.parseDate(entity.updatedAt)
+    const expiresAt = this.parseDate(entity.expiresAt)
+
+    if (!updatedAt || !expiresAt) {
+      return null
+    }
+
+    return { updatedAt, expiresAt }
+  }
+
+  private toEnvelope(
+    entity: UserIdMessage | UniqueIdMessage,
+    dates: { updatedAt: Date; expiresAt: Date }
+  ): TargetedMessageEnvelope {
     return {
       messageId: entity.messageId,
       data: this.parseContent(entity.content),
-      updatedAt: entity.updatedAt.toISOString(),
-      expiresAt: entity.expiresAt.toISOString(),
+      updatedAt: dates.updatedAt.toISOString(),
+      expiresAt: dates.expiresAt.toISOString(),
       ackRequired: true
     }
   }
 
-  private isExpired(expiresAt: Date) {
-    return expiresAt.getTime() <= Date.now()
+  private isExpired(expiresAt: Date | string | null | undefined) {
+    const date = this.parseDate(expiresAt)
+    return !date || date.getTime() <= Date.now()
   }
 
   async queryUserId(body: Pick<SendUserIdDto, 'userId'>) {
@@ -49,11 +73,12 @@ export class LastMessageService {
     if (!entity) {
       return null
     }
-    if (this.isExpired(entity.expiresAt)) {
+    const dates = this.getEnvelopeDates(entity)
+    if (!dates || this.isExpired(dates.expiresAt)) {
       await this.tUserId.delete({ userId: body.userId })
       return null
     }
-    return this.toEnvelope(entity)
+    return this.toEnvelope(entity, dates)
   }
 
   async createUserId(body: SendUserIdDto, ttlMs: number) {
@@ -92,11 +117,12 @@ export class LastMessageService {
     if (!entity) {
       return null
     }
-    if (this.isExpired(entity.expiresAt)) {
+    const dates = this.getEnvelopeDates(entity)
+    if (!dates || this.isExpired(dates.expiresAt)) {
       await this.tUniqueId.delete({ uniqueId: body.uniqueId })
       return null
     }
-    return this.toEnvelope(entity)
+    return this.toEnvelope(entity, dates)
   }
 
   async createUniqueId(body: SendUniqueIdDto, ttlMs: number) {
