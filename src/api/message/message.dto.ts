@@ -1,4 +1,6 @@
-import { IsNotEmpty, IsString } from 'class-validator'
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator'
+
+const TARGETED_MESSAGE_ID_MAX_LENGTH = 191
 
 export type TargetedMessageEnvelope = {
   messageId: string | null
@@ -24,6 +26,7 @@ export class SendOtaNameDto {
 export class SendUserIdDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(TARGETED_MESSAGE_ID_MAX_LENGTH)
   userId: string
 
   data?: any
@@ -35,6 +38,7 @@ export class SendUserIdDto {
 export class AckUserIdDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(TARGETED_MESSAGE_ID_MAX_LENGTH)
   userId: string
 
   @IsString()
@@ -45,6 +49,7 @@ export class AckUserIdDto {
 export class SendUniqueIdDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(TARGETED_MESSAGE_ID_MAX_LENGTH)
   uniqueId: string
 
   data?: any
@@ -55,6 +60,7 @@ export class SendUniqueIdDto {
 export class AckUniqueIdDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(TARGETED_MESSAGE_ID_MAX_LENGTH)
   uniqueId: string
 
   @IsString()
