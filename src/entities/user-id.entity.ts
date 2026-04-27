@@ -12,7 +12,7 @@ export class UserIdMessage {
   @Column('varchar', {
     name: 'user_id',
     comment: 'userId',
-    length: 255
+    length: 191
   })
   userId: string
 

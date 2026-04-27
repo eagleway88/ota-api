@@ -8,11 +8,13 @@ export class UniqueIdMessage {
   })
   id: number
 
+  // 唯一索引的 ID 字段不该用 255 的 utf8mb4 varchar；把它们收窄到 191，
+  // 就能让 MySQL 5.6/旧 InnoDB 正常建唯一索引
   @Index('uq_unique_id_message_unique_id', { unique: true })
   @Column('varchar', {
     name: 'unique_id',
     comment: 'uniqueId',
-    length: 255
+    length: 191
   })
   uniqueId: string
 
