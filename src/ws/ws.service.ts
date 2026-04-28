@@ -23,6 +23,37 @@ type UserIdMessage = {
 type UniqueIdMessage = {
   uniqueId: string
 }
+
+type ErrorAckResponse = {
+  error: string
+}
+
+type UserIdSubscriptionAckResponse = {
+  uid: string
+}
+
+type UniqueIdSubscriptionAckResponse = {
+  uniqueId: string
+}
+
+type OtaNameSubscriptionAckResponse = {
+  ota: string
+}
+
+type UserIdAckResponse = {
+  uid: string
+  messageId: string
+  acked: boolean
+  clientId: string
+}
+
+type UniqueIdAckResponse = {
+  uniqueId: string
+  messageId: string
+  acked: boolean
+  clientId: string
+}
+
 @WebSocketGateway(void 0, {
   cors: '*',
   transports: ['websocket']
@@ -77,9 +108,12 @@ export class WsService {
   }
 
   @SubscribeMessage('userId:subscribe')
-  async handleUserIdSubscribe(client: Socket, data: UserIdMessage) {
+  async handleUserIdSubscribe(
+    client: Socket,
+    data: UserIdMessage
+  ): Promise<UserIdSubscriptionAckResponse | ErrorAckResponse> {
     if (!data?.userId) {
-      return { event: 'userId:error', data: 'UserId is required' }
+      return { error: 'UserId is required' }
     }
 
     await client.join(this.getUserIdRoom(data.userId))
@@ -93,23 +127,29 @@ export class WsService {
       this.logger.error(`userId replay failed: ${data.userId}`, error instanceof Error ? error.stack : undefined)
     }
 
-    return { event: 'userId:subscribed', data: { uid: data.userId } }
+    return { uid: data.userId }
   }
 
   @SubscribeMessage('userId:unsubscribe')
-  async handleUuserIdUnsubscribe(client: Socket, data: UserIdMessage) {
+  async handleUuserIdUnsubscribe(
+    client: Socket,
+    data: UserIdMessage
+  ): Promise<UserIdSubscriptionAckResponse | ErrorAckResponse> {
     if (!data?.userId) {
-      return { event: 'userId:error', data: 'UserId is required' }
+      return { error: 'UserId is required' }
     }
 
     await client.leave(this.getUserIdRoom(data.userId))
-    return { event: 'userId:unsubscribed', data: { uid: data.userId } }
+    return { uid: data.userId }
   }
 
   @SubscribeMessage('uniqueId:subscribe')
-  async handleUniqueIdSubscribe(client: Socket, data: UniqueIdMessage) {
+  async handleUniqueIdSubscribe(
+    client: Socket,
+    data: UniqueIdMessage
+  ): Promise<UniqueIdSubscriptionAckResponse | ErrorAckResponse> {
     if (!data?.uniqueId) {
-      return { event: 'uniqueId:error', data: 'UniqueId is required' }
+      return { error: 'UniqueId is required' }
     }
 
     await client.join(this.getUniqueIdRoom(data.uniqueId))
@@ -123,23 +163,29 @@ export class WsService {
       this.logger.error(`uniqueId replay failed: ${data.uniqueId}`, error instanceof Error ? error.stack : undefined)
     }
 
-    return { event: 'uniqueId:subscribed', data: { uniqueId: data.uniqueId } }
+    return { uniqueId: data.uniqueId }
   }
 
   @SubscribeMessage('uniqueId:unsubscribe')
-  async handleUniqueIdUnsubscribe(client: Socket, data: UniqueIdMessage) {
+  async handleUniqueIdUnsubscribe(
+    client: Socket,
+    data: UniqueIdMessage
+  ): Promise<UniqueIdSubscriptionAckResponse | ErrorAckResponse> {
     if (!data?.uniqueId) {
-      return { event: 'uniqueId:error', data: 'UniqueId is required' }
+      return { error: 'UniqueId is required' }
     }
 
     await client.leave(this.getUniqueIdRoom(data.uniqueId))
-    return { event: 'uniqueId:unsubscribed', data: { uniqueId: data.uniqueId } }
+    return { uniqueId: data.uniqueId }
   }
 
   @SubscribeMessage('otaName:subscribe')
-  async handleOtaNameSubscribe(client: Socket, data: OtaNameMessage) {
+  async handleOtaNameSubscribe(
+    client: Socket,
+    data: OtaNameMessage
+  ): Promise<OtaNameSubscriptionAckResponse | ErrorAckResponse> {
     if (!data?.otaName) {
-      return { event: 'otaName:error', data: 'OtaName is required' }
+      return { error: 'OtaName is required' }
     }
 
     await client.join(this.getOtaNameRoom(data.otaName))
@@ -160,52 +206,55 @@ export class WsService {
       this.logger.error(`otaName replay failed: ${data.otaName}`, error instanceof Error ? error.stack : undefined)
     }
 
-    return { event: 'otaName:subscribed', data: { ota: data.otaName } }
+    return { ota: data.otaName }
   }
 
   @SubscribeMessage('otaName:unsubscribe')
-  async handleOtaNameUnsubscribe(client: Socket, data: OtaNameMessage) {
+  async handleOtaNameUnsubscribe(
+    client: Socket,
+    data: OtaNameMessage
+  ): Promise<OtaNameSubscriptionAckResponse | ErrorAckResponse> {
     if (!data?.otaName) {
-      return { event: 'otaName:error', data: 'OtaName is required' }
+      return { error: 'OtaName is required' }
     }
 
     await client.leave(this.getOtaNameRoom(data.otaName))
-    return { event: 'otaName:unsubscribed', data: { ota: data.otaName } }
+    return { ota: data.otaName }
   }
 
   @SubscribeMessage('userId:ack')
-  async handleUserIdAck(client: Socket, data: AckUserIdDto) {
+  async handleUserIdAck(
+    client: Socket,
+    data: AckUserIdDto
+  ): Promise<UserIdAckResponse | ErrorAckResponse> {
     if (!data?.userId || !data?.messageId) {
-      return { event: 'userId:error', data: 'UserId and messageId are required' }
+      return { error: 'UserId and messageId are required' }
     }
 
     const acked = await this.lastMessageService.ackUserId(data)
     return {
-      event: 'userId:acked',
-      data: {
-        uid: data.userId,
-        messageId: data.messageId,
-        acked,
-        clientId: client.id
-      }
+      uid: data.userId,
+      messageId: data.messageId,
+      acked,
+      clientId: client.id
     }
   }
 
   @SubscribeMessage('uniqueId:ack')
-  async handleUniqueIdAck(client: Socket, data: AckUniqueIdDto) {
+  async handleUniqueIdAck(
+    client: Socket,
+    data: AckUniqueIdDto
+  ): Promise<UniqueIdAckResponse | ErrorAckResponse> {
     if (!data?.uniqueId || !data?.messageId) {
-      return { event: 'uniqueId:error', data: 'UniqueId and messageId are required' }
+      return { error: 'UniqueId and messageId are required' }
     }
 
     const acked = await this.lastMessageService.ackUniqueId(data)
     return {
-      event: 'uniqueId:acked',
-      data: {
-        uniqueId: data.uniqueId,
-        messageId: data.messageId,
-        acked,
-        clientId: client.id
-      }
+      uniqueId: data.uniqueId,
+      messageId: data.messageId,
+      acked,
+      clientId: client.id
     }
   }
 
