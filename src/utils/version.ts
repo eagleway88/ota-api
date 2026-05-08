@@ -106,6 +106,7 @@ export function createVersionTable(name: string) {
       { name: 'file_size', type: 'int', isNullable: true, comment: '文件大小' },
       { name: 'enable', type: 'tinyint', isNullable: true, comment: '是否启用', default: 1 },
       { name: 'mandatory', type: 'tinyint', isNullable: true, comment: '是否强制更新', default: 1 },
+      { name: 'show_dialog', type: 'tinyint', isNullable: true, comment: '是否显示弹窗', default: 1 },
       { name: 'install_url', type: 'varchar', isNullable: true, comment: '安装链接(全量更新时不为null)' },
       { name: 'package_url', type: 'varchar', isNullable: true, comment: '热更新链接(热更新时不为null)' },
       { name: 'update_type', type: 'varchar', isNullable: true, comment: '更新类型(full=全量更新 hot=热更新)' },

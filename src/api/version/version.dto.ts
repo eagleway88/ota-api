@@ -52,6 +52,8 @@ export class VersionDto {
   enable?: number
   /** 是否强制更新 */
   mandatory?: number
+  /** 是否显示弹窗 */
+  showDialog?: number
   /** 安装链接(全量更新时不为null) */
   installUrl?: string
   /** 热更新链接(热更新时不为null) */
