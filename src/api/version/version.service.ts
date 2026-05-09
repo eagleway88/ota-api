@@ -341,6 +341,10 @@ export class VersionService {
       await this.backfillVersionUpdateType(queryRunner, table.name)
     }
 
+    if (table.name.endsWith('_version') && missingColumns.some(column => column.name === 'show_dialog')) {
+      await this.backfillVersionShowDialog(queryRunner, table.name)
+    }
+
     if (
       table.name.endsWith('_error_log')
       && missingColumns.some(column => ['error_hash', 'report_count', 'update_time'].includes(column.name))
@@ -358,6 +362,14 @@ export class VersionService {
          ELSE update_type
        END
        WHERE update_type IS NULL OR update_type = ''`
+    )
+  }
+
+  private async backfillVersionShowDialog(queryRunner: QueryRunner, tableName: string) {
+    await queryRunner.query(
+      `UPDATE ${tableName}
+       SET show_dialog = 1
+       WHERE show_dialog IS NULL`
     )
   }
 
