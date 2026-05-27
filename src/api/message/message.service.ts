@@ -61,6 +61,7 @@ export class MessageService {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
+    console.log('body.resend', body.resend)
     const payload = body.resend
       ? await this.lastMessageService.createUserId(body, this.getResendTtlMs())
       : this.createTransientEnvelope(body.data)
