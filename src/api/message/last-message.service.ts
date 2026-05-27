@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { randomUUID } from 'crypto'
@@ -9,6 +9,8 @@ import { UniqueIdMessage } from '@/entities/unique-id.entity'
 
 @Injectable()
 export class LastMessageService {
+  private readonly logger = new Logger(LastMessageService.name, { timestamp: true })
+
   constructor(
     @InjectRepository(UserIdMessage)
     private readonly tUserId: Repository<UserIdMessage>,
@@ -71,13 +73,17 @@ export class LastMessageService {
       userId: body.userId
     })
     if (!entity) {
+      this.logger.debug(`queryUserId miss userId=${body.userId}`)
       return null
     }
     const dates = this.getEnvelopeDates(entity)
     if (!dates || this.isExpired(dates.expiresAt)) {
+      this.logger.warn(`queryUserId expired userId=${body.userId} messageId=${entity.messageId}`)
       await this.tUserId.delete({ userId: body.userId })
       return null
     }
+
+    this.logger.debug(`queryUserId hit userId=${body.userId} messageId=${entity.messageId}`)
     return this.toEnvelope(entity, dates)
   }
 
@@ -93,6 +99,8 @@ export class LastMessageService {
       expiresAt
     }, ['userId'])
 
+    this.logger.log(`createUserId persisted userId=${body.userId} messageId=${messageId} expiresAt=${expiresAt.toISOString()}`)
+
     return {
       messageId,
       data: body.data,
@@ -107,6 +115,8 @@ export class LastMessageService {
       userId: body.userId,
       messageId: body.messageId
     })
+
+    this.logger.log(`ackUserId userId=${body.userId} messageId=${body.messageId} affected=${result.affected ?? 0}`)
     return Boolean(result.affected)
   }
 
@@ -115,13 +125,17 @@ export class LastMessageService {
       uniqueId: body.uniqueId
     })
     if (!entity) {
+      this.logger.debug(`queryUniqueId miss uniqueId=${body.uniqueId}`)
       return null
     }
     const dates = this.getEnvelopeDates(entity)
     if (!dates || this.isExpired(dates.expiresAt)) {
+      this.logger.warn(`queryUniqueId expired uniqueId=${body.uniqueId} messageId=${entity.messageId}`)
       await this.tUniqueId.delete({ uniqueId: body.uniqueId })
       return null
     }
+
+    this.logger.debug(`queryUniqueId hit uniqueId=${body.uniqueId} messageId=${entity.messageId}`)
     return this.toEnvelope(entity, dates)
   }
 
@@ -137,6 +151,8 @@ export class LastMessageService {
       expiresAt
     }, ['uniqueId'])
 
+    this.logger.log(`createUniqueId persisted uniqueId=${body.uniqueId} messageId=${messageId} expiresAt=${expiresAt.toISOString()}`)
+
     return {
       messageId,
       data: body.data,
@@ -151,6 +167,8 @@ export class LastMessageService {
       uniqueId: body.uniqueId,
       messageId: body.messageId
     })
+
+    this.logger.log(`ackUniqueId uniqueId=${body.uniqueId} messageId=${body.messageId} affected=${result.affected ?? 0}`)
     return Boolean(result.affected)
   }
 }
