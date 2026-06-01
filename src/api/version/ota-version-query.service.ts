@@ -57,45 +57,75 @@ export class OtaVersionQueryService {
         )
       }
 
-      const fullUpdate = await baseQuery
+      const fullUpdateQuery = baseQuery
         .clone()
         .andWhere('version.update_type = :updateType', {
           updateType: UpdateType.Full
         })
         .andWhere('version.ver > :ver', { ver: query.ver })
+
+      const fullUpdate = await fullUpdateQuery
+        .clone()
         .orderBy('version.ver', 'DESC')
         .addOrderBy('version.id', 'DESC')
         .getRawOne()
 
       if (fullUpdate) {
+        const hasPendingMandatoryFullUpdate = !!(await fullUpdateQuery
+          .clone()
+          .select('version.id', 'id')
+          .andWhere('version.mandatory = :mandatory', { mandatory: 1 })
+          .limit(1)
+          .getRawOne())
+
+        const isMandatory = hasPendingMandatoryFullUpdate ? 1 : fullUpdate.mandatory
+
         return underlineToHump({
           ...fullUpdate,
+          mandatory: isMandatory,
+          show_dialog: isMandatory ? 1 : fullUpdate.show_dialog,
           // 兼容旧版字段
           type: 1,
           downloadUrl: fullUpdate.install_url,
-          isMandatory: fullUpdate.mandatory
+          isMandatory
         })
       }
 
-      const hotUpdate = await baseQuery
+      const hotUpdateQuery = baseQuery
         .clone()
         .andWhere('version.update_type = :updateType', {
           updateType: UpdateType.Hot
         })
         .andWhere('version.ver = :ver', { ver: query.ver })
         .andWhere('version.id > :id', { id: query.id || 0 })
+
+      const hotUpdate = await hotUpdateQuery
+        .clone()
         .orderBy('version.id', 'DESC')
         .getRawOne()
 
-      return hotUpdate
-        ? underlineToHump({
-          ...hotUpdate,
-          // 兼容旧版字段
-          type: 0,
-          downloadUrl: hotUpdate.package_url,
-          isMandatory: hotUpdate.mandatory
-        })
-        : null
+      if (!hotUpdate) {
+        return null
+      }
+
+      const hasPendingMandatoryHotUpdate = !!(await hotUpdateQuery
+        .clone()
+        .select('version.id', 'id')
+        .andWhere('version.mandatory = :mandatory', { mandatory: 1 })
+        .limit(1)
+        .getRawOne())
+
+      const isMandatory = hasPendingMandatoryHotUpdate ? 1 : hotUpdate.mandatory
+
+      return underlineToHump({
+        ...hotUpdate,
+        mandatory: isMandatory,
+        show_dialog: isMandatory ? 1 : hotUpdate.show_dialog,
+        // 兼容旧版字段
+        type: 0,
+        downloadUrl: hotUpdate.package_url,
+        isMandatory
+      })
     } finally {
       await queryRunner.release()
     }
