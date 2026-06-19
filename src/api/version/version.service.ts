@@ -1,4 +1,3 @@
-
 import { Injectable } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource, QueryRunner, Table } from 'typeorm'
@@ -8,11 +7,12 @@ import { apiUtil } from '@/utils/api'
 import { ConfigService } from '@nestjs/config'
 import { UpdaterUtil } from '@/utils/updater'
 import { OtaVersionQueryService } from './ota-version-query.service'
-import { createAppErrorLogTable, createErrorTable, } from '@/utils/version'
-import { createSuccessTable, createVersionTable, } from '@/utils/version'
+import { createAppErrorLogTable, createErrorTable } from '@/utils/version'
+import { createSuccessTable, createVersionTable } from '@/utils/version'
 import { VERSION_TABLE_AUTO_INCREMENT_START } from '@/utils/version'
+import { normalizeVersionList, normalizeVersionValue } from '@/utils/version'
 import { fetchIP, humpToUnderline, underlineToHump } from '@/utils'
-import { AppErrorLogDto, CheckDto, CreateDto, } from './version.dto'
+import { AppErrorLogDto, CheckDto, CreateDto } from './version.dto'
 import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
 import { WsService } from '@/ws/ws.service'
 
@@ -23,18 +23,23 @@ export class VersionService {
     private readonly wsService: WsService,
     private readonly otaVersionQueryService: OtaVersionQueryService,
     private readonly configService: ConfigService,
-    @InjectDataSource() private dataSource: DataSource,
+    @InjectDataSource() private dataSource: DataSource
   ) {
     this.updater = new UpdaterUtil(this.configService)
   }
 
   async create(req: Request, body: CreateDto) {
-    const created = await this.insertIntoDynamicTable(createVersionTable(body.name), {
-      ...body,
-      updateType: UpdateType.Full,
-      ip: fetchIP(req),
-      createTime: new Date()
-    })
+    const created = await this.insertIntoDynamicTable(
+      createVersionTable(body.name),
+      {
+        ...body,
+        ver: normalizeVersionValue(body.ver) ?? body.ver,
+        baseVersions: normalizeVersionList(body.baseVersions),
+        updateType: UpdateType.Full,
+        ip: fetchIP(req),
+        createTime: new Date()
+      }
+    )
 
     if (created) await this.wsService.sendOtaNameMessage(body.name, created)
 
@@ -44,10 +49,15 @@ export class VersionService {
   async check(body: CheckDto) {
     const table = createVersionTable(body.name)
     const queryRunner = this.dataSource.createQueryRunner()
+    const normalizedVer =
+      typeof body.ver === 'string'
+        ? (normalizeVersionValue(body.ver) ??
+          Number(body.ver.replaceAll('.', '')))
+        : body.ver
 
     // 兼容旧版
     if (typeof body.ver === 'string') {
-      body.ver = Number(body.ver.replaceAll('.', ''))
+      body.ver = normalizedVer
     }
 
     await queryRunner.connect()
@@ -63,14 +73,16 @@ export class VersionService {
       await queryRunner.release()
     }
 
-    return apiUtil.data(await this.otaVersionQueryService.findLatestAvailableVersion({
-      name: body.name,
-      channel: body.channel,
-      architecture: body.architecture,
-      platform: body.platform,
-      ver: body.ver,
-      id: body.id
-    }))
+    return apiUtil.data(
+      await this.otaVersionQueryService.findLatestAvailableVersion({
+        name: body.name,
+        channel: body.channel,
+        architecture: body.architecture,
+        platform: body.platform,
+        ver: normalizedVer,
+        id: body.id
+      })
+    )
   }
 
   async upload(req: Request, file: any, body: UploadDto) {
@@ -78,37 +90,44 @@ export class VersionService {
       return apiUtil.error('File is required')
     }
 
+    const normalizedVer = normalizeVersionValue(body.ver)
     const dir = `${body.name}/${body.ver}`
     const uploadRes = await this.updater?.put(dir, file)
     if (!uploadRes || uploadRes.err || !uploadRes.url) {
       return apiUtil.error(uploadRes?.err || 'Upload failed')
     }
 
-    const created = await this.insertIntoDynamicTable(createVersionTable(body.name), {
-      ...body,
-      fileSize: file.size,
-      packageUrl: uploadRes.url,
-      updateType: UpdateType.Hot,
-      ip: fetchIP(req),
-      createTime: new Date()
-    })
+    const created = await this.insertIntoDynamicTable(
+      createVersionTable(body.name),
+      {
+        ...body,
+        ver: normalizedVer ?? body.ver,
+        baseVersions: normalizeVersionList(body.baseVersions),
+        fileSize: file.size,
+        packageUrl: uploadRes.url,
+        updateType: UpdateType.Hot,
+        ip: fetchIP(req),
+        createTime: new Date()
+      }
+    )
     if (created) await this.wsService.sendOtaNameMessage(body.name, created)
     return apiUtil.data(created)
-
   }
 
   async success(req: Request, body: SuccessDto) {
     await this.assertVersionExists(body.name, body.verId)
 
-    const created = await this.insertIntoDynamicTable(createSuccessTable(body.name), {
-      ...body,
-      extras: this.normalizeExtras(body.extras),
-      ip: fetchIP(req),
-      createTime: new Date()
-    })
+    const created = await this.insertIntoDynamicTable(
+      createSuccessTable(body.name),
+      {
+        ...body,
+        extras: this.normalizeExtras(body.extras),
+        ip: fetchIP(req),
+        createTime: new Date()
+      }
+    )
 
     return apiUtil.data(created)
-
   }
 
   async error(req: Request, body: ErrorDto) {
@@ -116,26 +135,32 @@ export class VersionService {
 
     const now = new Date()
     if (body.id) {
-      const updated = await this.updateDynamicTable(createErrorTable(body.name), body.id, {
-        ...body,
-        extras: this.normalizeExtras(body.extras),
-        ip: fetchIP(req),
-        updateTime: now
-      })
+      const updated = await this.updateDynamicTable(
+        createErrorTable(body.name),
+        body.id,
+        {
+          ...body,
+          extras: this.normalizeExtras(body.extras),
+          ip: fetchIP(req),
+          updateTime: now
+        }
+      )
 
       return apiUtil.data(updated)
     }
 
-    const created = await this.insertIntoDynamicTable(createErrorTable(body.name), {
-      ...body,
-      extras: this.normalizeExtras(body.extras),
-      ip: fetchIP(req),
-      updateTime: now,
-      createTime: now
-    })
+    const created = await this.insertIntoDynamicTable(
+      createErrorTable(body.name),
+      {
+        ...body,
+        extras: this.normalizeExtras(body.extras),
+        ip: fetchIP(req),
+        updateTime: now,
+        createTime: now
+      }
+    )
 
     return apiUtil.data(created)
-
   }
 
   async appError(req: Request, body: AppErrorLogDto) {
@@ -172,7 +197,12 @@ export class VersionService {
           .where('id = :id', { id: existing.id })
           .execute()
 
-        await queryRunner.manager.increment(table.name, { id: existing.id }, 'report_count', 1)
+        await queryRunner.manager.increment(
+          table.name,
+          { id: existing.id },
+          'report_count',
+          1
+        )
 
         const updated = await queryRunner.manager
           .createQueryBuilder()
@@ -181,24 +211,29 @@ export class VersionService {
           .where('id = :id', { id: existing.id })
           .getRawOne()
 
-        return apiUtil.data(this.normalizeDynamicResult(table, updated ?? existing))
+        return apiUtil.data(
+          this.normalizeDynamicResult(table, updated ?? existing)
+        )
       }
 
-      const created = await this.insertIntoDynamicTableByQueryRunner(queryRunner, table, {
-        ...body,
-        extras,
-        errorHash,
-        reportCount: 1,
-        ip: fetchIP(req),
-        updateTime: now,
-        createTime: now
-      })
+      const created = await this.insertIntoDynamicTableByQueryRunner(
+        queryRunner,
+        table,
+        {
+          ...body,
+          extras,
+          errorHash,
+          reportCount: 1,
+          ip: fetchIP(req),
+          updateTime: now,
+          createTime: now
+        }
+      )
 
       return apiUtil.data(created)
     } finally {
       await queryRunner.release()
     }
-
   }
 
   private async assertVersionExists(name: string, id: number) {
@@ -228,13 +263,20 @@ export class VersionService {
     }
   }
 
-  private async insertIntoDynamicTable(table: Table, payload: Record<string, any>) {
+  private async insertIntoDynamicTable(
+    table: Table,
+    payload: Record<string, any>
+  ) {
     const queryRunner = this.dataSource.createQueryRunner()
 
     await queryRunner.connect()
 
     try {
-      return await this.insertIntoDynamicTableByQueryRunner(queryRunner, table, payload)
+      return await this.insertIntoDynamicTableByQueryRunner(
+        queryRunner,
+        table,
+        payload
+      )
     } finally {
       await queryRunner.release()
     }
@@ -267,10 +309,17 @@ export class VersionService {
       .where('id = :id', { id: insertId })
       .getRawOne()
 
-    return this.normalizeDynamicResult(table, created ?? { id: insertId, ...insertPayload })
+    return this.normalizeDynamicResult(
+      table,
+      created ?? { id: insertId, ...insertPayload }
+    )
   }
 
-  private async updateDynamicTable(table: Table, id: number, payload: Record<string, any>) {
+  private async updateDynamicTable(
+    table: Table,
+    id: number,
+    payload: Record<string, any>
+  ) {
     const queryRunner = this.dataSource.createQueryRunner()
 
     await queryRunner.connect()
@@ -281,7 +330,10 @@ export class VersionService {
         return apiUtil.error('Error record does not exist')
       }
 
-      const updatePayload = this.prepareDynamicPayload(table, { ...payload, id: undefined })
+      const updatePayload = this.prepareDynamicPayload(table, {
+        ...payload,
+        id: undefined
+      })
       const updateRes = await queryRunner.manager
         .createQueryBuilder()
         .update(table.name)
@@ -300,7 +352,10 @@ export class VersionService {
         .where('id = :id', { id })
         .getRawOne()
 
-      return this.normalizeDynamicResult(table, updated ?? { id, ...updatePayload })
+      return this.normalizeDynamicResult(
+        table,
+        updated ?? { id, ...updatePayload }
+      )
     } finally {
       await queryRunner.release()
     }
@@ -337,23 +392,34 @@ export class VersionService {
 
     await queryRunner.addColumns(table.name, missingColumns)
 
-    if (table.name.endsWith('_version') && missingColumns.some(column => column.name === 'update_type')) {
+    if (
+      table.name.endsWith('_version') &&
+      missingColumns.some(column => column.name === 'update_type')
+    ) {
       await this.backfillVersionUpdateType(queryRunner, table.name)
     }
 
-    if (table.name.endsWith('_version') && missingColumns.some(column => column.name === 'show_dialog')) {
+    if (
+      table.name.endsWith('_version') &&
+      missingColumns.some(column => column.name === 'show_dialog')
+    ) {
       await this.backfillVersionShowDialog(queryRunner, table.name)
     }
 
     if (
-      table.name.endsWith('_error_log')
-      && missingColumns.some(column => ['error_hash', 'report_count', 'update_time'].includes(column.name))
+      table.name.endsWith('_error_log') &&
+      missingColumns.some(column =>
+        ['error_hash', 'report_count', 'update_time'].includes(column.name)
+      )
     ) {
       await this.backfillAppErrorLogColumns(queryRunner, table.name)
     }
   }
 
-  private async backfillVersionUpdateType(queryRunner: QueryRunner, tableName: string) {
+  private async backfillVersionUpdateType(
+    queryRunner: QueryRunner,
+    tableName: string
+  ) {
     await queryRunner.query(
       `UPDATE ${tableName}
        SET update_type = CASE
@@ -365,7 +431,10 @@ export class VersionService {
     )
   }
 
-  private async backfillVersionShowDialog(queryRunner: QueryRunner, tableName: string) {
+  private async backfillVersionShowDialog(
+    queryRunner: QueryRunner,
+    tableName: string
+  ) {
     await queryRunner.query(
       `UPDATE ${tableName}
        SET show_dialog = 1
@@ -373,7 +442,10 @@ export class VersionService {
     )
   }
 
-  private async backfillAppErrorLogColumns(queryRunner: QueryRunner, tableName: string) {
+  private async backfillAppErrorLogColumns(
+    queryRunner: QueryRunner,
+    tableName: string
+  ) {
     await queryRunner.query(
       `UPDATE ${tableName}
        SET error_hash = MD5(CONCAT_WS('|',
@@ -400,7 +472,10 @@ export class VersionService {
     )
   }
 
-  private async ensureVersionTableAutoIncrement(queryRunner: QueryRunner, tableName: string) {
+  private async ensureVersionTableAutoIncrement(
+    queryRunner: QueryRunner,
+    tableName: string
+  ) {
     await queryRunner.query(
       `ALTER TABLE \`${tableName}\` AUTO_INCREMENT = ${VERSION_TABLE_AUTO_INCREMENT_START}`
     )
@@ -495,7 +570,11 @@ export class VersionService {
     ]
 
     return createHash('md5')
-      .update(segments.map(segment => this.normalizeErrorHashSegment(segment)).join('|'))
+      .update(
+        segments
+          .map(segment => this.normalizeErrorHashSegment(segment))
+          .join('|')
+      )
       .digest('hex')
   }
 

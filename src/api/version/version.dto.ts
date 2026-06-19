@@ -1,4 +1,3 @@
-
 import { IsString, IsNumber, IsNotEmpty, IsOptional } from 'class-validator'
 import { ApiProperty, OmitType } from '@nestjs/swagger'
 
@@ -28,6 +27,11 @@ export class VersionDto {
   /** 版本号(1.0.0=100) */
   @IsNotEmpty()
   ver: number | string
+
+  /** 适用基础版本(多版本用逗号拼接100,101) */
+  @IsOptional()
+  @IsString()
+  baseVersions?: string
 
   /** 应用名称 */
   @IsString()
@@ -119,16 +123,11 @@ export class UploadDto extends OmitType(VersionDto, ['id', 'ver']) {
     format: 'binary'
   })
   file: any
-
 }
 
-export class CreateDto extends OmitType(VersionDto, ['id']) {
+export class CreateDto extends OmitType(VersionDto, ['id']) {}
 
-}
-
-export class SuccessDto extends OmitType(StatusDto, ['id']) {
-
-}
+export class SuccessDto extends OmitType(StatusDto, ['id']) {}
 
 export class ErrorDto extends OmitType(StatusDto, ['id']) {
   id?: number
