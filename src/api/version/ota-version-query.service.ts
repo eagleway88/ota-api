@@ -16,7 +16,7 @@ type OtaVersionQuery = {
 
 @Injectable()
 export class OtaVersionQueryService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) { }
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
   async findLatestAvailableVersion(query: OtaVersionQuery) {
     if (!query.name || !query.platform || query.ver == null) {
@@ -39,9 +39,12 @@ export class OtaVersionQueryService {
         .select('*')
         .from(table.name, 'version')
         .where('version.enable = :enable', { enable: 1 })
-        .andWhere("FIND_IN_SET(:platform, REPLACE(version.platform, ' ', '')) > 0", {
-          platform: query.platform
-        })
+        .andWhere(
+          "FIND_IN_SET(:platform, REPLACE(version.platform, ' ', '')) > 0",
+          {
+            platform: query.platform
+          }
+        )
 
       if (query.architecture) {
         baseQuery.andWhere(
@@ -78,7 +81,9 @@ export class OtaVersionQueryService {
           .limit(1)
           .getRawOne())
 
-        const isMandatory = hasPendingMandatoryFullUpdate ? 1 : fullUpdate.mandatory
+        const isMandatory = hasPendingMandatoryFullUpdate
+          ? 1
+          : fullUpdate.mandatory
 
         return underlineToHump({
           ...fullUpdate,
@@ -96,7 +101,18 @@ export class OtaVersionQueryService {
         .andWhere('version.update_type = :updateType', {
           updateType: UpdateType.Hot
         })
-        .andWhere('version.ver = :ver', { ver: query.ver })
+        .andWhere(
+          `(version.ver = :ver
+            OR (
+              version.base_versions IS NOT NULL
+              AND version.base_versions <> ''
+              AND FIND_IN_SET(:verString, REPLACE(version.base_versions, ' ', '')) > 0
+            ))`,
+          {
+            ver: query.ver,
+            verString: String(query.ver)
+          }
+        )
         .andWhere('version.id > :id', { id: query.id || 0 })
 
       const hotUpdate = await hotUpdateQuery
