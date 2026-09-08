@@ -14,6 +14,7 @@ import { normalizeVersionList, normalizeVersionValue } from '@/utils/version'
 import { fetchIP, humpToUnderline, underlineToHump } from '@/utils'
 import { AppErrorLogDto, CheckDto, CreateDto } from './version.dto'
 import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
+import { VersionListItemDto, VersionListQueryDto } from './version.dto'
 import { WsService } from '@/ws/ws.service'
 
 @Injectable()
@@ -26,6 +27,57 @@ export class VersionService {
     @InjectDataSource() private dataSource: DataSource
   ) {
     this.updater = new UpdaterUtil(this.configService)
+  }
+
+  async list(query: VersionListQueryDto) {
+    const queryRunner = this.dataSource.createQueryRunner()
+    await queryRunner.connect()
+
+    try {
+      const versionTableName = createVersionTable(query.name).name
+      const tablePrefix = versionTableName.slice(0, -'_version'.length)
+      const tables = await queryRunner.getTables([
+        versionTableName,
+        `${tablePrefix}_success`,
+        `${tablePrefix}_error`
+      ])
+      const tableNames = new Set(tables.map(table => table.name))
+      const versionTable = tables.find(table => table.name === versionTableName)
+      if (!versionTable) {
+        return apiUtil.data([])
+      }
+
+      const records = await this.queryVersionTable(
+        queryRunner,
+        versionTable,
+        query
+      )
+      const successCounts = await this.queryVersionStatusCounts(
+        queryRunner,
+        `${tablePrefix}_success`,
+        tableNames
+      )
+      const errorCounts = await this.queryVersionStatusCounts(
+        queryRunner,
+        `${tablePrefix}_error`,
+        tableNames
+      )
+      const versions: VersionListItemDto[] = records.map(record => ({
+        ...underlineToHump(record),
+        successCount: successCounts.get(Number(record.id)) ?? 0,
+        errorCount: errorCounts.get(Number(record.id)) ?? 0
+      }))
+
+      versions.sort((left, right) => {
+        const timeDiff =
+          this.toTimestamp(right.createTime) - this.toTimestamp(left.createTime)
+        return timeDiff || Number(right.id) - Number(left.id)
+      })
+
+      return apiUtil.data(versions)
+    } finally {
+      await queryRunner.release()
+    }
   }
 
   async create(req: Request, body: CreateDto) {
@@ -261,6 +313,122 @@ export class VersionService {
     } finally {
       await queryRunner.release()
     }
+  }
+
+  private async queryVersionTable(
+    queryRunner: QueryRunner,
+    table: Table,
+    query: VersionListQueryDto
+  ) {
+    const columnNames = new Set(table.columns.map(column => column.name))
+    const builder = queryRunner.manager
+      .createQueryBuilder()
+      .select('version.*')
+      .from(table.name, 'version')
+
+    builder.andWhere('version.name = :name', { name: query.name })
+    if (query.id) {
+      builder.andWhere('version.id = :id', { id: Number(query.id) })
+    }
+    if (query.ver) {
+      builder.andWhere('version.ver = :ver', {
+        ver: normalizeVersionValue(query.ver)
+      })
+    }
+    if (query.platform) {
+      builder.andWhere(
+        "FIND_IN_SET(:platform, REPLACE(version.platform, ' ', '')) > 0",
+        { platform: query.platform }
+      )
+    }
+    if (query.architecture) {
+      if (!columnNames.has('architecture')) {
+        return []
+      }
+      builder.andWhere(
+        "FIND_IN_SET(:architecture, REPLACE(version.architecture, ' ', '')) > 0",
+        { architecture: query.architecture }
+      )
+    }
+    if (query.channel) {
+      if (!columnNames.has('channel')) {
+        return []
+      }
+      builder.andWhere('version.channel = :channel', {
+        channel: query.channel
+      })
+    }
+    if (query.updateType) {
+      if (columnNames.has('update_type')) {
+        builder.andWhere('version.update_type = :updateType', {
+          updateType: query.updateType
+        })
+      } else {
+        const urlColumn =
+          query.updateType === UpdateType.Full ? 'install_url' : 'package_url'
+        if (!columnNames.has(urlColumn)) {
+          return []
+        }
+        builder.andWhere(`version.${urlColumn} IS NOT NULL`)
+        builder.andWhere(`version.${urlColumn} <> ''`)
+      }
+    }
+
+    const booleanFilters = [
+      ['enable', query.enable],
+      ['mandatory', query.mandatory],
+      ['show_dialog', query.showDialog]
+    ] as const
+    for (const [columnName, value] of booleanFilters) {
+      if (value === undefined) {
+        continue
+      }
+      if (!columnNames.has(columnName)) {
+        return []
+      }
+      builder.andWhere(`version.${columnName} = :${columnName}`, {
+        [columnName]: Number(value)
+      })
+    }
+
+    if (columnNames.has('create_time')) {
+      builder.orderBy('version.create_time', 'DESC')
+    }
+    builder.addOrderBy('version.id', 'DESC')
+
+    return builder.getRawMany<Record<string, any>>()
+  }
+
+  private async queryVersionStatusCounts(
+    queryRunner: QueryRunner,
+    tableName: string,
+    tableNames: Set<string>
+  ) {
+    const counts = new Map<number, number>()
+    if (!tableNames.has(tableName)) {
+      return counts
+    }
+
+    const records = await queryRunner.manager
+      .createQueryBuilder()
+      .select('status.ver_id', 'verId')
+      .addSelect('COUNT(*)', 'count')
+      .from(tableName, 'status')
+      .groupBy('status.ver_id')
+      .getRawMany<{ verId: string | number; count: string | number }>()
+
+    for (const record of records) {
+      counts.set(Number(record.verId), Number(record.count))
+    }
+    return counts
+  }
+
+  private toTimestamp(value?: Date | string) {
+    if (!value) {
+      return 0
+    }
+    const timestamp = new Date(value).getTime()
+    return Number.isNaN(timestamp) ? 0 : timestamp
   }
 
   private async insertIntoDynamicTable(

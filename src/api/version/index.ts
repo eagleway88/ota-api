@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common'
+import { Body, Controller, Get, HttpStatus, Post, Query } from '@nestjs/common'
 import { Req, UploadedFile, UseInterceptors } from '@nestjs/common'
 import { ApiBearerAuth, ApiConsumes } from '@nestjs/swagger'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
@@ -6,13 +6,22 @@ import type { Request } from 'express'
 import { VersionService } from './version.service'
 import { ApiResult, Public } from '@/decorators'
 import { FileInterceptor } from '@nestjs/platform-express'
-import { AppErrorLogDto, CheckDto, CreateDto, } from './version.dto'
+import { AppErrorLogDto, CheckDto, CreateDto } from './version.dto'
 import { ErrorDto, VersionDto, SuccessDto, UploadDto } from './version.dto'
+import { VersionListItemDto, VersionListQueryDto } from './version.dto'
 
 @ApiTags('version')
 @Controller('version')
 export class VersionController {
-  constructor(private readonly service: VersionService) { }
+  constructor(private readonly service: VersionService) {}
+
+  @Get('list')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '获取所有版本数据' })
+  @ApiResult({ type: [VersionListItemDto], status: HttpStatus.OK })
+  list(@Query() query: VersionListQueryDto) {
+    return this.service.list(query)
+  }
 
   @Public()
   @Post('check')
