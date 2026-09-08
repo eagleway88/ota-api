@@ -1,4 +1,5 @@
 import { IsString, IsNumber, IsNotEmpty, IsOptional } from 'class-validator'
+import { IsEnum, IsIn, IsNumberString, Matches } from 'class-validator'
 import { ApiProperty, OmitType } from '@nestjs/swagger'
 
 export enum PlatformType {
@@ -66,6 +67,74 @@ export class VersionDto {
   channel?: string
   /** 更新类型(full=全量更新 hot=热更新) */
   updateType?: UpdateType
+}
+
+export class VersionListQueryDto {
+  /** 应用名称 */
+  @IsString()
+  @IsNotEmpty()
+  name: string
+
+  /** 版本表记录ID */
+  @IsOptional()
+  @IsNumberString()
+  id?: string
+
+  /** 版本号，支持100或1.0.0 */
+  @IsOptional()
+  @Matches(/^\d+(?:\.\d+)*$/)
+  ver?: string
+
+  /** 平台 */
+  @IsOptional()
+  @IsString()
+  platform?: string
+
+  /** 架构 */
+  @IsOptional()
+  @IsString()
+  architecture?: string
+
+  /** 渠道 */
+  @IsOptional()
+  @IsString()
+  channel?: string
+
+  /** 更新类型 */
+  @IsOptional()
+  @IsEnum(UpdateType)
+  updateType?: UpdateType
+
+  /** 是否启用 */
+  @IsOptional()
+  @IsIn(['0', '1'])
+  enable?: string
+
+  /** 是否强制更新 */
+  @IsOptional()
+  @IsIn(['0', '1'])
+  mandatory?: string
+
+  /** 是否显示弹窗 */
+  @IsOptional()
+  @IsIn(['0', '1'])
+  showDialog?: string
+}
+
+export class VersionListItemDto extends VersionDto {
+  /** 创建IP */
+  ip?: string
+
+  /** 创建时间 */
+  createTime?: Date | string
+
+  /** 安装成功上报总数 */
+  @IsNumber()
+  successCount: number
+
+  /** 安装失败上报总数 */
+  @IsNumber()
+  errorCount: number
 }
 
 export class StatusDto {

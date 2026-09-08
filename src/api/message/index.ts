@@ -1,5 +1,5 @@
-import { Body, Controller, Post, Req } from '@nestjs/common'
-import { ApiOperation, ApiTags } from '@nestjs/swagger'
+import { Body, Controller, Get, HttpStatus, Post, Req } from '@nestjs/common'
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { ApiResult, Public } from '@/decorators'
 import { MessageService } from './message.service'
 import { SendGlobalDto, SendOtaNameDto } from './message.dto'
@@ -10,7 +10,15 @@ import type { Request } from 'express'
 @ApiTags('message')
 @Controller('message')
 export class MessageController {
-  constructor(private readonly service: MessageService) { }
+  constructor(private readonly service: MessageService) {}
+
+  @Get('user-id-subscriptions')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '获取所有userId订阅' })
+  @ApiResult({ type: [String], status: HttpStatus.OK })
+  listSubscribedUserIds() {
+    return this.service.listSubscribedUserIds()
+  }
 
   @Public()
   @Post('send-global')

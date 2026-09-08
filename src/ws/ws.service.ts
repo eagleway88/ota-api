@@ -4,7 +4,11 @@ import { SubscribeMessage } from '@nestjs/websockets'
 import { OtaVersionQueryService } from '@/api/version/ota-version-query.service'
 import { Server, Socket } from 'socket.io'
 import { LastMessageService } from '@/api/message/last-message.service'
-import { AckUniqueIdDto, AckUserIdDto, TargetedMessageEnvelope } from '@/api/message/message.dto'
+import {
+  AckUniqueIdDto,
+  AckUserIdDto,
+  TargetedMessageEnvelope
+} from '@/api/message/message.dto'
 
 type OtaNameMessage = {
   otaName: string
@@ -67,7 +71,7 @@ export class WsService {
   constructor(
     private readonly otaVersionQueryService: OtaVersionQueryService,
     private readonly lastMessageService: LastMessageService
-  ) { }
+  ) {}
 
   handleConnection(client: Socket) {
     this.logger.log(`client connected: ${client.id}`)
@@ -107,6 +111,27 @@ export class WsService {
     return this.server.to(this.getUniqueIdRoom(uniqueId)).emit(uniqueId, data)
   }
 
+  async getSubscribedUserIds() {
+    const roomPrefix = 'userId:'
+    const userIds = new Set<string>()
+    const sockets = await this.server.fetchSockets()
+
+    for (const socket of sockets) {
+      for (const room of socket.rooms) {
+        if (room.startsWith(roomPrefix)) {
+          const userId = room.slice(roomPrefix.length)
+          if (userId) {
+            userIds.add(userId)
+          }
+        }
+      }
+    }
+
+    return Array.from(userIds).sort((left, right) => {
+      return left.localeCompare(right)
+    })
+  }
+
   @SubscribeMessage('userId:subscribe')
   async handleUserIdSubscribe(
     client: Socket,
@@ -119,12 +144,17 @@ export class WsService {
     await client.join(this.getUserIdRoom(data.userId))
 
     try {
-      const msg = await this.lastMessageService.queryUserId({ userId: data.userId })
+      const msg = await this.lastMessageService.queryUserId({
+        userId: data.userId
+      })
       if (msg) {
         client.emit(data.userId, msg)
       }
     } catch (error) {
-      this.logger.error(`userId replay failed: ${data.userId}`, error instanceof Error ? error.stack : undefined)
+      this.logger.error(
+        `userId replay failed: ${data.userId}`,
+        error instanceof Error ? error.stack : undefined
+      )
     }
 
     return { uid: data.userId }
@@ -155,12 +185,17 @@ export class WsService {
     await client.join(this.getUniqueIdRoom(data.uniqueId))
 
     try {
-      const msg = await this.lastMessageService.queryUniqueId({ uniqueId: data.uniqueId })
+      const msg = await this.lastMessageService.queryUniqueId({
+        uniqueId: data.uniqueId
+      })
       if (msg) {
         client.emit(data.uniqueId, msg)
       }
     } catch (error) {
-      this.logger.error(`uniqueId replay failed: ${data.uniqueId}`, error instanceof Error ? error.stack : undefined)
+      this.logger.error(
+        `uniqueId replay failed: ${data.uniqueId}`,
+        error instanceof Error ? error.stack : undefined
+      )
     }
 
     return { uniqueId: data.uniqueId }
@@ -191,19 +226,23 @@ export class WsService {
     await client.join(this.getOtaNameRoom(data.otaName))
 
     try {
-      const latestOtaMessage = await this.otaVersionQueryService.findLatestAvailableVersion({
-        name: data.otaName,
-        platform: data.platform!,
-        architecture: data.architecture,
-        channel: data.channel,
-        ver: data.ver!,
-        id: data.id
-      })
+      const latestOtaMessage =
+        await this.otaVersionQueryService.findLatestAvailableVersion({
+          name: data.otaName,
+          platform: data.platform!,
+          architecture: data.architecture,
+          channel: data.channel,
+          ver: data.ver!,
+          id: data.id
+        })
       if (latestOtaMessage) {
         client.emit(data.otaName, latestOtaMessage)
       }
     } catch (error) {
-      this.logger.error(`otaName replay failed: ${data.otaName}`, error instanceof Error ? error.stack : undefined)
+      this.logger.error(
+        `otaName replay failed: ${data.otaName}`,
+        error instanceof Error ? error.stack : undefined
+      )
     }
 
     return { ota: data.otaName }
