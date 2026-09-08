@@ -111,14 +111,14 @@ export class WsService {
     return this.server.to(this.getUniqueIdRoom(uniqueId)).emit(uniqueId, data)
   }
 
-  async getSubscribedUserIds() {
+  async getSubscribedUserIds(name?: string) {
     const roomPrefix = 'userId:'
     const userIds = new Set<string>()
     const sockets = await this.server.fetchSockets()
 
     for (const socket of sockets) {
       for (const room of socket.rooms) {
-        if (room.startsWith(roomPrefix)) {
+        if (room.startsWith(roomPrefix) && (!name || room.includes(name))) {
           const userId = room.slice(roomPrefix.length)
           if (userId) {
             userIds.add(userId)

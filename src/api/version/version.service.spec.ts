@@ -13,6 +13,9 @@ function createQueryBuilder(result: Record<string, any>[]) {
     groupBy: jest.fn(),
     orderBy: jest.fn(),
     addOrderBy: jest.fn(),
+    skip: jest.fn(),
+    take: jest.fn(),
+    getCount: jest.fn().mockResolvedValue(result.length),
     getRawMany: jest.fn().mockResolvedValue(result)
   }
 
@@ -23,7 +26,9 @@ function createQueryBuilder(result: Record<string, any>[]) {
     'andWhere',
     'groupBy',
     'orderBy',
-    'addOrderBy'
+    'addOrderBy',
+    'skip',
+    'take'
   ] as const) {
     builder[method].mockReturnValue(builder)
   }
@@ -77,31 +82,37 @@ describe('VersionService.list', () => {
     )
 
     await expect(
-      service.list({
-        name: 'desktop-app',
+      service.list('desktop-app', {
+        page: 2,
+        pageSize: 10,
         ver: '1.0.0',
         platform: 'windows',
         enable: '1'
       })
     ).resolves.toEqual({
       code: 0,
-      data: [
-        {
-          id: 1000,
-          name: 'desktop-app',
-          ver: 100,
-          platform: 'windows,linux',
-          createTime: '2026-09-08T10:00:00.000Z',
-          successCount: 3,
-          errorCount: 2
-        }
-      ]
+      data: {
+        data: [
+          {
+            id: 1000,
+            name: 'desktop-app',
+            ver: 100,
+            platform: 'windows,linux',
+            createTime: '2026-09-08T10:00:00.000Z',
+            successCount: 3,
+            errorCount: 2
+          }
+        ],
+        total: 1
+      }
     })
 
     expect(versionBuilder.andWhere).toHaveBeenCalledWith(
       'version.name = :name',
       { name: 'desktop-app' }
     )
+    expect(versionBuilder.skip).toHaveBeenCalledWith(10)
+    expect(versionBuilder.take).toHaveBeenCalledWith(10)
     expect(versionBuilder.andWhere).toHaveBeenCalledWith('version.ver = :ver', {
       ver: 100
     })

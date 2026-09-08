@@ -1,5 +1,6 @@
 import { IsString, IsNumber, IsNotEmpty, IsOptional } from 'class-validator'
-import { IsEnum, IsIn, IsNumberString, Matches } from 'class-validator'
+import { IsEnum, IsIn, IsInt, IsNumberString, Matches } from 'class-validator'
+import { Min } from 'class-validator'
 import { ApiProperty, OmitType } from '@nestjs/swagger'
 
 export enum PlatformType {
@@ -70,10 +71,17 @@ export class VersionDto {
 }
 
 export class VersionListQueryDto {
-  /** 应用名称 */
-  @IsString()
-  @IsNotEmpty()
-  name: string
+  /** 页码 */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  page?: number
+
+  /** 每页数量 */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  pageSize?: number
 
   /** 版本表记录ID */
   @IsOptional()

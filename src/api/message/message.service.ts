@@ -55,8 +55,8 @@ export class MessageService {
     return apiUtil.data('success')
   }
 
-  async listSubscribedUserIds() {
-    return apiUtil.data(await this.wsService.getSubscribedUserIds())
+  async listSubscribedUserIds(name?: string) {
+    return apiUtil.data(await this.wsService.getSubscribedUserIds(name))
   }
 
   async sendOtaName(req: Request, body: SendOtaNameDto) {
