@@ -29,12 +29,12 @@ export class VersionService {
     this.updater = new UpdaterUtil(this.configService)
   }
 
-  async list(query: VersionListQueryDto) {
+  async list(name: string, query: VersionListQueryDto) {
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
 
     try {
-      const versionTableName = createVersionTable(query.name).name
+      const versionTableName = createVersionTable(name).name
       const tablePrefix = versionTableName.slice(0, -'_version'.length)
       const tables = await queryRunner.getTables([
         versionTableName,
@@ -44,12 +44,13 @@ export class VersionService {
       const tableNames = new Set(tables.map(table => table.name))
       const versionTable = tables.find(table => table.name === versionTableName)
       if (!versionTable) {
-        return apiUtil.data([])
+        return apiUtil.page([], 0)
       }
 
-      const records = await this.queryVersionTable(
+      const { records, total } = await this.queryVersionTable(
         queryRunner,
         versionTable,
+        name,
         query
       )
       const successCounts = await this.queryVersionStatusCounts(
@@ -74,7 +75,7 @@ export class VersionService {
         return timeDiff || Number(right.id) - Number(left.id)
       })
 
-      return apiUtil.data(versions)
+      return apiUtil.page(versions, total)
     } finally {
       await queryRunner.release()
     }
@@ -318,6 +319,7 @@ export class VersionService {
   private async queryVersionTable(
     queryRunner: QueryRunner,
     table: Table,
+    name: string,
     query: VersionListQueryDto
   ) {
     const columnNames = new Set(table.columns.map(column => column.name))
@@ -326,7 +328,7 @@ export class VersionService {
       .select('version.*')
       .from(table.name, 'version')
 
-    builder.andWhere('version.name = :name', { name: query.name })
+    builder.andWhere('version.name = :name', { name })
     if (query.id) {
       builder.andWhere('version.id = :id', { id: Number(query.id) })
     }
@@ -343,7 +345,7 @@ export class VersionService {
     }
     if (query.architecture) {
       if (!columnNames.has('architecture')) {
-        return []
+        return { records: [], total: 0 }
       }
       builder.andWhere(
         "FIND_IN_SET(:architecture, REPLACE(version.architecture, ' ', '')) > 0",
@@ -352,7 +354,7 @@ export class VersionService {
     }
     if (query.channel) {
       if (!columnNames.has('channel')) {
-        return []
+        return { records: [], total: 0 }
       }
       builder.andWhere('version.channel = :channel', {
         channel: query.channel
@@ -367,7 +369,7 @@ export class VersionService {
         const urlColumn =
           query.updateType === UpdateType.Full ? 'install_url' : 'package_url'
         if (!columnNames.has(urlColumn)) {
-          return []
+          return { records: [], total: 0 }
         }
         builder.andWhere(`version.${urlColumn} IS NOT NULL`)
         builder.andWhere(`version.${urlColumn} <> ''`)
@@ -384,7 +386,7 @@ export class VersionService {
         continue
       }
       if (!columnNames.has(columnName)) {
-        return []
+        return { records: [], total: 0 }
       }
       builder.andWhere(`version.${columnName} = :${columnName}`, {
         [columnName]: Number(value)
@@ -396,7 +398,15 @@ export class VersionService {
     }
     builder.addOrderBy('version.id', 'DESC')
 
-    return builder.getRawMany<Record<string, any>>()
+    const page = query.page ?? 1
+    const pageSize = query.pageSize ?? 20
+    const total = await builder.getCount()
+    const records = await builder
+      .skip((page - 1) * pageSize)
+      .take(pageSize)
+      .getRawMany<Record<string, any>>()
+
+    return { records, total }
   }
 
   private async queryVersionStatusCounts(
