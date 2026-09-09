@@ -325,7 +325,6 @@ export class VersionService {
     const columnNames = new Set(table.columns.map(column => column.name))
     const builder = queryRunner.manager
       .createQueryBuilder()
-      .select('version.*')
       .from(table.name, 'version')
 
     builder.andWhere('version.name = :name', { name })
@@ -393,14 +392,19 @@ export class VersionService {
       })
     }
 
+    const page = query.page ?? 1
+    const pageSize = query.pageSize ?? 20
+    const countResult = await builder
+      .select('COUNT(*)', 'total')
+      .getRawOne<{ total: string | number }>()
+    const total = Number(countResult?.total ?? 0)
+
+    builder.select('version.*')
     if (columnNames.has('create_time')) {
       builder.orderBy('version.create_time', 'DESC')
     }
     builder.addOrderBy('version.id', 'DESC')
 
-    const page = query.page ?? 1
-    const pageSize = query.pageSize ?? 20
-    const total = await builder.getCount()
     const records = await builder
       .skip((page - 1) * pageSize)
       .take(pageSize)
