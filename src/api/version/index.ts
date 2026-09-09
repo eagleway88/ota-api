@@ -23,8 +23,12 @@ export class VersionController {
     isPage: true,
     status: HttpStatus.OK
   })
-  list(@Param('name') name: string, @Body() body: VersionListQueryDto) {
-    return this.service.list(name, body)
+  list(
+    @Req() req: Request,
+    @Param('name') name: string,
+    @Body() body: VersionListQueryDto
+  ) {
+    return this.service.list(req, name, body)
   }
 
   @Public()

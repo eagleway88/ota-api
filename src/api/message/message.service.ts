@@ -9,7 +9,7 @@ import {
 import { SendUserIdDto, SendUniqueIdDto } from './message.dto'
 import { Request } from 'express'
 import { ConfigService } from '@nestjs/config'
-import { fetchIP } from '@/utils'
+import { isRequestIpAllowed } from '@/utils'
 import { LastMessageService } from './last-message.service'
 
 @Injectable()
@@ -21,12 +21,8 @@ export class MessageService {
   ) {}
 
   private checkPermission(req: Request) {
-    const ip = fetchIP(req)
     const ips = this.configService.get<string>('IPS')
-    if (ips && !ips.includes(ip)) {
-      return false
-    }
-    return true
+    return isRequestIpAllowed(req, ips)
   }
 
   private getResendTtlMs() {
@@ -55,7 +51,10 @@ export class MessageService {
     return apiUtil.data('success')
   }
 
-  async listSubscribedUserIds(name?: string) {
+  async listSubscribedUserIds(req: Request, name?: string) {
+    if (!this.checkPermission(req)) {
+      return apiUtil.error('Permission denied')
+    }
     return apiUtil.data(await this.wsService.getSubscribedUserIds(name))
   }
 

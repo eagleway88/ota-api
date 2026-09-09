@@ -8,7 +8,7 @@ import {
   Req
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
-import { ApiResult, Public } from '@/decorators'
+import { ApiResult } from '@/decorators'
 import { MessageService } from './message.service'
 import { SendGlobalDto, SendOtaNameDto } from './message.dto'
 import { SendUserIdDto, SendUniqueIdDto } from './message.dto'
@@ -16,20 +16,19 @@ import { SendUserIdRes, SendUniqueIdRes } from './message.dto'
 import type { Request } from 'express'
 
 @ApiTags('message')
+@ApiBearerAuth()
 @Controller('message')
 export class MessageController {
   constructor(private readonly service: MessageService) {}
 
   @Get('user-id-subscriptions')
-  @ApiBearerAuth()
   @ApiOperation({ summary: '获取所有userId订阅' })
   @ApiQuery({ name: 'name', required: false, type: String })
   @ApiResult({ type: [String], status: HttpStatus.OK })
-  listSubscribedUserIds(@Query('name') name?: string) {
-    return this.service.listSubscribedUserIds(name)
+  listSubscribedUserIds(@Req() req: Request, @Query('name') name?: string) {
+    return this.service.listSubscribedUserIds(req, name)
   }
 
-  @Public()
   @Post('send-global')
   @ApiOperation({ summary: '发送全局通知' })
   @ApiResult({ type: String })
@@ -37,7 +36,6 @@ export class MessageController {
     return this.service.sendGlobal(req, body)
   }
 
-  @Public()
   @Post('send-ota-name')
   @ApiOperation({ summary: '发送OTA通知' })
   @ApiResult({ type: String })
@@ -45,7 +43,6 @@ export class MessageController {
     return this.service.sendOtaName(req, body)
   }
 
-  @Public()
   @Post('send-user-id')
   @ApiOperation({ summary: '发送特定用户通知' })
   @ApiResult({ type: SendUserIdRes })
@@ -53,7 +50,6 @@ export class MessageController {
     return this.service.sendUserId(req, body)
   }
 
-  @Public()
   @Post('send-unique-id')
   @ApiOperation({ summary: '发送特定设备通知' })
   @ApiResult({ type: SendUniqueIdRes })

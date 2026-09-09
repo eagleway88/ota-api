@@ -11,7 +11,12 @@ import { createAppErrorLogTable, createErrorTable } from '@/utils/version'
 import { createSuccessTable, createVersionTable } from '@/utils/version'
 import { VERSION_TABLE_AUTO_INCREMENT_START } from '@/utils/version'
 import { normalizeVersionList, normalizeVersionValue } from '@/utils/version'
-import { fetchIP, humpToUnderline, underlineToHump } from '@/utils'
+import {
+  fetchIP,
+  humpToUnderline,
+  isRequestIpAllowed,
+  underlineToHump
+} from '@/utils'
 import { AppErrorLogDto, CheckDto, CreateDto } from './version.dto'
 import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
 import { VersionListItemDto, VersionListQueryDto } from './version.dto'
@@ -29,7 +34,11 @@ export class VersionService {
     this.updater = new UpdaterUtil(this.configService)
   }
 
-  async list(name: string, query: VersionListQueryDto) {
+  async list(req: Request, name: string, query: VersionListQueryDto) {
+    if (!isRequestIpAllowed(req, this.configService.get<string>('IPS'))) {
+      return apiUtil.error('Permission denied')
+    }
+
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
 

@@ -3,6 +3,7 @@ import { DataSource, QueryRunner } from 'typeorm'
 import { createErrorTable, createSuccessTable } from '@/utils/version'
 import { createVersionTable } from '@/utils/version'
 import { VersionService } from './version.service'
+import type { Request } from 'express'
 
 function createQueryBuilder(result: Record<string, any>[]) {
   const builder = {
@@ -82,7 +83,7 @@ describe('VersionService.list', () => {
     )
 
     await expect(
-      service.list('desktop-app', {
+      service.list({ headers: {}, ip: '127.0.0.1' } as Request, 'desktop-app', {
         page: 2,
         pageSize: 10,
         ver: '1.0.0',

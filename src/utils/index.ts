@@ -5,6 +5,7 @@ function normalizeIpAddress(value?: string) {
   if (!value) return ''
   let ip = value.split(',')[0]?.trim() ?? ''
   if (!ip) return ''
+  if (ip === 'localhost') return ip
 
   const bracketIpv6 = /^\[(.*)\]:(\d+)$/.exec(ip)
   if (bracketIpv6?.[1]) {
@@ -36,6 +37,19 @@ export function fetchIP(req: Request) {
   if (xForwardedFor) return xForwardedFor
 
   return normalizeIpAddress(req.ip)
+}
+
+export function isRequestIpAllowed(req: Request, ips?: string) {
+  if (!ips?.trim()) return true
+
+  const requestIp = fetchIP(req)
+  if (!requestIp) return false
+
+  return ips
+    .split(',')
+    .map(normalizeIpAddress)
+    .filter(Boolean)
+    .includes(requestIp)
 }
 
 /**
