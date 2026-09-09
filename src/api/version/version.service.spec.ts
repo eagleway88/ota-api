@@ -15,7 +15,7 @@ function createQueryBuilder(result: Record<string, any>[]) {
     addOrderBy: jest.fn(),
     skip: jest.fn(),
     take: jest.fn(),
-    getCount: jest.fn().mockResolvedValue(result.length),
+    getRawOne: jest.fn().mockResolvedValue({ total: String(result.length) }),
     getRawMany: jest.fn().mockResolvedValue(result)
   }
 
@@ -120,6 +120,12 @@ describe('VersionService.list', () => {
       'version.enable = :enable',
       { enable: 1 }
     )
+    expect(versionBuilder.select).toHaveBeenNthCalledWith(
+      1,
+      'COUNT(*)',
+      'total'
+    )
+    expect(versionBuilder.select).toHaveBeenNthCalledWith(2, 'version.*')
     expect(queryRunner.release).toHaveBeenCalled()
   })
 })
