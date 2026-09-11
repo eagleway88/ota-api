@@ -8,6 +8,7 @@
   "scripts": {
     "build": "rimraf dist && nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "test": "jest",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
@@ -36,6 +37,7 @@
     "mysql2": "^3.20.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "socket.io": "^4.8.3",
     "typeorm": "^0.3.28"
   },
   "devDependencies": {
@@ -75,6 +77,9 @@
     ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/$1"
+    },
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },

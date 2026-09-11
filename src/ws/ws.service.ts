@@ -20,7 +20,7 @@ type OtaNameMessage = {
 }
 
 type UserIdMessage = {
-  /** 可能会有多个项目对接，所以userId最好等于`otaName_userId`这样的形式订阅 */
+  /** 使用 `otaName:platform:userId` 形式区分应用和平台。 */
   userId: string
 }
 
@@ -113,16 +113,19 @@ export class WsService {
 
   async getSubscribedUserIds(name?: string) {
     const roomPrefix = 'userId:'
+    const namePrefix = name ? `${name}:` : undefined
     const userIds = new Set<string>()
     const sockets = await this.server.fetchSockets()
 
     for (const socket of sockets) {
       for (const room of socket.rooms) {
-        if (room.startsWith(roomPrefix) && (!name || room.includes(name))) {
-          const userId = room.slice(roomPrefix.length)
-          if (userId) {
-            userIds.add(userId)
-          }
+        if (!room.startsWith(roomPrefix)) {
+          continue
+        }
+
+        const userId = room.slice(roomPrefix.length)
+        if (userId && (!namePrefix || userId.startsWith(namePrefix))) {
+          userIds.add(userId)
         }
       }
     }

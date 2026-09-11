@@ -18,24 +18,29 @@ describe('WsService.getSubscribedUserIds', () => {
     ])
   })
 
-  it('only returns subscription rooms containing the provided name', async () => {
+  it('only returns subscriptions with the exact application prefix', async () => {
     const service = new WsService({} as never, {} as never)
     service.server = {
       fetchSockets: jest.fn().mockResolvedValue([
         {
           rooms: new Set([
             'socket-1',
-            'userId:desktop_user-a',
-            'userId:mobile_user-b'
+            'userId:eagleway-network:windows:1',
+            'userId:eagleway-network-dev:windows:2',
+            'userId:other:eagleway-network:3'
           ])
         },
-        { rooms: new Set(['socket-2', 'userId:desktop_user-c']) }
+        {
+          rooms: new Set(['socket-2', 'userId:eagleway-network:android:4'])
+        }
       ])
     } as never
 
-    await expect(service.getSubscribedUserIds('desktop')).resolves.toEqual([
-      'desktop_user-a',
-      'desktop_user-c'
+    await expect(
+      service.getSubscribedUserIds('eagleway-network')
+    ).resolves.toEqual([
+      'eagleway-network:android:4',
+      'eagleway-network:windows:1'
     ])
   })
 })

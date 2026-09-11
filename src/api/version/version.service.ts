@@ -21,6 +21,7 @@ import { AppErrorLogDto, CheckDto, CreateDto } from './version.dto'
 import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
 import { VersionListItemDto, VersionListQueryDto } from './version.dto'
 import { WsService } from '@/ws/ws.service'
+import { otaUploadMaxBytes, validateOtaUpload } from './upload-policy'
 
 @Injectable()
 export class VersionService {
@@ -147,9 +148,17 @@ export class VersionService {
     )
   }
 
-  async upload(req: Request, file: any, body: UploadDto) {
+  async upload(req: Request, file: Express.Multer.File, body: UploadDto) {
     if (!file) {
       return apiUtil.error('File is required')
+    }
+
+    const uploadError = validateOtaUpload(
+      file,
+      otaUploadMaxBytes(this.configService.get('OTA_UPLOAD_MAX_BYTES'))
+    )
+    if (uploadError) {
+      return apiUtil.error(uploadError)
     }
 
     const normalizedVer = normalizeVersionValue(body.ver)
