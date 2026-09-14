@@ -16,7 +16,7 @@
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "typeorm:gen": "rimraf ./src/migrations/*.ts && npx typeorm-ts-node-commonjs migration:generate ./src/migrations/init -d ./src/typeorm.ts",
     "typeorm:run": "npx typeorm-ts-node-commonjs migration:run -d ./src/typeorm.ts",
-    "pm2": "pnpm build && pm2 startOrReload ecosystem.config.cjs --update-env"
+    "pm2": "pnpm build && pm2 startOrReload ecosystem.config.js --update-env"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
