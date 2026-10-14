@@ -181,7 +181,7 @@ export class VersionService {
         createTime: new Date()
       }
     )
-    if (created) await this.wsService.sendOtaNameMessage(body.name, created)
+    // if (created) await this.wsService.sendOtaNameMessage(body.name, created)
     return apiUtil.data(created)
   }
 
