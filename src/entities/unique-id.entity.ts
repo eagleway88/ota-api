@@ -20,7 +20,7 @@ export class UniqueIdMessage {
 
   @Column('text', {
     name: 'content',
-    comment: 'content',
+    comment: 'content'
   })
   content: string
 

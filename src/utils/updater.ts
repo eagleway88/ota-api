@@ -30,10 +30,10 @@ export class UpdaterUtil {
     }
     const suffix = file.originalname.split('.').pop()
     const filrName = `${createHash('md5').update(`${Date.now()}`).digest('hex')}.${suffix}`
-    const ossDir = this.configService.get('OSS_DIR') || ''
-    const ossUrl = this.configService.get('OSS_URL') || ''
+    const ossDir = this.configService.get<string>('OSS_DIR') || ''
+    const ossUrl = this.configService.get<string>('OSS_URL') || ''
     const ossPath = join(ossDir, dir, filrName)
-    const [err, res] = await to(
+    const [err, res] = await to<AliOSS.PutObjectResult>(
       this.oss.put(ossPath, file.buffer, { timeout: 600000 })
     )
     if (err || res?.res.status !== 200) {

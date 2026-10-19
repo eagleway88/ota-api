@@ -57,9 +57,10 @@ describe('VersionService.list', () => {
         .mockReturnValueOnce(successBuilder)
         .mockReturnValueOnce(errorBuilder)
     }
+    const release = jest.fn()
     const queryRunner = {
       connect: jest.fn(),
-      release: jest.fn(),
+      release,
       getTables: jest
         .fn()
         .mockResolvedValue([
@@ -122,6 +123,6 @@ describe('VersionService.list', () => {
       'total'
     )
     expect(versionBuilder.select).toHaveBeenNthCalledWith(2, 'version.*')
-    expect(queryRunner.release).toHaveBeenCalled()
+    expect(release).toHaveBeenCalled()
   })
 })

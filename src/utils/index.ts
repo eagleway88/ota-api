@@ -64,19 +64,19 @@ export async function to<T, U = Error>(
     })
 }
 
-function isPlainObject(value: unknown): value is Record<string, any> {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (Object.prototype.toString.call(value) !== '[object Object]') {
     return false
   }
 
-  const prototype = Object.getPrototypeOf(value)
+  const prototype = Object.getPrototypeOf(value) as unknown
   return prototype === Object.prototype || prototype === null
 }
 
 /**
  * 下划线转驼峰 (CamelCase)
  */
-export function underlineToHump(obj: any) {
+export function underlineToHump(obj: unknown): unknown {
   if (obj === null || obj === undefined) return obj
 
   // 递归处理数组或对象
@@ -86,9 +86,11 @@ export function underlineToHump(obj: any) {
 
   if (!isPlainObject(obj)) return obj
 
-  return Object.keys(obj).reduce((newObj, key) => {
+  return Object.keys(obj).reduce<Record<string, unknown>>((newObj, key) => {
     // 使用正则匹配下划线，将其后第一个字母转为大写
-    let newKey = key.replace(/_(\w)/g, (all, letter) => letter.toUpperCase())
+    const newKey = key.replace(/_(\w)/g, (_, letter: string) =>
+      letter.toUpperCase()
+    )
     newObj[newKey] = underlineToHump(obj[key]) // 递归
     return newObj
   }, {})
@@ -97,7 +99,7 @@ export function underlineToHump(obj: any) {
 /**
  * 驼峰转下划线 (SnakeCase)
  */
-export function humpToUnderline(obj: any) {
+export function humpToUnderline(obj: unknown): unknown {
   if (obj === null || obj === undefined) return obj
 
   if (Array.isArray(obj)) {
@@ -106,9 +108,9 @@ export function humpToUnderline(obj: any) {
 
   if (!isPlainObject(obj)) return obj
 
-  return Object.keys(obj).reduce((newObj, key) => {
+  return Object.keys(obj).reduce<Record<string, unknown>>((newObj, key) => {
     // 使用正则匹配大写字母，并在其前添加下划线
-    let newKey = key.replace(/([A-Z])/g, '_$1').toLowerCase()
+    const newKey = key.replace(/([A-Z])/g, '_$1').toLowerCase()
     newObj[newKey] = humpToUnderline(obj[key]) // 递归
     return newObj
   }, {})

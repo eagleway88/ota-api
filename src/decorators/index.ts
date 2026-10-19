@@ -22,7 +22,7 @@ interface IApiResult<TModel extends Type> {
  * @example `@ApiResult({type: [A]})`
  */
 export const ApiResult = <TModel extends Type>(params: IApiResult<TModel>) => {
-  let prop: any = null
+  let prop: Record<string, unknown>
   const model = Array.isArray(params.type) ? params.type[0] : params.type
 
   if (params.isPage) {

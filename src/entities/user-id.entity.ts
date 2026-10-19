@@ -18,7 +18,7 @@ export class UserIdMessage {
 
   @Column('text', {
     name: 'content',
-    comment: 'content',
+    comment: 'content'
   })
   content: string
 

@@ -82,11 +82,14 @@ export class VersionService {
         `${physicalTablePrefix}_error`,
         tableNames
       )
-      const versions: VersionListItemDto[] = records.map(record => ({
-        ...underlineToHump(record),
-        successCount: successCounts.get(Number(record.id)) ?? 0,
-        errorCount: errorCounts.get(Number(record.id)) ?? 0
-      }))
+      const versions: VersionListItemDto[] = records.map(record => {
+        const normalized = underlineToHump(record) as Record<string, unknown>
+        return {
+          ...normalized,
+          successCount: successCounts.get(Number(record.id)) ?? 0,
+          errorCount: errorCounts.get(Number(record.id)) ?? 0
+        } as unknown as VersionListItemDto
+      })
 
       versions.sort((left, right) => {
         const timeDiff =
@@ -276,11 +279,7 @@ export class VersionService {
         }
       )
 
-      return apiUtil.data(
-        this.serializeLegacyStatusRecord(
-          updated as unknown as Record<string, unknown>
-        )
-      )
+      return apiUtil.data(this.serializeLegacyStatusRecord(updated))
     }
 
     const created = await this.insertStatusReport(
@@ -332,9 +331,13 @@ export class VersionService {
         .select('*')
         .from(table.name, table.name)
         .where('error_hash = :errorHash', { errorHash })
-        .getRawOne()
+        .getRawOne<Record<string, unknown>>()
 
       if (existing) {
+        const existingId = Number(existing.id)
+        if (!Number.isSafeInteger(existingId)) {
+          throw new Error('Stored application error ID is invalid')
+        }
         const updatePayload = this.prepareDynamicPayload(table, {
           ip: fetchIP(req),
           extras,
@@ -348,12 +351,12 @@ export class VersionService {
           .createQueryBuilder()
           .update(table.name)
           .set(updatePayload)
-          .where('id = :id', { id: existing.id })
+          .where('id = :id', { id: existingId })
           .execute()
 
         await queryRunner.manager.increment(
           table.name,
-          { id: existing.id },
+          { id: existingId },
           'report_count',
           1
         )
@@ -362,15 +365,12 @@ export class VersionService {
           .createQueryBuilder()
           .select('*')
           .from(table.name, table.name)
-          .where('id = :id', { id: existing.id })
-          .getRawOne()
+          .where('id = :id', { id: existingId })
+          .getRawOne<Record<string, unknown>>()
 
         return apiUtil.data(
           this.serializeLegacyStatusRecord(
-            this.normalizeDynamicResult(table, updated ?? existing) as Record<
-              string,
-              unknown
-            >
+            this.normalizeDynamicResult(table, updated ?? existing)
           )
         )
       }
@@ -392,11 +392,7 @@ export class VersionService {
         }
       )
 
-      return apiUtil.data(
-        this.serializeLegacyStatusRecord(
-          created as unknown as Record<string, unknown>
-        )
-      )
+      return apiUtil.data(this.serializeLegacyStatusRecord(created))
     } finally {
       if (errorLockAcquired && errorLockName) {
         await queryRunner.query('SELECT RELEASE_LOCK(?)', [errorLockName])
@@ -422,7 +418,7 @@ export class VersionService {
         .select('id')
         .from(table.name, 'version')
         .where('id = :id', { id })
-        .getRawOne()
+        .getRawOne<{ id: number | string }>()
 
       if (!version) {
         return apiUtil.error('Version does not exist')
@@ -524,7 +520,7 @@ export class VersionService {
     const records = await builder
       .skip((page - 1) * pageSize)
       .take(pageSize)
-      .getRawMany<Record<string, any>>()
+      .getRawMany<Record<string, unknown>>()
 
     return { records, total }
   }
@@ -563,8 +559,8 @@ export class VersionService {
 
   private async insertIntoDynamicTable(
     table: Table,
-    payload: Record<string, any>
-  ) {
+    payload: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     const queryRunner = this.dataSource.createQueryRunner()
 
     await queryRunner.connect()
@@ -606,20 +602,14 @@ export class VersionService {
           .where('report.report_id = :reportId', { reportId })
           .getRawOne<Record<string, unknown>>()
         if (existing) {
-          return this.normalizeDynamicResult(table, existing) as Record<
-            string,
-            unknown
-          >
+          return this.normalizeDynamicResult(table, existing)
         }
         throw new Error('Idempotent status report was not persisted')
       } finally {
         await queryRunner.release()
       }
     }
-    return (await this.insertIntoDynamicTable(table, payload)) as Record<
-      string,
-      unknown
-    >
+    return this.insertIntoDynamicTable(table, payload)
   }
 
   private async insertPublishedVersion(
@@ -650,11 +640,11 @@ export class VersionService {
       await this.ensureTable(queryRunner, audienceTable)
       await queryRunner.startTransaction()
       try {
-        created = (await this.insertIntoDynamicTableByQueryRunner(
+        created = await this.insertIntoDynamicTableByQueryRunner(
           queryRunner,
           table,
           payload
-        )) as Record<string, unknown>
+        )
         const releaseId = String(created.releaseId)
         if (userIds.length) {
           await queryRunner.manager
@@ -695,8 +685,8 @@ export class VersionService {
   private async insertIntoDynamicTableByQueryRunner(
     queryRunner: QueryRunner,
     table: Table,
-    payload: Record<string, any>
-  ) {
+    payload: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     const insertPayload = this.prepareDynamicPayload(table, payload)
     const insertRes = await queryRunner.manager
       .createQueryBuilder()
@@ -705,8 +695,15 @@ export class VersionService {
       .values(insertPayload)
       .execute()
 
-    const insertId = insertRes.identifiers[0]?.id ?? insertRes.raw?.insertId
-    if (!insertId) {
+    const identifier = insertRes.identifiers[0] as
+      Record<string, unknown> | undefined
+    const rawResult: unknown = insertRes.raw
+    const rawInsertId =
+      rawResult && typeof rawResult === 'object' && 'insertId' in rawResult
+        ? (rawResult as { insertId?: unknown }).insertId
+        : undefined
+    const insertId = Number(identifier?.id ?? rawInsertId)
+    if (!Number.isSafeInteger(insertId) || insertId < 1) {
       return apiUtil.error('Insert data failed')
     }
 
@@ -715,7 +712,7 @@ export class VersionService {
       .select('*')
       .from(table.name, table.name)
       .where('id = :id', { id: insertId })
-      .getRawOne()
+      .getRawOne<Record<string, unknown>>()
 
     return this.normalizeDynamicResult(
       table,
@@ -726,8 +723,8 @@ export class VersionService {
   private async updateDynamicTable(
     table: Table,
     id: number,
-    payload: Record<string, any>
-  ) {
+    payload: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     const queryRunner = this.dataSource.createQueryRunner()
 
     await queryRunner.connect()
@@ -758,7 +755,7 @@ export class VersionService {
         .select('*')
         .from(table.name, table.name)
         .where('id = :id', { id })
-        .getRawOne()
+        .getRawOne<Record<string, unknown>>()
 
       return this.normalizeDynamicResult(
         table,
@@ -944,14 +941,19 @@ export class VersionService {
     )
   }
 
-  private compactObject(payload: Record<string, any>) {
+  private compactObject(payload: Record<string, unknown>) {
     return Object.fromEntries(
       Object.entries(payload).filter(([, value]) => value !== undefined)
     )
   }
 
-  private prepareDynamicPayload(table: Table, payload: Record<string, any>) {
-    const compactedPayload = this.compactObject(humpToUnderline(payload))
+  private prepareDynamicPayload(
+    table: Table,
+    payload: Record<string, unknown>
+  ) {
+    const compactedPayload = this.compactObject(
+      humpToUnderline(payload) as Record<string, unknown>
+    )
     const columnNames = new Set(table.columns.map(column => column.name))
     const jsonColumnNames = new Set(
       table.columns
@@ -1027,7 +1029,10 @@ export class VersionService {
     )
   }
 
-  private normalizeDynamicResult(table: Table, record: Record<string, any>) {
+  private normalizeDynamicResult(
+    table: Table,
+    record: Record<string, unknown>
+  ): Record<string, unknown> {
     const jsonColumnNames = new Set(
       table.columns
         .filter(column => column.type === 'json')
@@ -1044,16 +1049,16 @@ export class VersionService {
       })
     )
 
-    return underlineToHump(normalizedRecord)
+    return underlineToHump(normalizedRecord) as Record<string, unknown>
   }
 
-  private stringifyJsonColumnValue(value: any) {
+  private stringifyJsonColumnValue(value: unknown) {
     if (value === undefined) return value
     if (value === null) return null
 
     if (typeof value === 'string') {
       try {
-        return JSON.stringify(JSON.parse(value))
+        return JSON.stringify(JSON.parse(value) as unknown)
       } catch {
         return JSON.stringify(value)
       }
@@ -1062,13 +1067,13 @@ export class VersionService {
     return JSON.stringify(value)
   }
 
-  private parseJsonColumnValue(value: any) {
+  private parseJsonColumnValue(value: unknown): unknown {
     if (typeof value !== 'string') {
       return value
     }
 
     try {
-      return JSON.parse(value)
+      return JSON.parse(value) as unknown
     } catch {
       return value
     }

@@ -52,7 +52,7 @@ function releaseUpdateType(record: Record<string, unknown>): ReleaseUpdateType {
 export function mapStoredReleaseRecord(
   record: Record<string, unknown>
 ): Release {
-  const stored = underlineToHump(record) as unknown as Record<string, unknown>
+  const stored = underlineToHump(record) as Record<string, unknown>
   const rawVersion = stored.targetVersionCode ?? stored.ver
   const targetVersionCode =
     typeof rawVersion === 'string' || typeof rawVersion === 'number'
