@@ -75,12 +75,7 @@ describe('VersionService.list', () => {
     const configService = {
       get: jest.fn()
     } as unknown as ConfigService
-    const service = new VersionService(
-      {} as never,
-      {} as never,
-      configService,
-      dataSource
-    )
+    const service = new VersionService({} as never, configService, dataSource)
 
     await expect(
       service.list({ headers: {}, ip: '127.0.0.1' } as Request, 'desktop-app', {

@@ -24,6 +24,7 @@ import { otaUploadMaxBytes } from '@/api/version/upload-policy'
     })
   ],
   controllers: [ReleaseManagementController],
-  providers: [ReleaseManagementService, ReleaseDraftService]
+  providers: [ReleaseManagementService, ReleaseDraftService],
+  exports: [ReleaseManagementService]
 })
 export class ReleasesModule {}

@@ -37,7 +37,7 @@ export type ReleaseOperationContext = {
 }
 
 type PolicyMutation = {
-  action: 'enable' | 'disable' | 'audience_changed' | 'redispatch'
+  action: 'publish' | 'enable' | 'disable' | 'audience_changed' | 'redispatch'
   expectedRevision?: number
   changeSummary: Record<string, unknown>
   mutate: (
@@ -92,6 +92,51 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
       schemaVersion: application.schemaVersion,
       status: application.status
     })
+  }
+
+  async enqueuePublishedRelease(
+    queryRunner: QueryRunner,
+    application: RegisteredApplication,
+    releaseId: string,
+    context: ReleaseOperationContext
+  ) {
+    const operationId = randomUUID()
+    const taskId = randomUUID()
+    await queryRunner.manager
+      .createQueryBuilder()
+      .update('ota_applications')
+      .set({
+        catalog_revision: () => 'catalog_revision + 1',
+        updated_at: new Date()
+      })
+      .where('app_name = :appName', { appName: application.appName })
+      .execute()
+    await this.insertTask(queryRunner, application, {
+      taskId,
+      operationId,
+      releaseId,
+      action: 'publish',
+      revision: 1
+    })
+    await this.insertAudit(queryRunner, application, {
+      context,
+      taskId,
+      operationId,
+      releaseId,
+      action: 'publish',
+      revisionBefore: 0,
+      revisionAfter: 1,
+      changeSummary: { source: 'legacy-http' }
+    })
+    return { taskId, operationId }
+  }
+
+  async executePersistedTask(
+    application: RegisteredApplication,
+    taskId: string,
+    requestId?: string
+  ) {
+    return this.executeTask(application, taskId, requestId)
   }
 
   async list(appName: string, query: ReleaseListQueryDto) {

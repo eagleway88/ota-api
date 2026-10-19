@@ -1,9 +1,8 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Optional } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource, QueryRunner, Table } from 'typeorm'
 import { Request } from 'express'
-import { createHash } from 'crypto'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { apiUtil } from '@/utils/api'
 import { ConfigService } from '@nestjs/config'
 import { UpdaterUtil } from '@/utils/updater'
@@ -22,20 +21,24 @@ import {
 import { AppErrorLogDto, CheckDto, CreateDto } from './version.dto'
 import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
 import { VersionListItemDto, VersionListQueryDto } from './version.dto'
-import { WsService } from '@/ws/ws.service'
 import { otaUploadMaxBytes, validateOtaUpload } from './upload-policy'
 import { userIdMatchesContext } from '@/contracts/user-id'
 import { normalizeLegacyReleaseAudience } from '@/compat/legacy/http/release-audience.mapper'
 import { serializeLegacyReleaseRecord } from '@/compat/legacy/mappers/release.mapper'
+import { ApplicationRegistryService } from '@/applications/application-registry.service'
+import { ReleaseManagementService } from '@/releases/release-management.service'
 
 @Injectable()
 export class VersionService {
   private updater?: UpdaterUtil
   constructor(
-    private readonly wsService: WsService,
     private readonly otaVersionQueryService: OtaVersionQueryService,
     private readonly configService: ConfigService,
-    @InjectDataSource() private dataSource: DataSource
+    @InjectDataSource() private dataSource: DataSource,
+    @Optional()
+    private readonly applications?: ApplicationRegistryService,
+    @Optional()
+    private readonly releaseManagement?: ReleaseManagementService
   ) {
     this.updater = new UpdaterUtil(this.configService)
   }
@@ -134,7 +137,6 @@ export class VersionService {
 
     if (created) {
       this.otaVersionQueryService.invalidate(body.name)
-      await this.wsService.dispatchApplicationUpdate(body.name)
     }
 
     return apiUtil.data(serializeLegacyReleaseRecord(created))
@@ -229,7 +231,6 @@ export class VersionService {
     )
     if (created) {
       this.otaVersionQueryService.invalidate(body.name)
-      await this.wsService.dispatchApplicationUpdate(body.name)
     }
     return apiUtil.data(serializeLegacyReleaseRecord(created))
   }
@@ -536,8 +537,13 @@ export class VersionService {
     payload: Record<string, unknown>,
     userIds: readonly string[]
   ): Promise<Record<string, unknown>> {
+    const appName = String(payload.name)
+    const application = this.applications
+      ? await this.applications.prepare(appName)
+      : undefined
     const queryRunner = this.dataSource.createQueryRunner()
-    const audienceTable = createReleaseUserTable(String(payload.name))
+    const audienceTable = createReleaseUserTable(appName)
+    let created: Record<string, unknown> | undefined
     await queryRunner.connect()
 
     try {
@@ -545,7 +551,7 @@ export class VersionService {
       await this.ensureTable(queryRunner, audienceTable)
       await queryRunner.startTransaction()
       try {
-        const created = (await this.insertIntoDynamicTableByQueryRunner(
+        created = (await this.insertIntoDynamicTableByQueryRunner(
           queryRunner,
           table,
           payload,
@@ -566,12 +572,27 @@ export class VersionService {
             )
             .execute()
         }
+        if (application && this.releaseManagement) {
+          const requestId = randomUUID()
+          await this.releaseManagement.enqueuePublishedRelease(
+            queryRunner,
+            application,
+            releaseId,
+            {
+              requestId,
+              sourceIp: typeof payload.ip === 'string' ? payload.ip : undefined
+            }
+          )
+        }
         await queryRunner.commitTransaction()
-        return created
       } catch (error) {
         await queryRunner.rollbackTransaction()
         throw error
       }
+      if (!created) {
+        throw new Error('Published release was not created')
+      }
+      return created
     } finally {
       await queryRunner.release()
     }
