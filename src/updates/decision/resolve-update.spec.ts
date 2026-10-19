@@ -147,4 +147,67 @@ describe('resolveUpdate', () => {
 
     expect(decision.release?.releaseId).toBe('full')
   })
+
+  it.each([
+    ['application', release({ appName: 'other-app' })],
+    ['platform', release({ platforms: ['linux'] })],
+    ['architecture', release({ architectures: ['arm64'] })],
+    ['channel', release({ distributionChannel: 'beta' })]
+  ])('rejects a release with a mismatched %s', (_, candidate) => {
+    const decision = resolveUpdate(
+      context(),
+      { revision: 1, releases: [candidate] },
+      audience(),
+      defaultApplicationUpdatePolicy
+    )
+
+    expect(decision.release).toBeNull()
+  })
+
+  it.each(['arm64', 'x64'])(
+    'matches a macOS universal release to %s clients',
+    architecture => {
+      const decision = resolveUpdate(
+        context({ platform: 'macos', architecture }),
+        {
+          revision: 1,
+          releases: [
+            release({
+              platforms: ['macos'],
+              architectures: ['universal']
+            })
+          ]
+        },
+        audience(),
+        defaultApplicationUpdatePolicy
+      )
+
+      expect(decision.release?.releaseId).toBe('release-1')
+    }
+  )
+
+  it('does not expose a release with an empty allowlist', () => {
+    const decision = resolveUpdate(
+      context({ userIds: new Set(['eagleway-network:windows:1']) }),
+      {
+        revision: 1,
+        releases: [release({ scope: 'allowlist' })]
+      },
+      audience([['release-1', []]]),
+      defaultApplicationUpdatePolicy
+    )
+
+    expect(decision.release).toBeNull()
+  })
+
+  it('does not resend an installed hot release', () => {
+    const decision = resolveUpdate(
+      context({ installedReleaseSequence: 2000 }),
+      { revision: 1, releases: [release()] },
+      audience(),
+      defaultApplicationUpdatePolicy
+    )
+
+    expect(decision.release).toBeNull()
+  })
 })
