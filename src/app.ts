@@ -7,19 +7,21 @@ import { AdminModule } from './api/admin/admin.module'
 import { VersionModule } from './api/version/version.module'
 import { MessageModule } from './api/message/message.module'
 import { ReleasesModule } from './releases/releases.module'
+import { validateRuntimeConfig } from './infrastructure/config/validate-config'
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['.env']
+      envFilePath: ['.env'],
+      validate: validateRuntimeConfig
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
         type: 'mysql',
         host: configService.get('ORM_HOST'),
-        port: configService.get('ORM_PORT'),
+        port: configService.get<number>('ORM_PORT'),
         username: configService.get('ORM_USERNAME'),
         password: configService.get('ORM_PASSWORD'),
         database: configService.get('ORM_DATABASE'),

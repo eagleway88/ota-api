@@ -8,7 +8,9 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { ConfigService } from '@nestjs/config'
 import compression from 'compression'
 import { urlencoded, json } from 'express'
+import type { NextFunction, Request, Response } from 'express'
 import helmet from 'helmet'
+import { randomUUID } from 'crypto'
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -16,6 +18,16 @@ async function bootstrap() {
   })
 
   const configService = app.get(ConfigService)
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const supplied = req.headers['x-request-id']
+    const requestId =
+      typeof supplied === 'string' && /^[A-Za-z0-9._:-]{1,64}$/.test(supplied)
+        ? supplied
+        : randomUUID()
+    req.headers['x-request-id'] = requestId
+    res.setHeader('x-request-id', requestId)
+    next()
+  })
   app.useGlobalPipes(new ValidationPipe())
   app.useGlobalFilters(new ExceptionFilter())
   app.useGlobalInterceptors(new TransformInterceptor())
@@ -23,7 +35,8 @@ async function bootstrap() {
   app.use(urlencoded({ extended: true, limit: '50mb' }))
   app.use(json({ limit: '50mb' }))
   app.setGlobalPrefix('api')
-  app.set('trust proxy', 1)
+  const trustProxyHops = configService.get<number>('TRUST_PROXY_HOPS') ?? 1
+  app.set('trust proxy', trustProxyHops > 0 ? trustProxyHops : false)
   app.use(compression())
   app.use(helmet())
 
@@ -36,4 +49,4 @@ async function bootstrap() {
   await app.listen(configService.get('PORT') || 3001)
 }
 
-bootstrap()
+void bootstrap()
