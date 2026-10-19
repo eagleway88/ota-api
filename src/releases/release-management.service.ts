@@ -12,8 +12,8 @@ import { DataSource, QueryRunner } from 'typeorm'
 import { apiUtil } from '@/utils/api'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { RegisteredApplication } from '@/applications/application-registry.service'
-import { mapLegacyReleaseRecord } from '@/compat/legacy/mappers/release.mapper'
-import { normalizeLegacyReleaseAudience } from '@/compat/legacy/http/release-audience.mapper'
+import { mapStoredReleaseRecord } from './release-record.mapper'
+import { normalizeReleaseAudience } from './release-audience'
 import { OtaVersionQueryService } from '@/api/version/ota-version-query.service'
 import { WsService } from '@/ws/ws.service'
 import { ConfigService } from '@nestjs/config'
@@ -210,7 +210,7 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
     body: ReplaceReleaseUsersDto,
     context: ReleaseOperationContext
   ) {
-    const normalized = normalizeLegacyReleaseAudience({
+    const normalized = normalizeReleaseAudience({
       appName,
       platforms: (await this.findRelease(appName, releaseId)).release
         .platform as string,
@@ -959,7 +959,7 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
   }
 
   private toManagementRelease(record: Record<string, unknown>) {
-    const release = mapLegacyReleaseRecord(record)
+    const release = mapStoredReleaseRecord(record)
     return {
       releaseId: release.releaseId,
       releaseSequence: release.releaseSequence,

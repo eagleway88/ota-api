@@ -17,8 +17,8 @@ import {
 import { ReleaseScopeType, UpdateType } from '@/api/version/version.dto'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { RegisteredApplication } from '@/applications/application-registry.service'
-import { normalizeLegacyReleaseAudience } from '@/compat/legacy/http/release-audience.mapper'
-import { mapLegacyReleaseRecord } from '@/compat/legacy/mappers/release.mapper'
+import { normalizeReleaseAudience } from './release-audience'
+import { mapStoredReleaseRecord } from './release-record.mapper'
 import { ReleaseOperationContext } from './release-management.service'
 import { ReleaseListQueryDto } from './release-management.dto'
 import {
@@ -456,7 +456,7 @@ export class ReleaseDraftService {
     const compatibleBaseVersionCodes = Array.from(
       new Set(body.compatibleBaseVersionCodes)
     )
-    const audience = normalizeLegacyReleaseAudience({
+    const audience = normalizeReleaseAudience({
       appName,
       platforms: platforms.join(','),
       releaseScope: body.releaseScope,
@@ -692,7 +692,7 @@ export class ReleaseDraftService {
   }
 
   private toPublished(record: Record<string, unknown>) {
-    const release = mapLegacyReleaseRecord(record)
+    const release = mapStoredReleaseRecord(record)
     return {
       releaseId: release.releaseId,
       releaseSequence: release.releaseSequence,
