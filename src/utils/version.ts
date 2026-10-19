@@ -1,6 +1,19 @@
-import { Table } from 'typeorm'
+import { Table, TableIndex } from 'typeorm'
 
 export const VERSION_TABLE_AUTO_INCREMENT_START = 2000
+
+export function calculateNextReleaseSequence(
+  currentAutoIncrement?: number | null,
+  maximumStoredId?: number | null,
+  maximumConfirmedIssuedId?: number | null
+) {
+  return Math.max(
+    VERSION_TABLE_AUTO_INCREMENT_START,
+    Number(currentAutoIncrement) || 0,
+    (Number(maximumStoredId) || 0) + 1,
+    (Number(maximumConfirmedIssuedId) || 0) + 1
+  )
+}
 
 function normalizeVersionToken(value: string | number) {
   const normalized = String(value).trim().replaceAll('.', '')
@@ -162,6 +175,27 @@ export function createVersionTable(name: string) {
         isGenerated: true,
         generationStrategy: 'increment'
       },
+      {
+        name: 'release_id',
+        type: 'varchar',
+        length: '36',
+        isNullable: true,
+        isUnique: true,
+        comment: '内部版本UUID'
+      },
+      {
+        name: 'release_scope',
+        type: 'varchar',
+        length: '16',
+        default: "'public'",
+        comment: '发布范围(public/allowlist)'
+      },
+      {
+        name: 'policy_revision',
+        type: 'int',
+        default: 1,
+        comment: '发布策略修订号'
+      },
       { name: 'name', type: 'varchar', comment: '应用名称' },
       { name: 'ver', type: 'int', comment: '版本号(1.0.0=100)' },
       {
@@ -230,6 +264,36 @@ export function createVersionTable(name: string) {
       },
       { name: 'ip', type: 'varchar', isNullable: true, comment: 'IP' },
       { name: 'create_time', type: 'datetime', isNullable: true }
+    ]
+  })
+}
+
+export function createReleaseUserTable(name: string) {
+  const tableName = createTableName(name)
+  return new Table({
+    name: `${tableName}_release_user`,
+    columns: [
+      {
+        name: 'id',
+        type: 'bigint',
+        isPrimary: true,
+        isGenerated: true,
+        generationStrategy: 'increment'
+      },
+      { name: 'release_id', type: 'varchar', length: '36' },
+      { name: 'user_id', type: 'varchar', length: '191' },
+      { name: 'created_at', type: 'datetime' }
+    ],
+    indices: [
+      new TableIndex({
+        name: `${tableName}_release_user_release_user_uq`,
+        columnNames: ['release_id', 'user_id'],
+        isUnique: true
+      }),
+      new TableIndex({
+        name: `${tableName}_release_user_user_release_idx`,
+        columnNames: ['user_id', 'release_id']
+      })
     ]
   })
 }

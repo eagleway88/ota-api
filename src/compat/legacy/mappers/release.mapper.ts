@@ -107,13 +107,7 @@ export function serializeLegacyRelease(
   mandatory: boolean,
   showUpdateDialog: boolean
 ) {
-  const result: Record<string, unknown> = {}
-  for (const field of legacyReleaseFields) {
-    if (release.legacyPayload[field] !== undefined) {
-      result[field] = release.legacyPayload[field]
-    }
-  }
-
+  const result = serializeLegacyReleaseRecord(release.legacyPayload)
   const mandatoryFlag = mandatory ? 1 : 0
   result.mandatory = mandatoryFlag
   result.showDialog = showUpdateDialog ? 1 : 0
@@ -121,5 +115,15 @@ export function serializeLegacyRelease(
   result.downloadUrl =
     release.updateType === 'full' ? result.installUrl : result.packageUrl
   result.isMandatory = mandatoryFlag
+  return result
+}
+
+export function serializeLegacyReleaseRecord(record: Record<string, unknown>) {
+  const result: Record<string, unknown> = {}
+  for (const field of legacyReleaseFields) {
+    if (record[field] !== undefined) {
+      result[field] = record[field]
+    }
+  }
   return result
 }

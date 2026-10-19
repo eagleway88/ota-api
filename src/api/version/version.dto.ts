@@ -16,6 +16,11 @@ export enum UpdateType {
   Hot = 'hot'
 }
 
+export enum ReleaseScopeType {
+  Public = 'public',
+  Allowlist = 'allowlist'
+}
+
 export enum AppErrorKind {
   Crash = 'crash',
   Error = 'error'
@@ -205,9 +210,24 @@ export class UploadDto extends OmitType(VersionDto, ['id', 'ver']) {
     format: 'binary'
   })
   file: any
+
+  @IsOptional()
+  @IsEnum(ReleaseScopeType)
+  releaseScope?: ReleaseScopeType
+
+  /** multipart 使用 JSON 字符串，JSON 请求使用字符串数组 */
+  @IsOptional()
+  userIds?: string | string[]
 }
 
-export class CreateDto extends OmitType(VersionDto, ['id']) {}
+export class CreateDto extends OmitType(VersionDto, ['id']) {
+  @IsOptional()
+  @IsEnum(ReleaseScopeType)
+  releaseScope?: ReleaseScopeType
+
+  @IsOptional()
+  userIds?: string[]
+}
 
 export class SuccessDto extends OmitType(StatusDto, ['id']) {}
 

@@ -3,13 +3,15 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource, QueryRunner, Table } from 'typeorm'
 import { Request } from 'express'
 import { createHash } from 'crypto'
+import { randomUUID } from 'crypto'
 import { apiUtil } from '@/utils/api'
 import { ConfigService } from '@nestjs/config'
 import { UpdaterUtil } from '@/utils/updater'
 import { OtaVersionQueryService } from './ota-version-query.service'
 import { createAppErrorLogTable, createErrorTable } from '@/utils/version'
 import { createSuccessTable, createVersionTable } from '@/utils/version'
-import { VERSION_TABLE_AUTO_INCREMENT_START } from '@/utils/version'
+import { createReleaseUserTable } from '@/utils/version'
+import { calculateNextReleaseSequence } from '@/utils/version'
 import { normalizeVersionList, normalizeVersionValue } from '@/utils/version'
 import {
   fetchIP,
@@ -23,6 +25,8 @@ import { VersionListItemDto, VersionListQueryDto } from './version.dto'
 import { WsService } from '@/ws/ws.service'
 import { otaUploadMaxBytes, validateOtaUpload } from './upload-policy'
 import { userIdMatchesContext } from '@/contracts/user-id'
+import { normalizeLegacyReleaseAudience } from '@/compat/legacy/http/release-audience.mapper'
+import { serializeLegacyReleaseRecord } from '@/compat/legacy/mappers/release.mapper'
 
 @Injectable()
 export class VersionService {
@@ -93,16 +97,21 @@ export class VersionService {
   }
 
   async create(req: Request, body: CreateDto) {
-    const created = await this.insertIntoDynamicTable(
+    const audience = this.normalizeReleaseAudience(body)
+    const created = await this.insertPublishedVersion(
       createVersionTable(body.name),
       {
         ...body,
+        releaseId: randomUUID(),
+        releaseScope: audience.releaseScope,
+        policyRevision: 1,
         ver: normalizeVersionValue(body.ver) ?? body.ver,
         baseVersions: normalizeVersionList(body.baseVersions),
         updateType: UpdateType.Full,
         ip: fetchIP(req),
         createTime: new Date()
-      }
+      },
+      audience.userIds
     )
 
     if (created) {
@@ -110,7 +119,7 @@ export class VersionService {
       await this.wsService.dispatchApplicationUpdate(body.name)
     }
 
-    return apiUtil.data(created)
+    return apiUtil.data(serializeLegacyReleaseRecord(created))
   }
 
   async check(body: CheckDto) {
@@ -159,16 +168,20 @@ export class VersionService {
     }
 
     const normalizedVer = normalizeVersionValue(body.ver)
+    const audience = this.normalizeReleaseAudience(body)
     const dir = `${body.name}/${body.ver}`
     const uploadRes = await this.updater?.put(dir, file)
     if (!uploadRes || uploadRes.err || !uploadRes.url) {
       return apiUtil.error(uploadRes?.err || 'Upload failed')
     }
 
-    const created = await this.insertIntoDynamicTable(
+    const created = await this.insertPublishedVersion(
       createVersionTable(body.name),
       {
         ...body,
+        releaseId: randomUUID(),
+        releaseScope: audience.releaseScope,
+        policyRevision: 1,
         ver: normalizedVer ?? body.ver,
         baseVersions: normalizeVersionList(body.baseVersions),
         fileSize: file.size,
@@ -176,13 +189,14 @@ export class VersionService {
         updateType: UpdateType.Hot,
         ip: fetchIP(req),
         createTime: new Date()
-      }
+      },
+      audience.userIds
     )
     if (created) {
       this.otaVersionQueryService.invalidate(body.name)
       await this.wsService.dispatchApplicationUpdate(body.name)
     }
-    return apiUtil.data(created)
+    return apiUtil.data(serializeLegacyReleaseRecord(created))
   }
 
   async success(req: Request, body: SuccessDto) {
@@ -482,12 +496,61 @@ export class VersionService {
     }
   }
 
+  private async insertPublishedVersion(
+    table: Table,
+    payload: Record<string, unknown>,
+    userIds: readonly string[]
+  ): Promise<Record<string, unknown>> {
+    const queryRunner = this.dataSource.createQueryRunner()
+    const audienceTable = createReleaseUserTable(String(payload.name))
+    await queryRunner.connect()
+
+    try {
+      await this.ensureTable(queryRunner, table)
+      await this.ensureTable(queryRunner, audienceTable)
+      await queryRunner.startTransaction()
+      try {
+        const created = (await this.insertIntoDynamicTableByQueryRunner(
+          queryRunner,
+          table,
+          payload,
+          false
+        )) as Record<string, unknown>
+        const releaseId = String(created.releaseId)
+        if (userIds.length) {
+          await queryRunner.manager
+            .createQueryBuilder()
+            .insert()
+            .into(audienceTable.name)
+            .values(
+              userIds.map(userId => ({
+                release_id: releaseId,
+                user_id: userId,
+                created_at: new Date()
+              }))
+            )
+            .execute()
+        }
+        await queryRunner.commitTransaction()
+        return created
+      } catch (error) {
+        await queryRunner.rollbackTransaction()
+        throw error
+      }
+    } finally {
+      await queryRunner.release()
+    }
+  }
+
   private async insertIntoDynamicTableByQueryRunner(
     queryRunner: QueryRunner,
     table: Table,
-    payload: Record<string, any>
+    payload: Record<string, any>,
+    ensure = true
   ) {
-    await this.ensureTable(queryRunner, table)
+    if (ensure) {
+      await this.ensureTable(queryRunner, table)
+    }
 
     const insertPayload = this.prepareDynamicPayload(table, payload)
     const insertRes = await queryRunner.manager
@@ -574,6 +637,9 @@ export class VersionService {
     }
 
     await this.syncTableColumns(queryRunner, table)
+    if (table.name.endsWith('_version')) {
+      await this.ensureVersionTableAutoIncrement(queryRunner, table.name)
+    }
   }
 
   private async syncTableColumns(queryRunner: QueryRunner, table: Table) {
@@ -604,6 +670,15 @@ export class VersionService {
       missingColumns.some(column => column.name === 'show_dialog')
     ) {
       await this.backfillVersionShowDialog(queryRunner, table.name)
+    }
+
+    if (
+      table.name.endsWith('_version') &&
+      missingColumns.some(column =>
+        ['release_id', 'release_scope', 'policy_revision'].includes(column.name)
+      )
+    ) {
+      await this.backfillVersionReleaseMetadata(queryRunner, table.name)
     }
 
     if (
@@ -642,6 +717,27 @@ export class VersionService {
     )
   }
 
+  private async backfillVersionReleaseMetadata(
+    queryRunner: QueryRunner,
+    tableName: string
+  ) {
+    await queryRunner.query(
+      `UPDATE \`${tableName}\`
+       SET release_id = UUID()
+       WHERE release_id IS NULL OR release_id = ''`
+    )
+    await queryRunner.query(
+      `UPDATE \`${tableName}\`
+       SET release_scope = 'public'
+       WHERE release_scope IS NULL OR release_scope = ''`
+    )
+    await queryRunner.query(
+      `UPDATE \`${tableName}\`
+       SET policy_revision = 1
+       WHERE policy_revision IS NULL OR policy_revision < 1`
+    )
+  }
+
   private async backfillAppErrorLogColumns(
     queryRunner: QueryRunner,
     tableName: string
@@ -676,8 +772,21 @@ export class VersionService {
     queryRunner: QueryRunner,
     tableName: string
   ) {
+    const tableStatus = (await queryRunner.query(
+      `SELECT AUTO_INCREMENT AS autoIncrement
+       FROM information_schema.TABLES
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+      [tableName]
+    )) as Array<{ autoIncrement?: number | string | null }>
+    const maximumRows = (await queryRunner.query(
+      `SELECT MAX(id) AS maximumId FROM \`${tableName}\``
+    )) as Array<{ maximumId?: number | string | null }>
+    const nextSequence = calculateNextReleaseSequence(
+      Number(tableStatus[0]?.autoIncrement),
+      Number(maximumRows[0]?.maximumId)
+    )
     await queryRunner.query(
-      `ALTER TABLE \`${tableName}\` AUTO_INCREMENT = ${VERSION_TABLE_AUTO_INCREMENT_START}`
+      `ALTER TABLE \`${tableName}\` AUTO_INCREMENT = ${nextSequence}`
     )
   }
 
@@ -689,6 +798,7 @@ export class VersionService {
 
   private prepareDynamicPayload(table: Table, payload: Record<string, any>) {
     const compactedPayload = this.compactObject(humpToUnderline(payload))
+    const columnNames = new Set(table.columns.map(column => column.name))
     const jsonColumnNames = new Set(
       table.columns
         .filter(column => column.type === 'json')
@@ -696,14 +806,31 @@ export class VersionService {
     )
 
     return Object.fromEntries(
-      Object.entries(compactedPayload).map(([key, value]) => {
-        if (!jsonColumnNames.has(key)) {
-          return [key, value]
-        }
+      Object.entries(compactedPayload)
+        .filter(([key]) => columnNames.has(key))
+        .map(([key, value]) => {
+          if (!jsonColumnNames.has(key)) {
+            return [key, value]
+          }
 
-        return [key, this.stringifyJsonColumnValue(value)]
-      })
+          return [key, this.stringifyJsonColumnValue(value)]
+        })
     )
+  }
+
+  private normalizeReleaseAudience(body: CreateDto | UploadDto) {
+    try {
+      return normalizeLegacyReleaseAudience({
+        appName: body.name,
+        platforms: body.platform,
+        releaseScope: body.releaseScope,
+        userIds: body.userIds
+      })
+    } catch (error) {
+      return apiUtil.error(
+        error instanceof Error ? error.message : 'Invalid release audience'
+      )
+    }
   }
 
   private normalizeDynamicResult(table: Table, record: Record<string, any>) {
