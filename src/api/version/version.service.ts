@@ -604,8 +604,12 @@ export class VersionService {
     userIds: readonly string[]
   ): Promise<Record<string, unknown>> {
     const appName = String(payload.name)
+    const operationContext = {
+      requestId: randomUUID(),
+      sourceIp: typeof payload.ip === 'string' ? payload.ip : undefined
+    }
     const application = this.applications
-      ? await this.applications.prepare(appName)
+      ? await this.applications.prepare(appName, operationContext)
       : undefined
     if (application) {
       table = createVersionTable(application.tablePrefix)
@@ -644,15 +648,11 @@ export class VersionService {
             .execute()
         }
         if (application && this.releaseManagement) {
-          const requestId = randomUUID()
           await this.releaseManagement.enqueuePublishedRelease(
             queryRunner,
             application,
             releaseId,
-            {
-              requestId,
-              sourceIp: typeof payload.ip === 'string' ? payload.ip : undefined
-            }
+            operationContext
           )
         }
         await queryRunner.commitTransaction()

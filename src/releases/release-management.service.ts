@@ -89,8 +89,8 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async prepare(appName: string) {
-    const application = await this.applications.prepare(appName)
+  async prepare(appName: string, context: ReleaseOperationContext) {
+    const application = await this.applications.prepare(appName, context)
     return apiUtil.data({
       appName: application.appName,
       tablePrefix: application.tablePrefix,
@@ -464,7 +464,7 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
     context: ReleaseOperationContext,
     mutation: PolicyMutation
   ) {
-    const application = await this.applications.prepare(appName)
+    const application = await this.applications.prepare(appName, context)
     const queryRunner = this.dataSource.createQueryRunner()
     const operationId = randomUUID()
     const taskId = randomUUID()

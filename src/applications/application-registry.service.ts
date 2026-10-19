@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from '@nestjs/common'
+import { ConflictException, Injectable, Logger } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource, QueryRunner } from 'typeorm'
 import {
@@ -9,6 +9,8 @@ import {
   calculateNextReleaseSequence,
   createVersionTable
 } from '@/utils/version'
+import { randomUUID } from 'crypto'
+import { GlobalAuditContext, insertGlobalAudit } from '@/admin/global-audit'
 
 export type RegisteredApplication = {
   appName: string
@@ -20,6 +22,8 @@ export type RegisteredApplication = {
 
 @Injectable()
 export class ApplicationRegistryService {
+  private readonly logger = new Logger(ApplicationRegistryService.name)
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly tableResolver: ApplicationTableResolver
@@ -63,14 +67,20 @@ export class ApplicationRegistryService {
     }
   }
 
-  async prepare(appName: string): Promise<RegisteredApplication> {
+  async prepare(
+    appName: string,
+    context?: GlobalAuditContext
+  ): Promise<RegisteredApplication> {
     this.tableResolver.validateAppName(appName)
     const queryRunner = this.dataSource.createQueryRunner()
+    const auditContext = context ?? { requestId: randomUUID() }
+    const operationId = randomUUID()
+    let tablePrefix: string | undefined
+    let shouldAudit = false
     await queryRunner.connect()
     try {
       await this.ensureGlobalTables(queryRunner)
       await queryRunner.startTransaction()
-      let tablePrefix: string
       try {
         const existing = await queryRunner.manager
           .createQueryBuilder()
@@ -82,6 +92,10 @@ export class ApplicationRegistryService {
         tablePrefix = existing
           ? String(existing.table_prefix)
           : await this.allocatePrefix(queryRunner, appName)
+        shouldAudit =
+          !existing ||
+          String(existing.status) !== 'ready' ||
+          Number(existing.schema_version) < 1
         if (!existing) {
           await queryRunner.manager
             .createQueryBuilder()
@@ -104,15 +118,36 @@ export class ApplicationRegistryService {
         throw error
       }
 
+      if (!tablePrefix) {
+        throw new Error('Application table prefix was not allocated')
+      }
       const tables = this.tableResolver.resolve(appName, tablePrefix)
       await this.ensureVersionTable(queryRunner, appName, tables)
       await this.ensureApplicationTables(queryRunner, tables)
-      await queryRunner.manager
-        .createQueryBuilder()
-        .update('ota_applications')
-        .set({ schema_version: 1, status: 'ready', updated_at: new Date() })
-        .where('app_name = :appName', { appName })
-        .execute()
+      await queryRunner.startTransaction()
+      try {
+        await queryRunner.manager
+          .createQueryBuilder()
+          .update('ota_applications')
+          .set({ schema_version: 1, status: 'ready', updated_at: new Date() })
+          .where('app_name = :appName', { appName })
+          .execute()
+        if (shouldAudit) {
+          await insertGlobalAudit(queryRunner, {
+            context: auditContext,
+            operationId,
+            action: 'application_prepared',
+            targetType: 'application',
+            targetId: appName,
+            changeSummary: { tablePrefix, schemaVersion: 1 },
+            result: 'succeeded'
+          })
+        }
+        await queryRunner.commitTransaction()
+      } catch (error) {
+        await queryRunner.rollbackTransaction()
+        throw error
+      }
 
       return {
         appName,
@@ -122,6 +157,9 @@ export class ApplicationRegistryService {
         tables
       }
     } catch (error) {
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction()
+      }
       if (await queryRunner.hasTable('ota_applications')) {
         await queryRunner.manager
           .createQueryBuilder()
@@ -129,6 +167,25 @@ export class ApplicationRegistryService {
           .set({ status: 'failed', updated_at: new Date() })
           .where('app_name = :appName', { appName })
           .execute()
+      }
+      if (await queryRunner.hasTable('ota_admin_audit_log')) {
+        try {
+          await insertGlobalAudit(queryRunner, {
+            context: auditContext,
+            operationId,
+            action: 'application_prepared',
+            targetType: 'application',
+            targetId: appName,
+            changeSummary: tablePrefix ? { tablePrefix } : undefined,
+            result: 'failed',
+            errorCode: 'APPLICATION_PREPARE_FAILED'
+          })
+        } catch (auditError) {
+          this.logger.error(
+            `Failed to persist application preparation audit requestId=${auditContext.requestId}`,
+            auditError instanceof Error ? auditError.stack : undefined
+          )
+        }
       }
       throw error
     } finally {
@@ -223,7 +280,10 @@ export class ApplicationRegistryService {
         source_ip VARCHAR(64) NULL,
         created_at DATETIME NOT NULL,
         PRIMARY KEY (audit_id),
-        UNIQUE KEY ota_admin_audit_operation_request_part_uq (operation_id, request_id, part_no)
+        UNIQUE KEY ota_admin_audit_operation_request_part_uq (operation_id, request_id, part_no),
+        KEY ota_admin_audit_actor_created_idx (actor_admin_id, created_at),
+        KEY ota_admin_audit_action_created_idx (action, created_at),
+        KEY ota_admin_audit_created_idx (created_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
     `)
   }

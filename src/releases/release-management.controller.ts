@@ -43,8 +43,11 @@ export class ReleaseManagementController {
   ) {}
 
   @Post('prepare')
-  prepare(@Param('appName') appName: string) {
-    return this.service.prepare(appName)
+  prepare(
+    @Req() request: AuthenticatedRequest,
+    @Param('appName') appName: string
+  ) {
+    return this.service.prepare(appName, this.context(request))
   }
 
   @Get('releases')
@@ -56,10 +59,11 @@ export class ReleaseManagementController {
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
   uploadArtifact(
+    @Req() request: AuthenticatedRequest,
     @Param('appName') appName: string,
     @UploadedFile() file?: Express.Multer.File
   ) {
-    return this.drafts.uploadArtifact(appName, file)
+    return this.drafts.uploadArtifact(appName, file, this.context(request))
   }
 
   @Post('releases')
@@ -72,7 +76,8 @@ export class ReleaseManagementController {
     return this.drafts.createDraft(
       appName,
       body,
-      typeof idempotencyKey === 'string' ? idempotencyKey : undefined
+      typeof idempotencyKey === 'string' ? idempotencyKey : undefined,
+      this.context(request)
     )
   }
 
@@ -86,11 +91,17 @@ export class ReleaseManagementController {
 
   @Patch('releases/:releaseId')
   updateDraft(
+    @Req() request: AuthenticatedRequest,
     @Param('appName') appName: string,
     @Param('releaseId') releaseId: string,
     @Body() body: UpdateReleaseDraftDto
   ) {
-    return this.drafts.updateDraft(appName, releaseId, body)
+    return this.drafts.updateDraft(
+      appName,
+      releaseId,
+      body,
+      this.context(request)
+    )
   }
 
   @Post('releases/:releaseId/publish')

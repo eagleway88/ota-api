@@ -57,7 +57,11 @@ export class ReleaseDraftService {
     this.updater = new UpdaterUtil(configService)
   }
 
-  async uploadArtifact(appName: string, file?: Express.Multer.File) {
+  async uploadArtifact(
+    appName: string,
+    file: Express.Multer.File | undefined,
+    context: ReleaseOperationContext
+  ) {
     if (!file) {
       return apiUtil.error('File is required')
     }
@@ -69,7 +73,7 @@ export class ReleaseDraftService {
       return apiUtil.error(uploadError)
     }
 
-    const application = await this.applications.prepare(appName)
+    const application = await this.applications.prepare(appName, context)
     const artifactId = randomUUID()
     const checksumSha256 = createHash('sha256')
       .update(file.buffer)
@@ -116,12 +120,13 @@ export class ReleaseDraftService {
   async createDraft(
     appName: string,
     body: CreateReleaseDraftDto,
-    idempotencyKey?: string
+    idempotencyKey: string | undefined,
+    context: ReleaseOperationContext
   ) {
     if (idempotencyKey && idempotencyKey.length > 191) {
       throw new BadRequestException('Idempotency key is too long')
     }
-    const application = await this.applications.prepare(appName)
+    const application = await this.applications.prepare(appName, context)
     const normalized = this.normalizeDraft(appName, body)
     const serializedPayload = JSON.stringify(normalized)
     const queryRunner = this.dataSource.createQueryRunner()
@@ -239,9 +244,10 @@ export class ReleaseDraftService {
   async updateDraft(
     appName: string,
     releaseId: string,
-    body: UpdateReleaseDraftDto
+    body: UpdateReleaseDraftDto,
+    context: ReleaseOperationContext
   ) {
-    const application = await this.applications.prepare(appName)
+    const application = await this.applications.prepare(appName, context)
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     await queryRunner.startTransaction()
@@ -321,7 +327,7 @@ export class ReleaseDraftService {
     releaseId: string,
     context: ReleaseOperationContext
   ) {
-    const application = await this.applications.prepare(appName)
+    const application = await this.applications.prepare(appName, context)
     const queryRunner = this.dataSource.createQueryRunner()
     const operationId = randomUUID()
     const taskId = randomUUID()
