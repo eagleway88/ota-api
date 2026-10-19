@@ -5,6 +5,10 @@ import {
   ApplicationTables,
   ApplicationTableResolver
 } from '@/infrastructure/persistence/application-table-resolver'
+import {
+  calculateNextReleaseSequence,
+  createVersionTable
+} from '@/utils/version'
 
 export type RegisteredApplication = {
   appName: string
@@ -101,6 +105,7 @@ export class ApplicationRegistryService {
       }
 
       const tables = this.tableResolver.resolve(appName, tablePrefix)
+      await this.ensureVersionTable(queryRunner, appName, tables)
       await this.ensureApplicationTables(queryRunner, tables)
       await queryRunner.manager
         .createQueryBuilder()
@@ -353,5 +358,52 @@ export class ApplicationRegistryService {
         PRIMARY KEY (artifact_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
     `)
+  }
+
+  private async ensureVersionTable(
+    queryRunner: QueryRunner,
+    appName: string,
+    tables: ApplicationTables
+  ) {
+    const desired = createVersionTable(appName)
+    const current = await queryRunner.getTable(tables.version)
+    if (!current) {
+      await queryRunner.createTable(desired, true)
+    } else {
+      const currentColumns = new Set(current.columns.map(column => column.name))
+      const missingColumns = desired.columns.filter(column => {
+        return !currentColumns.has(column.name)
+      })
+      if (missingColumns.length) {
+        await queryRunner.addColumns(tables.version, missingColumns)
+      }
+    }
+
+    await queryRunner.query(
+      `UPDATE \`${tables.version}\`
+       SET release_id = UUID()
+       WHERE release_id IS NULL OR release_id = ''`
+    )
+    await queryRunner.query(
+      `UPDATE \`${tables.version}\`
+       SET release_scope = 'public', policy_revision = 1
+       WHERE release_scope IS NULL OR release_scope = '' OR policy_revision IS NULL OR policy_revision < 1`
+    )
+    const tableStatus = (await queryRunner.query(
+      `SELECT AUTO_INCREMENT AS autoIncrement
+       FROM information_schema.TABLES
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+      [tables.version]
+    )) as Array<{ autoIncrement?: number | string | null }>
+    const maximumRows = (await queryRunner.query(
+      `SELECT MAX(id) AS maximumId FROM \`${tables.version}\``
+    )) as Array<{ maximumId?: number | string | null }>
+    const nextSequence = calculateNextReleaseSequence(
+      Number(tableStatus[0]?.autoIncrement),
+      Number(maximumRows[0]?.maximumId)
+    )
+    await queryRunner.query(
+      `ALTER TABLE \`${tables.version}\` AUTO_INCREMENT = ${nextSequence}`
+    )
   }
 }

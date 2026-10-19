@@ -3,8 +3,27 @@ import { underlineToHump } from '@/utils'
 import { normalizeVersionValue } from '@/utils/version'
 
 function csv(value: unknown) {
+  if (Array.isArray(value)) {
+    return (value as unknown[])
+      .filter(
+        (item): item is string | number =>
+          typeof item === 'string' || typeof item === 'number'
+      )
+      .map(item => String(item).trim())
+      .filter(Boolean)
+  }
   if (typeof value !== 'string') {
     return []
+  }
+  if (value.trim().startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(value)
+      if (Array.isArray(parsed)) {
+        return csv(parsed)
+      }
+    } catch {
+      return []
+    }
   }
   return Array.from(
     new Set(
@@ -40,43 +59,49 @@ export function mapLegacyReleaseRecord(
   record: Record<string, unknown>
 ): Release {
   const legacy = underlineToHump(record) as unknown as Record<string, unknown>
-  const rawVersion = legacy.ver
+  const rawVersion = legacy.targetVersionCode ?? legacy.ver
   const targetVersionCode =
     typeof rawVersion === 'string' || typeof rawVersion === 'number'
       ? (normalizeVersionValue(rawVersion) ?? 0)
       : 0
-  const hasFormalBaseVersions = legacy.compatibleBaseVersionCodes !== undefined
+  const hasFormalBaseVersions =
+    legacy.compatibleBaseVersionCodes !== undefined &&
+    legacy.compatibleBaseVersionCodes !== null
   const compatibleBaseVersionCodes = hasFormalBaseVersions
     ? numberList(legacy.compatibleBaseVersionCodes)
     : Array.from(
         new Set([targetVersionCode, ...numberList(legacy.baseVersions)])
       )
-  const releaseSequence = Number(legacy.id)
+  const releaseSequence = Number(legacy.releaseSequence ?? legacy.id)
 
   const releaseId =
     typeof legacy.releaseId === 'string'
       ? legacy.releaseId
-      : `${String(legacy.name)}:${String(releaseSequence)}`
+      : `${String(legacy.appName ?? legacy.name)}:${String(releaseSequence)}`
   const scope: ReleaseScope =
     legacy.releaseScope === 'allowlist' ? 'allowlist' : 'public'
 
   return {
     releaseId,
     releaseSequence,
-    appName: String(legacy.name),
+    appName: String(legacy.appName ?? legacy.name),
     targetVersionCode,
     compatibleBaseVersionCodes,
-    platforms: csv(legacy.platform),
-    architectures: csv(legacy.architecture),
+    platforms: csv(legacy.platforms ?? legacy.platform),
+    architectures: csv(legacy.architectures ?? legacy.architecture),
     distributionChannel:
-      typeof legacy.channel === 'string' && legacy.channel
-        ? legacy.channel
+      typeof (legacy.distributionChannel ?? legacy.channel) === 'string' &&
+      (legacy.distributionChannel ?? legacy.channel)
+        ? String(legacy.distributionChannel ?? legacy.channel)
         : undefined,
     updateType: releaseUpdateType(legacy),
     scope,
-    enabled: booleanValue(legacy.enable, true),
-    mandatory: booleanValue(legacy.mandatory, true),
-    showUpdateDialog: booleanValue(legacy.showDialog, true),
+    enabled: booleanValue(legacy.isEnabled ?? legacy.enable, true),
+    mandatory: booleanValue(legacy.isMandatory ?? legacy.mandatory, true),
+    showUpdateDialog: booleanValue(
+      legacy.showUpdateDialog ?? legacy.showDialog,
+      true
+    ),
     legacyPayload: legacy
   }
 }

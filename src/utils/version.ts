@@ -196,6 +196,90 @@ export function createVersionTable(name: string) {
         default: 1,
         comment: '发布策略修订号'
       },
+      {
+        name: 'target_version_code',
+        type: 'int',
+        isNullable: true,
+        comment: '目标版本编码'
+      },
+      {
+        name: 'compatible_base_version_codes',
+        type: 'json',
+        isNullable: true,
+        comment: '明确兼容的原生基础版本编码'
+      },
+      {
+        name: 'release_notes',
+        type: 'text',
+        isNullable: true,
+        comment: '发布说明'
+      },
+      {
+        name: 'artifact_size_bytes',
+        type: 'bigint',
+        isNullable: true,
+        comment: '更新资源字节数'
+      },
+      {
+        name: 'is_enabled',
+        type: 'tinyint',
+        isNullable: true,
+        comment: '正式启用标记'
+      },
+      {
+        name: 'is_mandatory',
+        type: 'tinyint',
+        isNullable: true,
+        comment: '正式强制更新标记'
+      },
+      {
+        name: 'show_update_dialog',
+        type: 'tinyint',
+        isNullable: true,
+        comment: '正式更新弹窗标记'
+      },
+      {
+        name: 'installer_source_url',
+        type: 'varchar',
+        length: '2048',
+        isNullable: true,
+        comment: '安装文件或更新源目录'
+      },
+      {
+        name: 'bundle_url',
+        type: 'varchar',
+        length: '2048',
+        isNullable: true,
+        comment: '热更新包地址'
+      },
+      {
+        name: 'platforms',
+        type: 'json',
+        isNullable: true,
+        comment: '正式平台列表'
+      },
+      {
+        name: 'architectures',
+        type: 'json',
+        isNullable: true,
+        comment: '正式架构列表'
+      },
+      {
+        name: 'distribution_channel',
+        type: 'varchar',
+        isNullable: true,
+        comment: '正式分发渠道'
+      },
+      {
+        name: 'created_at',
+        type: 'datetime',
+        isNullable: true
+      },
+      {
+        name: 'updated_at',
+        type: 'datetime',
+        isNullable: true
+      },
       { name: 'name', type: 'varchar', comment: '应用名称' },
       { name: 'ver', type: 'int', comment: '版本号(1.0.0=100)' },
       {

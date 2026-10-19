@@ -98,6 +98,8 @@ export class VersionService {
 
   async create(req: Request, body: CreateDto) {
     const audience = this.normalizeReleaseAudience(body)
+    const createTime = new Date()
+    const targetVersionCode = normalizeVersionValue(body.ver) ?? body.ver
     const created = await this.insertPublishedVersion(
       createVersionTable(body.name),
       {
@@ -105,11 +107,27 @@ export class VersionService {
         releaseId: randomUUID(),
         releaseScope: audience.releaseScope,
         policyRevision: 1,
-        ver: normalizeVersionValue(body.ver) ?? body.ver,
+        ver: targetVersionCode,
+        targetVersionCode,
         baseVersions: normalizeVersionList(body.baseVersions),
+        compatibleBaseVersionCodes: this.legacyCompatibleVersionCodes(
+          targetVersionCode,
+          body.baseVersions
+        ),
+        releaseNotes: body.desc,
+        artifactSizeBytes: body.fileSize,
+        isEnabled: body.enable ?? 1,
+        isMandatory: body.mandatory ?? 1,
+        showUpdateDialog: body.showDialog ?? 1,
+        installerSourceUrl: body.installUrl,
+        bundleUrl: body.packageUrl,
+        platforms: this.stringList(body.platform),
+        architectures: this.stringList(body.architecture),
+        distributionChannel: body.channel,
         updateType: UpdateType.Full,
         ip: fetchIP(req),
-        createTime: new Date()
+        createTime,
+        createdAt: createTime
       },
       audience.userIds
     )
@@ -169,6 +187,7 @@ export class VersionService {
 
     const normalizedVer = normalizeVersionValue(body.ver)
     const audience = this.normalizeReleaseAudience(body)
+    const createTime = new Date()
     const dir = `${body.name}/${body.ver}`
     const uploadRes = await this.updater?.put(dir, file)
     if (!uploadRes || uploadRes.err || !uploadRes.url) {
@@ -183,12 +202,28 @@ export class VersionService {
         releaseScope: audience.releaseScope,
         policyRevision: 1,
         ver: normalizedVer ?? body.ver,
+        targetVersionCode: normalizedVer ?? body.ver,
         baseVersions: normalizeVersionList(body.baseVersions),
+        compatibleBaseVersionCodes: this.legacyCompatibleVersionCodes(
+          normalizedVer ?? body.ver,
+          body.baseVersions
+        ),
+        releaseNotes: body.desc,
         fileSize: file.size,
+        artifactSizeBytes: file.size,
+        isEnabled: body.enable ?? 1,
+        isMandatory: body.mandatory ?? 1,
+        showUpdateDialog: body.showDialog ?? 1,
         packageUrl: uploadRes.url,
+        bundleUrl: uploadRes.url,
+        installerSourceUrl: body.installUrl,
+        platforms: this.stringList(body.platform),
+        architectures: this.stringList(body.architecture),
+        distributionChannel: body.channel,
         updateType: UpdateType.Hot,
         ip: fetchIP(req),
-        createTime: new Date()
+        createTime,
+        createdAt: createTime
       },
       audience.userIds
     )
@@ -831,6 +866,39 @@ export class VersionService {
         error instanceof Error ? error.message : 'Invalid release audience'
       )
     }
+  }
+
+  private stringList(value?: string) {
+    if (!value) {
+      return []
+    }
+    return Array.from(
+      new Set(
+        value
+          .split(',')
+          .map(item => item.trim())
+          .filter(Boolean)
+      )
+    )
+  }
+
+  private versionCodeList(value?: string) {
+    return this.stringList(value)
+      .map(item => normalizeVersionValue(item))
+      .filter((item): item is number => item !== undefined)
+  }
+
+  private legacyCompatibleVersionCodes(
+    targetVersionCode: number | string,
+    value?: string
+  ) {
+    const target = normalizeVersionValue(targetVersionCode)
+    return Array.from(
+      new Set([
+        ...(target === undefined ? [] : [target]),
+        ...this.versionCodeList(value)
+      ])
+    )
   }
 
   private normalizeDynamicResult(table: Table, record: Record<string, any>) {
