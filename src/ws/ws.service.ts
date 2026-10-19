@@ -1,7 +1,10 @@
 import { Logger } from '@nestjs/common'
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets'
 import { SubscribeMessage } from '@nestjs/websockets'
-import { OtaVersionQueryService } from '@/api/version/ota-version-query.service'
+import {
+  OtaVersionQueryService,
+  ReleaseCatalog
+} from '@/api/version/ota-version-query.service'
 import { Server, Socket } from 'socket.io'
 import { LastMessageService } from '@/api/message/last-message.service'
 import {
@@ -9,6 +12,10 @@ import {
   AckUserIdDto,
   TargetedMessageEnvelope
 } from '@/api/message/message.dto'
+import {
+  ApplicationSubscriber,
+  ConnectionSubscriptionStore
+} from '@/realtime/subscriptions/connection-subscription.store'
 
 type OtaNameMessage = {
   otaName: string
@@ -68,13 +75,26 @@ export class WsService {
   @WebSocketServer()
   server: Server
 
+  private readonly deliveredReleases = new Map<
+    string,
+    Map<string, Record<string, unknown>>
+  >()
+
   constructor(
     private readonly otaVersionQueryService: OtaVersionQueryService,
-    private readonly lastMessageService: LastMessageService
+    private readonly lastMessageService: LastMessageService,
+    private readonly subscriptions: ConnectionSubscriptionStore = new ConnectionSubscriptionStore()
   ) {}
 
   handleConnection(client: Socket) {
+    this.subscriptions.connect(client.id)
     this.logger.log(`client connected: ${client.id}`)
+  }
+
+  handleDisconnect(client: Socket) {
+    this.subscriptions.disconnect(client.id)
+    this.deliveredReleases.delete(client.id)
+    this.logger.log(`client disconnected: ${client.id}`)
   }
 
   private getOtaNameRoom(otaName: string) {
@@ -99,40 +119,46 @@ export class WsService {
     return ids
   }
 
-  async sendOtaNameMessage(otaName: string, data: any) {
-    return this.server.to(this.getOtaNameRoom(otaName)).emit(otaName, data)
+  sendOtaNameMessage(otaName: string, data: any) {
+    return Promise.resolve(
+      this.server.to(this.getOtaNameRoom(otaName)).emit(otaName, data)
+    )
   }
 
-  async sendUserIdMessage(userId: string, data: TargetedMessageEnvelope) {
-    return this.server.to(this.getUserIdRoom(userId)).emit(userId, data)
-  }
+  async dispatchApplicationUpdate(otaName: string) {
+    const catalog = await this.otaVersionQueryService.loadCatalog(otaName, true)
+    const subscribers = this.subscriptions.getApplicationSubscribers(otaName)
+    const result = { scanned: subscribers.length, updated: 0, revoked: 0 }
 
-  async sendUniqueIdMessage(uniqueId: string, data: TargetedMessageEnvelope) {
-    return this.server.to(this.getUniqueIdRoom(uniqueId)).emit(uniqueId, data)
-  }
-
-  async getSubscribedUserIds(name?: string) {
-    const roomPrefix = 'userId:'
-    const namePrefix = name ? `${name}:` : undefined
-    const userIds = new Set<string>()
-    const sockets = await this.server.fetchSockets()
-
-    for (const socket of sockets) {
-      for (const room of socket.rooms) {
-        if (!room.startsWith(roomPrefix)) {
-          continue
-        }
-
-        const userId = room.slice(roomPrefix.length)
-        if (userId && (!namePrefix || userId.startsWith(namePrefix))) {
-          userIds.add(userId)
-        }
+    for (let index = 0; index < subscribers.length; index += 1) {
+      const emitted = this.emitCurrentDecision(
+        subscribers[index],
+        catalog,
+        true
+      )
+      result.updated += emitted.updated
+      result.revoked += emitted.revoked
+      if ((index + 1) % 100 === 0) {
+        await new Promise<void>(resolve => setImmediate(resolve))
       }
     }
+    return result
+  }
 
-    return Array.from(userIds).sort((left, right) => {
-      return left.localeCompare(right)
-    })
+  sendUserIdMessage(userId: string, data: TargetedMessageEnvelope) {
+    return Promise.resolve(
+      this.server.to(this.getUserIdRoom(userId)).emit(userId, data)
+    )
+  }
+
+  sendUniqueIdMessage(uniqueId: string, data: TargetedMessageEnvelope) {
+    return Promise.resolve(
+      this.server.to(this.getUniqueIdRoom(uniqueId)).emit(uniqueId, data)
+    )
+  }
+
+  getSubscribedUserIds(name?: string) {
+    return Promise.resolve(this.subscriptions.getSubscribedUserIds(name))
   }
 
   @SubscribeMessage('userId:subscribe')
@@ -145,6 +171,7 @@ export class WsService {
     }
 
     await client.join(this.getUserIdRoom(data.userId))
+    this.subscriptions.subscribeUserId(client.id, data.userId)
 
     try {
       const msg = await this.lastMessageService.queryUserId({
@@ -160,6 +187,8 @@ export class WsService {
       )
     }
 
+    await this.recomputeConnectionApplications(client)
+
     return { uid: data.userId }
   }
 
@@ -173,6 +202,8 @@ export class WsService {
     }
 
     await client.leave(this.getUserIdRoom(data.userId))
+    this.subscriptions.unsubscribeUserId(client.id, data.userId)
+    await this.recomputeConnectionApplications(client)
     return { uid: data.userId }
   }
 
@@ -186,6 +217,7 @@ export class WsService {
     }
 
     await client.join(this.getUniqueIdRoom(data.uniqueId))
+    this.subscriptions.subscribeUniqueId(client.id, data.uniqueId)
 
     try {
       const msg = await this.lastMessageService.queryUniqueId({
@@ -214,6 +246,7 @@ export class WsService {
     }
 
     await client.leave(this.getUniqueIdRoom(data.uniqueId))
+    this.subscriptions.unsubscribeUniqueId(client.id, data.uniqueId)
     return { uniqueId: data.uniqueId }
   }
 
@@ -227,20 +260,26 @@ export class WsService {
     }
 
     await client.join(this.getOtaNameRoom(data.otaName))
+    const nativeVersionCode = Number(data.ver)
+    if (!data.platform || !Number.isFinite(nativeVersionCode)) {
+      this.subscriptions.unsubscribeApplication(client.id, data.otaName)
+      this.deliveredReleases.get(client.id)?.delete(data.otaName)
+      return { ota: data.otaName }
+    }
+    const subscriber = this.subscriptions.subscribeApplication(client.id, {
+      appName: data.otaName,
+      platform: data.platform,
+      architecture: data.architecture,
+      distributionChannel: data.channel,
+      nativeVersionCode,
+      installedReleaseSequence: Number(data.id) || 0
+    })
 
     try {
-      const latestOtaMessage =
-        await this.otaVersionQueryService.findLatestAvailableVersion({
-          name: data.otaName,
-          platform: data.platform!,
-          architecture: data.architecture,
-          channel: data.channel,
-          ver: data.ver!,
-          id: data.id
-        })
-      if (latestOtaMessage) {
-        client.emit(data.otaName, latestOtaMessage)
-      }
+      const catalog = await this.otaVersionQueryService.loadCatalog(
+        data.otaName
+      )
+      this.emitCurrentDecision(subscriber, catalog, true, client)
     } catch (error) {
       this.logger.error(
         `otaName replay failed: ${data.otaName}`,
@@ -261,6 +300,8 @@ export class WsService {
     }
 
     await client.leave(this.getOtaNameRoom(data.otaName))
+    this.subscriptions.unsubscribeApplication(client.id, data.otaName)
+    this.deliveredReleases.get(client.id)?.delete(data.otaName)
     return { ota: data.otaName }
   }
 
@@ -303,5 +344,78 @@ export class WsService {
   @SubscribeMessage('message')
   handleMessage(client: Socket, data: string) {
     return { event: 'message', data: { type: data, data: client.id } }
+  }
+
+  private async recomputeConnectionApplications(client: Socket) {
+    const appNames = this.subscriptions.getConnectionApplications(client.id)
+    for (const appName of appNames) {
+      const subscriber = this.subscriptions.getApplicationSubscriber(
+        client.id,
+        appName
+      )
+      if (!subscriber) {
+        continue
+      }
+      const catalog = await this.otaVersionQueryService.loadCatalog(appName)
+      this.emitCurrentDecision(subscriber, catalog, false, client)
+    }
+  }
+
+  private emitCurrentDecision(
+    subscriber: ApplicationSubscriber,
+    catalog: ReleaseCatalog,
+    force: boolean,
+    knownClient?: Socket
+  ) {
+    const result = { updated: 0, revoked: 0 }
+    if (!this.subscriptions.isCurrent(subscriber)) {
+      return result
+    }
+
+    const client =
+      knownClient ?? this.server.sockets.sockets.get(subscriber.socketId)
+    if (!client) {
+      return result
+    }
+    const application = subscriber.application
+    const payload = this.otaVersionQueryService.resolveAvailableVersion(
+      {
+        name: application.appName,
+        platform: application.platform,
+        architecture: application.architecture,
+        channel: application.distributionChannel,
+        ver: application.nativeVersionCode,
+        id: application.installedReleaseSequence,
+        userIds: Array.from(subscriber.userIds)
+      },
+      catalog
+    )
+    if (!this.subscriptions.isCurrent(subscriber)) {
+      return result
+    }
+
+    const socketDeliveries =
+      this.deliveredReleases.get(subscriber.socketId) ??
+      new Map<string, Record<string, unknown>>()
+    const previous = socketDeliveries.get(application.appName)
+    const previousId = Number(previous?.id)
+    const nextId = Number(payload?.id)
+
+    if (previous && (!payload || previousId !== nextId)) {
+      client.emit(application.appName, { ...previous, enable: 0 })
+      socketDeliveries.delete(application.appName)
+      result.revoked += 1
+    }
+    if (payload && (force || previousId !== nextId)) {
+      client.emit(application.appName, payload)
+      socketDeliveries.set(application.appName, payload)
+      result.updated += 1
+    }
+    if (socketDeliveries.size) {
+      this.deliveredReleases.set(subscriber.socketId, socketDeliveries)
+    } else {
+      this.deliveredReleases.delete(subscriber.socketId)
+    }
+    return result
   }
 }

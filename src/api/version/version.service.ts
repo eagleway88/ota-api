@@ -105,7 +105,10 @@ export class VersionService {
       }
     )
 
-    if (created) await this.wsService.sendOtaNameMessage(body.name, created)
+    if (created) {
+      this.otaVersionQueryService.invalidate(body.name)
+      await this.wsService.dispatchApplicationUpdate(body.name)
+    }
 
     return apiUtil.data(created)
   }
@@ -175,7 +178,10 @@ export class VersionService {
         createTime: new Date()
       }
     )
-    if (created) await this.wsService.sendOtaNameMessage(body.name, created)
+    if (created) {
+      this.otaVersionQueryService.invalidate(body.name)
+      await this.wsService.dispatchApplicationUpdate(body.name)
+    }
     return apiUtil.data(created)
   }
 
