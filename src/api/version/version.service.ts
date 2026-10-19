@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common'
+import { ConflictException, Injectable, Optional } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource, QueryRunner, Table } from 'typeorm'
 import { Request } from 'express'
@@ -307,15 +307,26 @@ export class VersionService {
       await this.resolveTablePrefix(body.name)
     )
     const queryRunner = this.dataSource.createQueryRunner()
+    let errorLockName: string | undefined
+    let errorLockAcquired = false
 
     await queryRunner.connect()
 
     try {
-      await this.ensureTable(queryRunner, table)
+      await this.assertPreparedTable(queryRunner, table.name)
 
       const now = new Date()
       const extras = this.normalizeExtras(body.extras)
       const errorHash = this.buildAppErrorHash(body)
+      errorLockName = `ota_app_error_${errorHash}`
+      const lockRows = (await queryRunner.query(
+        'SELECT GET_LOCK(?, 10) AS acquired',
+        [errorLockName]
+      )) as Array<{ acquired: number | string }>
+      errorLockAcquired = Number(lockRows[0]?.acquired) === 1
+      if (!errorLockAcquired) {
+        throw new ConflictException('Error report aggregation is busy')
+      }
       const existing = await queryRunner.manager
         .createQueryBuilder()
         .select('*')
@@ -387,6 +398,9 @@ export class VersionService {
         )
       )
     } finally {
+      if (errorLockAcquired && errorLockName) {
+        await queryRunner.query('SELECT RELEASE_LOCK(?)', [errorLockName])
+      }
       await queryRunner.release()
     }
   }
@@ -556,6 +570,7 @@ export class VersionService {
     await queryRunner.connect()
 
     try {
+      await this.assertPreparedTable(queryRunner, table.name)
       return await this.insertIntoDynamicTableByQueryRunner(
         queryRunner,
         table,
@@ -575,7 +590,15 @@ export class VersionService {
       const queryRunner = this.dataSource.createQueryRunner()
       await queryRunner.connect()
       try {
-        await this.ensureTable(queryRunner, table)
+        await this.assertPreparedTable(queryRunner, table.name)
+        const insertPayload = this.prepareDynamicPayload(table, payload)
+        await queryRunner.manager
+          .createQueryBuilder()
+          .insert()
+          .into(table.name)
+          .values(insertPayload)
+          .orIgnore()
+          .execute()
         const existing = await queryRunner.manager
           .createQueryBuilder()
           .select('*')
@@ -588,6 +611,7 @@ export class VersionService {
             unknown
           >
         }
+        throw new Error('Idempotent status report was not persisted')
       } finally {
         await queryRunner.release()
       }
@@ -629,8 +653,7 @@ export class VersionService {
         created = (await this.insertIntoDynamicTableByQueryRunner(
           queryRunner,
           table,
-          payload,
-          false
+          payload
         )) as Record<string, unknown>
         const releaseId = String(created.releaseId)
         if (userIds.length) {
@@ -672,13 +695,8 @@ export class VersionService {
   private async insertIntoDynamicTableByQueryRunner(
     queryRunner: QueryRunner,
     table: Table,
-    payload: Record<string, any>,
-    ensure = true
+    payload: Record<string, any>
   ) {
-    if (ensure) {
-      await this.ensureTable(queryRunner, table)
-    }
-
     const insertPayload = this.prepareDynamicPayload(table, payload)
     const insertRes = await queryRunner.manager
       .createQueryBuilder()
@@ -766,6 +784,15 @@ export class VersionService {
     await this.syncTableColumns(queryRunner, table)
     if (table.name.endsWith('_version')) {
       await this.ensureVersionTableAutoIncrement(queryRunner, table.name)
+    }
+  }
+
+  private async assertPreparedTable(
+    queryRunner: QueryRunner,
+    tableName: string
+  ) {
+    if (!(await queryRunner.hasTable(tableName))) {
+      throw new Error(`Application schema is not ready: ${tableName}`)
     }
   }
 

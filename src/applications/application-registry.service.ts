@@ -7,9 +7,12 @@ import {
 } from '@/infrastructure/persistence/application-table-resolver'
 import {
   calculateNextReleaseSequence,
+  createAppErrorLogTable,
+  createErrorTable,
+  createSuccessTable,
   createVersionTable
 } from '@/utils/version'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { GlobalAuditContext, insertGlobalAudit } from '@/admin/global-audit'
 
 export type RegisteredApplication = {
@@ -77,8 +80,21 @@ export class ApplicationRegistryService {
     const operationId = randomUUID()
     let tablePrefix: string | undefined
     let shouldAudit = false
+    const prepareLockName = `ota_app_prepare_${createHash('sha256')
+      .update(appName)
+      .digest('hex')
+      .slice(0, 40)}`
+    let prepareLockAcquired = false
     await queryRunner.connect()
     try {
+      const lockRows = (await queryRunner.query(
+        'SELECT GET_LOCK(?, 30) AS acquired',
+        [prepareLockName]
+      )) as Array<{ acquired: number | string }>
+      prepareLockAcquired = Number(lockRows[0]?.acquired) === 1
+      if (!prepareLockAcquired) {
+        throw new ConflictException('Application preparation is busy')
+      }
       await this.ensureGlobalTables(queryRunner)
       await queryRunner.startTransaction()
       try {
@@ -122,8 +138,8 @@ export class ApplicationRegistryService {
         throw new Error('Application table prefix was not allocated')
       }
       const tables = this.tableResolver.resolve(appName, tablePrefix)
-      await this.ensureVersionTable(queryRunner, appName, tables)
-      await this.ensureApplicationTables(queryRunner, tables)
+      await this.ensureVersionTable(queryRunner, tables)
+      await this.ensureApplicationTables(queryRunner, tables, shouldAudit)
       await queryRunner.startTransaction()
       try {
         await queryRunner.manager
@@ -189,6 +205,9 @@ export class ApplicationRegistryService {
       }
       throw error
     } finally {
+      if (prepareLockAcquired) {
+        await queryRunner.query('SELECT RELEASE_LOCK(?)', [prepareLockName])
+      }
       await queryRunner.release()
     }
   }
@@ -290,9 +309,25 @@ export class ApplicationRegistryService {
 
   private async ensureApplicationTables(
     queryRunner: QueryRunner,
-    tables: ApplicationTables
+    tables: ApplicationTables,
+    requiresBackfill: boolean
   ) {
     const prefix = tables.prefix
+    await this.ensureReportingTable(
+      queryRunner,
+      createSuccessTable(prefix),
+      requiresBackfill
+    )
+    await this.ensureReportingTable(
+      queryRunner,
+      createErrorTable(prefix),
+      requiresBackfill
+    )
+    await this.ensureReportingTable(
+      queryRunner,
+      createAppErrorLogTable(prefix),
+      requiresBackfill
+    )
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS \`${tables.releaseUser}\` (
         id BIGINT NOT NULL AUTO_INCREMENT,
@@ -422,10 +457,9 @@ export class ApplicationRegistryService {
 
   private async ensureVersionTable(
     queryRunner: QueryRunner,
-    appName: string,
     tables: ApplicationTables
   ) {
-    const desired = createVersionTable(appName)
+    const desired = createVersionTable(tables.prefix)
     const current = await queryRunner.getTable(tables.version)
     if (!current) {
       await queryRunner.createTable(desired, true)
@@ -465,5 +499,70 @@ export class ApplicationRegistryService {
     await queryRunner.query(
       `ALTER TABLE \`${tables.version}\` AUTO_INCREMENT = ${nextSequence}`
     )
+  }
+
+  private async ensureReportingTable(
+    queryRunner: QueryRunner,
+    desired: ReturnType<typeof createSuccessTable>,
+    requiresBackfill: boolean
+  ) {
+    const current = await queryRunner.getTable(desired.name)
+    if (!current) {
+      await queryRunner.createTable(desired, true)
+      return
+    }
+
+    const currentColumns = new Set(current.columns.map(column => column.name))
+    const missingColumns = desired.columns.filter(
+      column => !currentColumns.has(column.name)
+    )
+    if (missingColumns.length) {
+      await queryRunner.addColumns(desired.name, missingColumns)
+    }
+    if (missingColumns.length || requiresBackfill) {
+      await this.backfillReportingTable(queryRunner, desired.name)
+    }
+  }
+
+  private async backfillReportingTable(
+    queryRunner: QueryRunner,
+    tableName: string
+  ) {
+    if (tableName.endsWith('_success')) {
+      await queryRunner.query(
+        `UPDATE \`${tableName}\`
+         SET release_sequence = COALESCE(release_sequence, ver_id),
+             reported_username = COALESCE(reported_username, username),
+             created_at = COALESCE(created_at, create_time)
+         WHERE release_sequence IS NULL OR reported_username IS NULL OR created_at IS NULL`
+      )
+      return
+    }
+    if (tableName.endsWith('_error')) {
+      await queryRunner.query(
+        `UPDATE \`${tableName}\`
+         SET release_sequence = COALESCE(release_sequence, ver_id),
+             reported_username = COALESCE(reported_username, username),
+             created_at = COALESCE(created_at, create_time),
+             updated_at = COALESCE(updated_at, update_time, create_time)
+         WHERE release_sequence IS NULL OR reported_username IS NULL OR created_at IS NULL OR updated_at IS NULL`
+      )
+      return
+    }
+    if (tableName.endsWith('_error_log')) {
+      await queryRunner.query(
+        `UPDATE \`${tableName}\`
+         SET error_hash = COALESCE(NULLIF(error_hash, ''), MD5(CONCAT_WS('|',
+               IFNULL(name, ''), IFNULL(platform, ''), IFNULL(CAST(ver AS CHAR), ''),
+               IFNULL(kind, ''), IFNULL(message, ''), IFNULL(stack, '')))),
+             report_count = CASE WHEN report_count IS NULL OR report_count <= 0 THEN 1 ELSE report_count END,
+             reported_username = COALESCE(reported_username, username),
+             update_time = COALESCE(update_time, create_time),
+             created_at = COALESCE(created_at, create_time),
+             updated_at = COALESCE(updated_at, update_time, create_time)
+         WHERE error_hash IS NULL OR error_hash = '' OR report_count IS NULL OR report_count <= 0
+            OR reported_username IS NULL OR update_time IS NULL OR created_at IS NULL OR updated_at IS NULL`
+      )
+    }
   }
 }
