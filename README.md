@@ -19,9 +19,10 @@ NestJS + TypeORM + MySQL + Socket.IO 的模块化 OTA 与普通消息服务。
 yarn install
 yarn test --runInBand --watchman=false
 yarn build
+yarn lint
 ```
 
-完整 lint 命令为 `yarn lint`。仓库历史代码仍有存量严格类型 lint 问题；本次新增模块均通过定向 ESLint。
+完整仓库已通过 ESLint、TypeScript 构建和 Jest 测试。`yarn lint` 带有 `--fix`，CI 中如需只检查不改文件，可直接执行 `eslint "{src,apps,libs,test}/**/*.ts"`。
 
 ## 数据库与启动
 
