@@ -52,7 +52,7 @@ export class ApplicationTableResolver {
   resolve(appName: string, registeredPrefix?: string): ApplicationTables {
     this.validateAppName(appName)
     const prefix = registeredPrefix ?? this.legacyPrefix(appName)
-    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(prefix)) {
+    if (!/^[A-Za-z0-9_]{1,40}$/.test(prefix)) {
       throw new BadRequestException('Invalid registered table prefix')
     }
 

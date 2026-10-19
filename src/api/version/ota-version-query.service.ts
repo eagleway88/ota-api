@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Optional } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { createVersionTable } from '@/utils/version'
@@ -14,6 +14,7 @@ import {
   serializeLegacyRelease
 } from '@/compat/legacy/mappers/release.mapper'
 import { createTableName } from '@/utils/version'
+import { ApplicationRegistryService } from '@/applications/application-registry.service'
 
 export type ReleaseCatalog = {
   available: AvailableReleaseSnapshot
@@ -38,7 +39,10 @@ export class OtaVersionQueryService {
   >()
   private readonly loads = new Map<string, Promise<ReleaseCatalog>>()
 
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    @Optional() private readonly applications?: ApplicationRegistryService
+  ) {}
 
   async findLatestAvailableVersion(query: OtaVersionQuery) {
     if (!query.name || !query.platform || query.ver == null) {
@@ -108,8 +112,13 @@ export class OtaVersionQueryService {
   private async loadCatalogFromDatabase(
     appName: string
   ): Promise<ReleaseCatalog> {
-    const table = createVersionTable(appName)
-    const audienceTableName = `${createTableName(appName)}_release_user`
+    const application = this.applications
+      ? await this.applications.resolve(appName)
+      : undefined
+    const table = createVersionTable(application?.tablePrefix ?? appName)
+    const audienceTableName =
+      application?.tables.releaseUser ??
+      `${createTableName(appName)}_release_user`
     const queryRunner = this.dataSource.createQueryRunner()
 
     await queryRunner.connect()

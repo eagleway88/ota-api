@@ -52,12 +52,13 @@ export class VersionService {
     await queryRunner.connect()
 
     try {
-      const versionTableName = createVersionTable(name).name
-      const tablePrefix = versionTableName.slice(0, -'_version'.length)
+      const tablePrefix = await this.resolveTablePrefix(name)
+      const versionTableName = createVersionTable(tablePrefix).name
+      const physicalTablePrefix = versionTableName.slice(0, -'_version'.length)
       const tables = await queryRunner.getTables([
         versionTableName,
-        `${tablePrefix}_success`,
-        `${tablePrefix}_error`
+        `${physicalTablePrefix}_success`,
+        `${physicalTablePrefix}_error`
       ])
       const tableNames = new Set(tables.map(table => table.name))
       const versionTable = tables.find(table => table.name === versionTableName)
@@ -73,12 +74,12 @@ export class VersionService {
       )
       const successCounts = await this.queryVersionStatusCounts(
         queryRunner,
-        `${tablePrefix}_success`,
+        `${physicalTablePrefix}_success`,
         tableNames
       )
       const errorCounts = await this.queryVersionStatusCounts(
         queryRunner,
-        `${tablePrefix}_error`,
+        `${physicalTablePrefix}_error`,
         tableNames
       )
       const versions: VersionListItemDto[] = records.map(record => ({
@@ -104,7 +105,7 @@ export class VersionService {
     const createTime = new Date()
     const targetVersionCode = normalizeVersionValue(body.ver) ?? body.ver
     const created = await this.insertPublishedVersion(
-      createVersionTable(body.name),
+      createVersionTable(await this.resolveTablePrefix(body.name)),
       {
         ...body,
         releaseId: randomUUID(),
@@ -197,7 +198,7 @@ export class VersionService {
     }
 
     const created = await this.insertPublishedVersion(
-      createVersionTable(body.name),
+      createVersionTable(await this.resolveTablePrefix(body.name)),
       {
         ...body,
         releaseId: randomUUID(),
@@ -240,7 +241,7 @@ export class VersionService {
 
     const createTime = new Date()
     const created = await this.insertStatusReport(
-      createSuccessTable(body.name),
+      createSuccessTable(await this.resolveTablePrefix(body.name)),
       {
         ...body,
         releaseSequence: body.verId,
@@ -262,7 +263,7 @@ export class VersionService {
     const now = new Date()
     if (body.id) {
       const updated = await this.updateDynamicTable(
-        createErrorTable(body.name),
+        createErrorTable(await this.resolveTablePrefix(body.name)),
         body.id,
         {
           ...body,
@@ -283,7 +284,7 @@ export class VersionService {
     }
 
     const created = await this.insertStatusReport(
-      createErrorTable(body.name),
+      createErrorTable(await this.resolveTablePrefix(body.name)),
       {
         ...body,
         releaseSequence: body.verId,
@@ -302,7 +303,9 @@ export class VersionService {
   }
 
   async appError(req: Request, body: AppErrorLogDto) {
-    const table = createAppErrorLogTable(body.name)
+    const table = createAppErrorLogTable(
+      await this.resolveTablePrefix(body.name)
+    )
     const queryRunner = this.dataSource.createQueryRunner()
 
     await queryRunner.connect()
@@ -389,7 +392,7 @@ export class VersionService {
   }
 
   private async assertVersionExists(name: string, id: number) {
-    const table = createVersionTable(name)
+    const table = createVersionTable(await this.resolveTablePrefix(name))
     const queryRunner = this.dataSource.createQueryRunner()
 
     await queryRunner.connect()
@@ -604,8 +607,13 @@ export class VersionService {
     const application = this.applications
       ? await this.applications.prepare(appName)
       : undefined
+    if (application) {
+      table = createVersionTable(application.tablePrefix)
+    }
     const queryRunner = this.dataSource.createQueryRunner()
-    const audienceTable = createReleaseUserTable(appName)
+    const audienceTable = createReleaseUserTable(
+      application?.tablePrefix ?? appName
+    )
     let created: Record<string, unknown> | undefined
     await queryRunner.connect()
 
@@ -950,6 +958,13 @@ export class VersionService {
         error instanceof Error ? error.message : 'Invalid release audience'
       )
     }
+  }
+
+  private async resolveTablePrefix(appName: string) {
+    const application = this.applications
+      ? await this.applications.resolve(appName)
+      : undefined
+    return application?.tablePrefix ?? appName
   }
 
   private stringList(value?: string) {
