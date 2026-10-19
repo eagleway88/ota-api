@@ -242,6 +242,36 @@ export class ApplicationRegistryService {
     }
   }
 
+  async incrementCatalogRevision(
+    queryRunner: QueryRunner,
+    appName: string,
+    updatedAt = new Date()
+  ) {
+    const result = await queryRunner.manager
+      .createQueryBuilder()
+      .update('ota_applications')
+      .set({
+        catalog_revision: () => 'catalog_revision + 1',
+        updated_at: updatedAt
+      })
+      .where('app_name = :appName', { appName })
+      .execute()
+    if (!result.affected) {
+      throw new Error(`Application is not registered: ${appName}`)
+    }
+    const application = await queryRunner.manager
+      .createQueryBuilder()
+      .select('application.catalog_revision', 'catalogRevision')
+      .from('ota_applications', 'application')
+      .where('application.app_name = :appName', { appName })
+      .getRawOne<{ catalogRevision: number | string }>()
+    const revision = Number(application?.catalogRevision)
+    if (!Number.isSafeInteger(revision) || revision < 1) {
+      throw new Error(`Application catalog revision is invalid: ${appName}`)
+    }
+    return revision
+  }
+
   private async allocatePrefix(queryRunner: QueryRunner, appName: string) {
     const initialPrefix = this.tableResolver.collisionSafePrefix(appName)
     const prefixOwner = await this.findByPrefix(queryRunner, initialPrefix)

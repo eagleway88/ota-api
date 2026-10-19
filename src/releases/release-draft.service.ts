@@ -481,21 +481,18 @@ export class ReleaseDraftService {
         })
         .where('release_id = :releaseId', { releaseId })
         .execute()
-      await queryRunner.manager
-        .createQueryBuilder()
-        .update('ota_applications')
-        .set({
-          catalog_revision: () => 'catalog_revision + 1',
-          updated_at: now
-        })
-        .where('app_name = :appName', { appName })
-        .execute()
+      const catalogRevision = await this.applications.incrementCatalogRevision(
+        queryRunner,
+        appName,
+        now
+      )
       await this.insertPublishTask(
         queryRunner,
         application,
         taskId,
         operationId,
         releaseId,
+        catalogRevision,
         now
       )
       await this.insertPublishAudit(queryRunner, application, {
@@ -670,6 +667,7 @@ export class ReleaseDraftService {
     taskId: string,
     operationId: string,
     releaseId: string,
+    catalogRevision: number,
     now: Date
   ) {
     await queryRunner.manager
@@ -681,7 +679,7 @@ export class ReleaseDraftService {
         operation_id: operationId,
         release_id: releaseId,
         action: 'publish',
-        requested_revision: 1,
+        requested_revision: catalogRevision,
         status: 'pending',
         attempt_count: 0,
         max_attempts: 5,

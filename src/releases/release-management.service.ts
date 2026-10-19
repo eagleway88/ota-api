@@ -107,21 +107,16 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
   ) {
     const operationId = randomUUID()
     const taskId = randomUUID()
-    await queryRunner.manager
-      .createQueryBuilder()
-      .update('ota_applications')
-      .set({
-        catalog_revision: () => 'catalog_revision + 1',
-        updated_at: new Date()
-      })
-      .where('app_name = :appName', { appName: application.appName })
-      .execute()
+    const catalogRevision = await this.applications.incrementCatalogRevision(
+      queryRunner,
+      application.appName
+    )
     await this.insertTask(queryRunner, application, {
       taskId,
       operationId,
       releaseId,
       action: 'publish',
-      revision: 1
+      revision: catalogRevision
     })
     await this.insertAudit(queryRunner, application, {
       context,
@@ -492,21 +487,16 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
         .set({ policy_revision: revisionAfter })
         .where('release_id = :releaseId', { releaseId })
         .execute()
-      await queryRunner.manager
-        .createQueryBuilder()
-        .update('ota_applications')
-        .set({
-          catalog_revision: () => 'catalog_revision + 1',
-          updated_at: new Date()
-        })
-        .where('app_name = :appName', { appName })
-        .execute()
+      const catalogRevision = await this.applications.incrementCatalogRevision(
+        queryRunner,
+        appName
+      )
       await this.insertTask(queryRunner, application, {
         taskId,
         operationId,
         releaseId,
         action: mutation.action,
-        revision: revisionAfter
+        revision: catalogRevision
       })
       await this.insertAudit(queryRunner, application, {
         context,
@@ -541,18 +531,28 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
     taskId: string,
     requestId?: string
   ) {
+    if (this.configService.get('PUBLISH_TASKS_PAUSED') === 'true') {
+      return false
+    }
     const claimed = await this.claimTask(application, taskId, requestId)
     if (!claimed) {
       return false
     }
 
-    const { attemptNo, leaseToken, logId, startedAt } = claimed
+    const { attemptNo, leaseToken, logId, startedAt, effectiveRevision } =
+      claimed
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     try {
       const result = await this.wsService.dispatchApplicationUpdate(
         application.appName,
-        () => this.hasTaskLease(application, taskId, leaseToken)
+        () =>
+          this.renewTaskLease(
+            application,
+            taskId,
+            leaseToken,
+            effectiveRevision
+          )
       )
       const finishedAt = new Date()
       await queryRunner.startTransaction()
@@ -575,7 +575,7 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
         await queryRunner.rollbackTransaction()
         return false
       }
-      await queryRunner.manager
+      const logCompletion = await queryRunner.manager
         .createQueryBuilder()
         .update(application.tables.publishTaskLog)
         .set({
@@ -594,6 +594,10 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
           status: 'running'
         })
         .execute()
+      if (!logCompletion.affected) {
+        await queryRunner.rollbackTransaction()
+        return false
+      }
       await queryRunner.commitTransaction()
       return true
     } catch (error) {
@@ -603,12 +607,26 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
       const failedAt = new Date()
       const summary =
         error instanceof Error ? error.message.slice(0, 512) : 'Dispatch failed'
+      const errorCode = summary.includes('catalog revision')
+        ? 'catalog_revision_changed'
+        : summary.includes('lease')
+          ? 'lease_lost'
+          : 'dispatch_failed'
+      await queryRunner.startTransaction()
       const task = await queryRunner.manager
         .createQueryBuilder()
-        .select(['task.max_attempts'])
+        .select('*')
         .from(application.tables.publishTask, 'task')
-        .where('task.task_id = :taskId', { taskId })
-        .getRawOne<{ max_attempts: number | string }>()
+        .setLock('pessimistic_write')
+        .where(
+          'task.task_id = :taskId AND task.status = :status AND task.lease_token = :leaseToken',
+          { taskId, status: 'running', leaseToken }
+        )
+        .getRawOne<Record<string, unknown>>()
+      if (!task) {
+        await queryRunner.commitTransaction()
+        return false
+      }
       const transition = publishTaskFailureTransition(
         attemptNo,
         Number(task?.max_attempts ?? 5),
@@ -622,24 +640,21 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
           next_run_at: transition.nextRunAt,
           lease_owner: null,
           lease_until: null,
-          last_error_code: 'dispatch_failed',
+          last_error_code: errorCode,
           last_error_summary: summary,
           updated_at: failedAt,
           finished_at: transition.finishedAt
         })
-        .where(
-          'task_id = :taskId AND status = :status AND lease_token = :leaseToken',
-          { taskId, status: 'running', leaseToken }
-        )
+        .where('task_id = :taskId', { taskId })
         .execute()
-      await queryRunner.manager
+      const logFailure = await queryRunner.manager
         .createQueryBuilder()
         .update(application.tables.publishTaskLog)
         .set({
           status: 'failed',
           finished_at: failedAt,
           duration_ms: failedAt.getTime() - startedAt.getTime(),
-          error_code: 'dispatch_failed',
+          error_code: errorCode,
           error_summary: summary,
           metrics_complete: 0
         })
@@ -648,8 +663,16 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
           status: 'running'
         })
         .execute()
+      if (!logFailure.affected) {
+        await queryRunner.rollbackTransaction()
+        return false
+      }
+      await queryRunner.commitTransaction()
       return false
     } finally {
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction()
+      }
       await queryRunner.release()
     }
   }
@@ -720,6 +743,19 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
 
       const leaseToken = Number(task.lease_token) + 1
       const logId = randomUUID()
+      const catalog = await queryRunner.manager
+        .createQueryBuilder()
+        .select('application.catalog_revision', 'catalogRevision')
+        .from('ota_applications', 'application')
+        .setLock('pessimistic_read')
+        .where('application.app_name = :appName', {
+          appName: application.appName
+        })
+        .getRawOne<{ catalogRevision: number | string }>()
+      const effectiveRevision = Number(catalog?.catalogRevision)
+      if (!Number.isSafeInteger(effectiveRevision)) {
+        throw new Error('Application catalog revision is unavailable')
+      }
       await queryRunner.manager
         .createQueryBuilder()
         .update(application.tables.publishTask)
@@ -745,7 +781,7 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
           worker_id: this.workerId,
           lease_token: leaseToken,
           status: 'running',
-          effective_revision: Number(task.requested_revision),
+          effective_revision: effectiveRevision,
           started_at: now,
           metrics_complete: 0,
           request_id: requestId
@@ -756,7 +792,8 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
         attemptNo,
         leaseToken,
         logId,
-        startedAt: now
+        startedAt: now,
+        effectiveRevision
       }
     } catch (error) {
       await queryRunner.rollbackTransaction()
@@ -766,24 +803,49 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async hasTaskLease(
+  private async renewTaskLease(
     application: RegisteredApplication,
     taskId: string,
-    leaseToken: number
+    leaseToken: number,
+    effectiveRevision: number
   ) {
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
+    await queryRunner.startTransaction()
     try {
-      const task = await queryRunner.manager
+      const catalog = await queryRunner.manager
         .createQueryBuilder()
-        .select('task.task_id', 'taskId')
-        .from(application.tables.publishTask, 'task')
-        .where('task.task_id = :taskId', { taskId })
-        .andWhere('task.status = :status', { status: 'running' })
-        .andWhere('task.lease_token = :leaseToken', { leaseToken })
-        .andWhere('task.lease_until > :now', { now: new Date() })
-        .getRawOne<{ taskId: string }>()
-      return Boolean(task)
+        .select('application.catalog_revision', 'catalogRevision')
+        .from('ota_applications', 'application')
+        .setLock('pessimistic_read')
+        .where('application.app_name = :appName', {
+          appName: application.appName
+        })
+        .getRawOne<{ catalogRevision: number | string }>()
+      if (Number(catalog?.catalogRevision) !== effectiveRevision) {
+        await queryRunner.commitTransaction()
+        throw new Error('Publish catalog revision changed')
+      }
+      const now = new Date()
+      const renewal = await queryRunner.manager
+        .createQueryBuilder()
+        .update(application.tables.publishTask)
+        .set({
+          lease_until: new Date(now.getTime() + 300_000),
+          updated_at: now
+        })
+        .where(
+          'task_id = :taskId AND status = :status AND lease_token = :leaseToken AND lease_until > :now',
+          { taskId, status: 'running', leaseToken, now }
+        )
+        .execute()
+      await queryRunner.commitTransaction()
+      return Boolean(renewal.affected)
+    } catch (error) {
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction()
+      }
+      throw error
     } finally {
       await queryRunner.release()
     }
