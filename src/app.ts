@@ -6,6 +6,7 @@ import { join } from 'path'
 import { AdminModule } from './api/admin/admin.module'
 import { VersionModule } from './api/version/version.module'
 import { MessageModule } from './api/message/message.module'
+import { ReleasesModule } from './releases/releases.module'
 
 @Module({
   imports: [
@@ -29,8 +30,9 @@ import { MessageModule } from './api/message/message.module'
     }),
     AdminModule,
     MessageModule,
-    VersionModule
+    VersionModule,
+    ReleasesModule
   ],
   controllers: []
 })
-export class AppModule { }
+export class AppModule {}

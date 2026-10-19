@@ -12,7 +12,7 @@ export class AuthGuard implements CanActivate {
     private reflector: Reflector,
     private jwtService: JwtService,
     private configService: ConfigService
-  ) { }
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -30,9 +30,14 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Missing token')
     }
     try {
-      await this.jwtService.verifyAsync(token, {
+      const payload = await this.jwtService.verifyAsync<{
+        sub?: number
+        uid?: number
+        username?: string
+      }>(token, {
         secret: secret
       })
+      ;(request as Request & { user?: typeof payload }).user = payload
     } catch {
       throw new UnauthorizedException('Invalid token')
     }
