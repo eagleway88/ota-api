@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { randomUUID } from 'crypto'
 import { SendUserIdDto, TargetedMessageEnvelope } from './message.dto'
-import { AckUniqueIdDto, AckUserIdDto, SendUniqueIdDto, } from './message.dto'
+import { AckUniqueIdDto, AckUserIdDto, SendUniqueIdDto } from './message.dto'
 import { UserIdMessage } from '@/entities/user-id.entity'
 import { UniqueIdMessage } from '@/entities/unique-id.entity'
 
@@ -13,8 +13,8 @@ export class LastMessageService {
     @InjectRepository(UserIdMessage)
     private readonly tUserId: Repository<UserIdMessage>,
     @InjectRepository(UniqueIdMessage)
-    private readonly tUniqueId: Repository<UniqueIdMessage>,
-  ) { }
+    private readonly tUniqueId: Repository<UniqueIdMessage>
+  ) {}
 
   private parseContent(content: string) {
     try {
@@ -75,7 +75,10 @@ export class LastMessageService {
     }
     const dates = this.getEnvelopeDates(entity)
     if (!dates || this.isExpired(dates.expiresAt)) {
-      await this.tUserId.delete({ userId: body.userId })
+      await this.tUserId.delete({
+        userId: body.userId,
+        messageId: entity.messageId
+      })
       return null
     }
     return this.toEnvelope(entity, dates)
@@ -85,13 +88,16 @@ export class LastMessageService {
     const now = new Date()
     const messageId = randomUUID()
     const expiresAt = new Date(now.getTime() + ttlMs)
-    await this.tUserId.upsert({
-      userId: body.userId,
-      content: this.stringifyContent(body.data),
-      messageId,
-      updatedAt: now,
-      expiresAt
-    }, ['userId'])
+    await this.tUserId.upsert(
+      {
+        userId: body.userId,
+        content: this.stringifyContent(body.data),
+        messageId,
+        updatedAt: now,
+        expiresAt
+      },
+      ['userId']
+    )
 
     return {
       messageId,
@@ -119,7 +125,10 @@ export class LastMessageService {
     }
     const dates = this.getEnvelopeDates(entity)
     if (!dates || this.isExpired(dates.expiresAt)) {
-      await this.tUniqueId.delete({ uniqueId: body.uniqueId })
+      await this.tUniqueId.delete({
+        uniqueId: body.uniqueId,
+        messageId: entity.messageId
+      })
       return null
     }
     return this.toEnvelope(entity, dates)
@@ -129,13 +138,16 @@ export class LastMessageService {
     const now = new Date()
     const messageId = randomUUID()
     const expiresAt = new Date(now.getTime() + ttlMs)
-    await this.tUniqueId.upsert({
-      uniqueId: body.uniqueId,
-      content: this.stringifyContent(body.data),
-      messageId,
-      updatedAt: now,
-      expiresAt
-    }, ['uniqueId'])
+    await this.tUniqueId.upsert(
+      {
+        uniqueId: body.uniqueId,
+        content: this.stringifyContent(body.data),
+        messageId,
+        updatedAt: now,
+        expiresAt
+      },
+      ['uniqueId']
+    )
 
     return {
       messageId,

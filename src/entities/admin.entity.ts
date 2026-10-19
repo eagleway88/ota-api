@@ -14,7 +14,8 @@ export class Admin {
   @Column('varchar', {
     name: 'username',
     comment: '用户名',
-    length: 255
+    length: 191,
+    unique: true
   })
   username: string
 
@@ -22,7 +23,8 @@ export class Admin {
   @Column('varchar', {
     name: 'password',
     comment: '密码',
-    length: 255
+    length: 255,
+    select: false
   })
   password: string
 
