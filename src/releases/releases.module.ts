@@ -7,6 +7,9 @@ import { ReleaseDraftService } from './release-draft.service'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { MulterModule } from '@nestjs/platform-express'
 import { otaUploadMaxBytes } from '@/api/version/upload-policy'
+import { RetentionService } from '@/infrastructure/tasks/retention.service'
+import { AdminAuditController } from '@/admin/admin-audit.controller'
+import { AdminAuditService } from '@/admin/admin-audit.service'
 
 @Module({
   imports: [
@@ -23,8 +26,13 @@ import { otaUploadMaxBytes } from '@/api/version/upload-policy'
       })
     })
   ],
-  controllers: [ReleaseManagementController],
-  providers: [ReleaseManagementService, ReleaseDraftService],
+  controllers: [ReleaseManagementController, AdminAuditController],
+  providers: [
+    ReleaseManagementService,
+    ReleaseDraftService,
+    RetentionService,
+    AdminAuditService
+  ],
   exports: [ReleaseManagementService]
 })
 export class ReleasesModule {}

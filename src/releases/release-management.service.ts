@@ -16,6 +16,7 @@ import { mapLegacyReleaseRecord } from '@/compat/legacy/mappers/release.mapper'
 import { normalizeLegacyReleaseAudience } from '@/compat/legacy/http/release-audience.mapper'
 import { OtaVersionQueryService } from '@/api/version/ota-version-query.service'
 import { WsService } from '@/ws/ws.service'
+import { ConfigService } from '@nestjs/config'
 import {
   canClaimPublishTask,
   PublishTaskStatus,
@@ -67,6 +68,7 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly configService: ConfigService,
     private readonly applications: ApplicationRegistryService,
     private readonly otaVersionQueryService: OtaVersionQueryService,
     private readonly wsService: WsService
@@ -74,7 +76,10 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     void this.recoverTasks()
-    this.taskTimer = setInterval(() => void this.recoverTasks(), 5_000)
+    const pollMs = Number(
+      this.configService.get('PUBLISH_TASK_POLL_MS') ?? 5_000
+    )
+    this.taskTimer = setInterval(() => void this.recoverTasks(), pollMs)
     this.taskTimer.unref()
   }
 
@@ -785,6 +790,9 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async recoverTasks() {
+    if (this.configService.get('PUBLISH_TASKS_PAUSED') === 'true') {
+      return
+    }
     if (this.recoveringTasks) {
       return
     }
