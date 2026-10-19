@@ -1,6 +1,6 @@
 import { Table } from 'typeorm'
 
-export const VERSION_TABLE_AUTO_INCREMENT_START = 1000
+export const VERSION_TABLE_AUTO_INCREMENT_START = 2000
 
 function normalizeVersionToken(value: string | number) {
   const normalized = String(value).trim().replaceAll('.', '')

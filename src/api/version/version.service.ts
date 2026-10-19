@@ -22,6 +22,7 @@ import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
 import { VersionListItemDto, VersionListQueryDto } from './version.dto'
 import { WsService } from '@/ws/ws.service'
 import { otaUploadMaxBytes, validateOtaUpload } from './upload-policy'
+import { userIdMatchesContext } from '@/contracts/user-id'
 
 @Injectable()
 export class VersionService {
@@ -110,8 +111,6 @@ export class VersionService {
   }
 
   async check(body: CheckDto) {
-    const table = createVersionTable(body.name)
-    const queryRunner = this.dataSource.createQueryRunner()
     const normalizedVer =
       typeof body.ver === 'string'
         ? (normalizeVersionValue(body.ver) ??
@@ -123,17 +122,11 @@ export class VersionService {
       body.ver = normalizedVer
     }
 
-    await queryRunner.connect()
-
-    try {
-      const hasTable = await queryRunner.hasTable(table.name)
-      if (!hasTable) {
-        return apiUtil.data(null)
-      }
-
-      await this.syncTableColumns(queryRunner, table)
-    } finally {
-      await queryRunner.release()
+    if (
+      body.userId &&
+      !userIdMatchesContext(body.userId, body.name, body.platform)
+    ) {
+      return apiUtil.error('Invalid userId for application or platform')
     }
 
     return apiUtil.data(
@@ -143,7 +136,8 @@ export class VersionService {
         architecture: body.architecture,
         platform: body.platform,
         ver: normalizedVer,
-        id: body.id
+        id: body.id,
+        userIds: body.userId ? [body.userId] : undefined
       })
     )
   }

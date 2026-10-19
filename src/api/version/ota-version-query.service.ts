@@ -1,17 +1,25 @@
 import { Injectable } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
-import { underlineToHump } from '@/utils'
 import { createVersionTable } from '@/utils/version'
-import { UpdateType } from './version.dto'
+import {
+  defaultApplicationUpdatePolicy,
+  ClientUpdateContext
+} from '@/contracts/releases'
+import { resolveUpdate } from '@/updates/decision/resolve-update'
+import {
+  mapLegacyReleaseRecord,
+  serializeLegacyRelease
+} from '@/compat/legacy/mappers/release.mapper'
 
-type OtaVersionQuery = {
+export type OtaVersionQuery = {
   name: string
   platform: string
   architecture?: string
   channel?: string
   ver: number
   id?: number
+  userIds?: readonly string[]
 }
 
 @Injectable()
@@ -34,114 +42,37 @@ export class OtaVersionQueryService {
         return null
       }
 
-      const baseQuery = queryRunner.manager
+      const records = await queryRunner.manager
         .createQueryBuilder()
         .select('*')
         .from(table.name, 'version')
-        .where('version.enable = :enable', { enable: 1 })
-        .andWhere(
-          "FIND_IN_SET(:platform, REPLACE(version.platform, ' ', '')) > 0",
-          {
-            platform: query.platform
-          }
-        )
+        .where('version.name = :name', { name: query.name })
+        .getRawMany<Record<string, unknown>>()
 
-      if (query.architecture) {
-        baseQuery.andWhere(
-          "(version.architecture IS NULL OR version.architecture = '' OR FIND_IN_SET(:architecture, REPLACE(version.architecture, ' ', '')) > 0)",
-          { architecture: query.architecture }
-        )
+      const releases = records.map(mapLegacyReleaseRecord)
+      const context: ClientUpdateContext = {
+        appName: query.name,
+        platform: query.platform,
+        architecture: query.architecture,
+        distributionChannel: query.channel,
+        nativeVersionCode: query.ver,
+        installedReleaseSequence: query.id ?? 0,
+        userIds: new Set(query.userIds ?? [])
       }
+      const decision = resolveUpdate(
+        context,
+        { revision: 0, releases },
+        { revision: 0, userIdsByReleaseId: new Map() },
+        defaultApplicationUpdatePolicy
+      )
 
-      if (query.channel) {
-        baseQuery.andWhere(
-          '(version.channel = :channel OR version.channel IS NULL OR version.channel = "")',
-          { channel: query.channel }
-        )
-      }
-
-      const fullUpdateQuery = baseQuery
-        .clone()
-        .andWhere('version.update_type = :updateType', {
-          updateType: UpdateType.Full
-        })
-        .andWhere('version.ver > :ver', { ver: query.ver })
-
-      const fullUpdate = await fullUpdateQuery
-        .clone()
-        .orderBy('version.ver', 'DESC')
-        .addOrderBy('version.id', 'DESC')
-        .getRawOne()
-
-      if (fullUpdate) {
-        const hasPendingMandatoryFullUpdate = !!(await fullUpdateQuery
-          .clone()
-          .select('version.id', 'id')
-          .andWhere('version.mandatory = :mandatory', { mandatory: 1 })
-          .limit(1)
-          .getRawOne())
-
-        const isMandatory = hasPendingMandatoryFullUpdate
-          ? 1
-          : fullUpdate.mandatory
-
-        return underlineToHump({
-          ...fullUpdate,
-          mandatory: isMandatory,
-          show_dialog: isMandatory ? 1 : fullUpdate.show_dialog,
-          // 兼容旧版字段
-          type: 1,
-          downloadUrl: fullUpdate.install_url,
-          isMandatory
-        })
-      }
-
-      const hotUpdateQuery = baseQuery
-        .clone()
-        .andWhere('version.update_type = :updateType', {
-          updateType: UpdateType.Hot
-        })
-        .andWhere(
-          `(version.ver = :ver
-            OR (
-              version.base_versions IS NOT NULL
-              AND version.base_versions <> ''
-              AND FIND_IN_SET(:verString, REPLACE(version.base_versions, ' ', '')) > 0
-            ))`,
-          {
-            ver: query.ver,
-            verString: String(query.ver)
-          }
-        )
-        .andWhere('version.id > :id', { id: query.id || 0 })
-
-      const hotUpdate = await hotUpdateQuery
-        .clone()
-        .orderBy('version.id', 'DESC')
-        .getRawOne()
-
-      if (!hotUpdate) {
-        return null
-      }
-
-      const hasPendingMandatoryHotUpdate = !!(await hotUpdateQuery
-        .clone()
-        .select('version.id', 'id')
-        .andWhere('version.mandatory = :mandatory', { mandatory: 1 })
-        .limit(1)
-        .getRawOne())
-
-      const isMandatory = hasPendingMandatoryHotUpdate ? 1 : hotUpdate.mandatory
-
-      return underlineToHump({
-        ...hotUpdate,
-        mandatory: isMandatory,
-        show_dialog: isMandatory ? 1 : hotUpdate.show_dialog,
-        // 兼容旧版字段
-        type: 0,
-        downloadUrl: hotUpdate.package_url,
-        isMandatory
-      })
+      return decision.release
+        ? serializeLegacyRelease(
+            decision.release,
+            decision.mandatory,
+            decision.showUpdateDialog
+          )
+        : null
     } finally {
       await queryRunner.release()
     }

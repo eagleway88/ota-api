@@ -187,6 +187,11 @@ export class CheckDto extends OmitType(VersionDto, ['id', 'platform']) {
 
   /** 已更新的版本ID */
   id?: number
+
+  /** 可选的完整用户标识，用于定向发布资格判断 */
+  @IsOptional()
+  @IsString()
+  userId?: string
 }
 
 export class UploadDto extends OmitType(VersionDto, ['id', 'ver']) {
