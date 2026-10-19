@@ -4,14 +4,14 @@ const TARGETED_MESSAGE_ID_MAX_LENGTH = 191
 
 export type TargetedMessageEnvelope = {
   messageId: string | null
-  data: any
+  data: unknown
   updatedAt: string
   expiresAt: string | null
   ackRequired: boolean
 }
 
 export class SendGlobalDto {
-  data?: any
+  data?: unknown
 }
 
 export class SendOtaNameDto {
@@ -19,8 +19,7 @@ export class SendOtaNameDto {
   @IsNotEmpty()
   otaName: string
 
-  data?: any
-
+  data?: unknown
 }
 
 export class SendUserIdDto {
@@ -29,10 +28,9 @@ export class SendUserIdDto {
   @MaxLength(TARGETED_MESSAGE_ID_MAX_LENGTH)
   userId: string
 
-  data?: any
+  data?: unknown
 
   resend?: boolean
-
 }
 
 export class AckUserIdDto {
@@ -52,7 +50,7 @@ export class SendUniqueIdDto {
   @MaxLength(TARGETED_MESSAGE_ID_MAX_LENGTH)
   uniqueId: string
 
-  data?: any
+  data?: unknown
 
   resend?: boolean
 }
@@ -70,7 +68,7 @@ export class AckUniqueIdDto {
 
 class SendRes {
   messageId?: string
-  data: any
+  data: unknown
   updatedAt: string
   expiresAt?: string
   ackRequired: boolean

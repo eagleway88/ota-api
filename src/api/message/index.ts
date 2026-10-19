@@ -37,7 +37,7 @@ export class MessageController {
   }
 
   @Post('send-ota-name')
-  @ApiOperation({ summary: '发送OTA通知' })
+  @ApiOperation({ summary: '发送兼容的普通应用消息' })
   @ApiResult({ type: String })
   sendOtaName(@Req() req: Request, @Body() body: SendOtaNameDto) {
     return this.service.sendOtaName(req, body)

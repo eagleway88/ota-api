@@ -33,7 +33,7 @@ export class MessageService {
     return Math.max(ttlSeconds, 1) * 1000
   }
 
-  private createTransientEnvelope(data: any): TargetedMessageEnvelope {
+  private createTransientEnvelope(data: unknown): TargetedMessageEnvelope {
     return {
       messageId: null,
       data,
@@ -62,7 +62,7 @@ export class MessageService {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
-    const bool = await this.wsService.sendOtaNameMessage(
+    const bool = await this.wsService.sendApplicationMessage(
       body.otaName,
       body.data
     )

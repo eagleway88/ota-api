@@ -18,13 +18,13 @@ export class LastMessageService {
 
   private parseContent(content: string) {
     try {
-      return JSON.parse(content)
+      return JSON.parse(content) as unknown
     } catch {
       return content
     }
   }
 
-  private stringifyContent(data: any) {
+  private stringifyContent(data: unknown) {
     return typeof data === 'string' ? data : JSON.stringify(data)
   }
 

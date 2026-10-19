@@ -109,7 +109,7 @@ export class WsService {
     return `uniqueId:${uniqueId}`
   }
 
-  async sendMessage(data?: any) {
+  async sendMessage(data?: unknown) {
     const ids: Record<string, boolean> = {}
     const sockets = await this.server.fetchSockets()
     for (const client of sockets) {
@@ -119,7 +119,7 @@ export class WsService {
     return ids
   }
 
-  sendOtaNameMessage(otaName: string, data: any) {
+  sendApplicationMessage(otaName: string, data: unknown) {
     return Promise.resolve(
       this.server.to(this.getOtaNameRoom(otaName)).emit(otaName, data)
     )
