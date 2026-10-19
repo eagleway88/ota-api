@@ -9,7 +9,9 @@ import {
   Query,
   Req
 } from '@nestjs/common'
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
+import { UploadedFile, UseInterceptors } from '@nestjs/common'
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger'
+import { FileInterceptor } from '@nestjs/platform-express'
 import type { Request } from 'express'
 import { randomUUID } from 'crypto'
 import { fetchIP } from '@/utils'
@@ -21,6 +23,11 @@ import {
   ReplaceReleaseUsersDto,
   TaskListQueryDto
 } from './release-management.dto'
+import { ReleaseDraftService } from './release-draft.service'
+import {
+  CreateReleaseDraftDto,
+  UpdateReleaseDraftDto
+} from './release-draft.dto'
 
 type AuthenticatedRequest = Request & {
   user?: { sub?: number; uid?: number; username?: string }
@@ -30,7 +37,10 @@ type AuthenticatedRequest = Request & {
 @ApiBearerAuth()
 @Controller('v2/apps/:appName')
 export class ReleaseManagementController {
-  constructor(private readonly service: ReleaseManagementService) {}
+  constructor(
+    private readonly service: ReleaseManagementService,
+    private readonly drafts: ReleaseDraftService
+  ) {}
 
   @Post('prepare')
   prepare(@Param('appName') appName: string) {
@@ -39,7 +49,31 @@ export class ReleaseManagementController {
 
   @Get('releases')
   list(@Param('appName') appName: string, @Query() query: ReleaseListQueryDto) {
-    return this.service.list(appName, query)
+    return this.drafts.list(appName, query)
+  }
+
+  @Post('artifacts')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadArtifact(
+    @Param('appName') appName: string,
+    @UploadedFile() file?: Express.Multer.File
+  ) {
+    return this.drafts.uploadArtifact(appName, file)
+  }
+
+  @Post('releases')
+  createDraft(
+    @Req() request: AuthenticatedRequest,
+    @Param('appName') appName: string,
+    @Body() body: CreateReleaseDraftDto
+  ) {
+    const idempotencyKey = request.headers['idempotency-key']
+    return this.drafts.createDraft(
+      appName,
+      body,
+      typeof idempotencyKey === 'string' ? idempotencyKey : undefined
+    )
   }
 
   @Get('releases/:releaseId')
@@ -47,7 +81,25 @@ export class ReleaseManagementController {
     @Param('appName') appName: string,
     @Param('releaseId') releaseId: string
   ) {
-    return this.service.detail(appName, releaseId)
+    return this.drafts.detail(appName, releaseId)
+  }
+
+  @Patch('releases/:releaseId')
+  updateDraft(
+    @Param('appName') appName: string,
+    @Param('releaseId') releaseId: string,
+    @Body() body: UpdateReleaseDraftDto
+  ) {
+    return this.drafts.updateDraft(appName, releaseId, body)
+  }
+
+  @Post('releases/:releaseId/publish')
+  publish(
+    @Req() request: AuthenticatedRequest,
+    @Param('appName') appName: string,
+    @Param('releaseId') releaseId: string
+  ) {
+    return this.drafts.publish(appName, releaseId, this.context(request))
   }
 
   @Get('releases/:releaseId/users')
