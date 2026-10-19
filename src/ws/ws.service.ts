@@ -125,12 +125,18 @@ export class WsService {
     )
   }
 
-  async dispatchApplicationUpdate(otaName: string) {
+  async dispatchApplicationUpdate(
+    otaName: string,
+    isLeaseValid?: () => Promise<boolean>
+  ) {
     const catalog = await this.otaVersionQueryService.loadCatalog(otaName, true)
     const subscribers = this.subscriptions.getApplicationSubscribers(otaName)
     const result = { scanned: subscribers.length, updated: 0, revoked: 0 }
 
     for (let index = 0; index < subscribers.length; index += 1) {
+      if (index % 100 === 0 && isLeaseValid && !(await isLeaseValid())) {
+        throw new Error('Publish task lease was lost')
+      }
       const emitted = this.emitCurrentDecision(
         subscribers[index],
         catalog,

@@ -131,6 +131,36 @@ export class ApplicationRegistryService {
     }
   }
 
+  async listReady(): Promise<RegisteredApplication[]> {
+    const queryRunner = this.dataSource.createQueryRunner()
+    await queryRunner.connect()
+    try {
+      if (!(await queryRunner.hasTable('ota_applications'))) {
+        return []
+      }
+      const rows = await queryRunner.manager
+        .createQueryBuilder()
+        .select('*')
+        .from('ota_applications', 'application')
+        .where('application.status = :status', { status: 'ready' })
+        .orderBy('application.app_name', 'ASC')
+        .getRawMany<Record<string, unknown>>()
+      return rows.map(row => {
+        const appName = String(row.app_name)
+        const tablePrefix = String(row.table_prefix)
+        return {
+          appName,
+          tablePrefix,
+          schemaVersion: Number(row.schema_version),
+          status: 'ready' as const,
+          tables: this.tableResolver.resolve(appName, tablePrefix)
+        }
+      })
+    } finally {
+      await queryRunner.release()
+    }
+  }
+
   private async allocatePrefix(queryRunner: QueryRunner, appName: string) {
     const initialPrefix = this.tableResolver.collisionSafePrefix(appName)
     const prefixOwner = await this.findByPrefix(queryRunner, initialPrefix)
