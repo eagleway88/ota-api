@@ -19,6 +19,7 @@ import { ReleaseManagementService } from './release-management.service'
 import {
   ChangeReleaseScopeDto,
   AuditListQueryDto,
+  ReleaseCatalogListQueryDto,
   ReleaseListQueryDto,
   ReplaceReleaseUsersDto,
   TaskListQueryDto
@@ -51,7 +52,10 @@ export class ReleaseManagementController {
   }
 
   @Get('releases')
-  list(@Param('appName') appName: string, @Query() query: ReleaseListQueryDto) {
+  list(
+    @Param('appName') appName: string,
+    @Query() query: ReleaseCatalogListQueryDto
+  ) {
     return this.drafts.list(appName, query)
   }
 

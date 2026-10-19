@@ -20,7 +20,7 @@ import { RegisteredApplication } from '@/applications/application-registry.servi
 import { normalizeReleaseAudience } from './release-audience'
 import { mapStoredReleaseRecord } from './release-record.mapper'
 import { ReleaseOperationContext } from './release-management.service'
-import { ReleaseListQueryDto } from './release-management.dto'
+import { ReleaseCatalogListQueryDto } from './release-management.dto'
 import {
   CreateReleaseDraftDto,
   UpdateReleaseDraftDto
@@ -202,39 +202,108 @@ export class ReleaseDraftService {
     }
   }
 
-  async list(appName: string, query: ReleaseListQueryDto) {
+  async list(appName: string, query: ReleaseCatalogListQueryDto) {
     const application = await this.applications.resolve(appName)
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     try {
-      const entries: Array<Record<string, unknown>> = []
-      if (await queryRunner.hasTable(application.tables.version)) {
-        const published = await queryRunner.manager
+      const page = Math.max(Number(query.page) || 1, 1)
+      const pageSize = Math.min(Math.max(Number(query.pageSize) || 20, 1), 100)
+      const offset = (page - 1) * pageSize
+      const includePublished = !query.status || query.status === 'published'
+      const includeDraft = !query.status || query.status === 'draft'
+      const hasPublished =
+        includePublished &&
+        (await queryRunner.hasTable(application.tables.version))
+      const hasDraft =
+        includeDraft &&
+        (await queryRunner.hasTable(application.tables.releaseDraft))
+      const keyQueries: string[] = []
+      const keyParameters: unknown[] = []
+      let total = 0
+
+      if (hasPublished) {
+        const count = await queryRunner.manager
+          .createQueryBuilder()
+          .select('COUNT(*)', 'total')
+          .from(application.tables.version, 'version')
+          .where('version.name = :appName', { appName })
+          .getRawOne<{ total: string | number }>()
+        total += Number(count?.total ?? 0)
+        keyQueries.push(
+          `SELECT 'published' AS record_kind, release_id AS record_key, ` +
+            `COALESCE(updated_at, created_at, create_time) AS sort_time ` +
+            `FROM \`${application.tables.version}\` WHERE name = ?`
+        )
+        keyParameters.push(appName)
+      }
+      if (hasDraft) {
+        const count = await queryRunner.manager
+          .createQueryBuilder()
+          .select('COUNT(*)', 'total')
+          .from(application.tables.releaseDraft, 'draft')
+          .where('draft.status = :status', { status: 'draft' })
+          .getRawOne<{ total: string | number }>()
+        total += Number(count?.total ?? 0)
+        keyQueries.push(
+          `SELECT 'draft' AS record_kind, release_id AS record_key, updated_at AS sort_time ` +
+            `FROM \`${application.tables.releaseDraft}\` WHERE status = 'draft'`
+        )
+      }
+      if (!keyQueries.length || offset >= total) {
+        return apiUtil.page([], total)
+      }
+
+      const keys = (await queryRunner.query(
+        `SELECT record_kind, record_key FROM (${keyQueries.join(
+          ' UNION ALL '
+        )}) AS release_catalog ` +
+          'ORDER BY sort_time DESC, record_key DESC LIMIT ? OFFSET ?',
+        [...keyParameters, pageSize, offset]
+      )) as Array<{ record_kind: 'draft' | 'published'; record_key: string }>
+      const publishedIds = keys
+        .filter(key => key.record_kind === 'published')
+        .map(key => key.record_key)
+      const draftIds = keys
+        .filter(key => key.record_kind === 'draft')
+        .map(key => key.record_key)
+      const entries = new Map<string, Record<string, unknown>>()
+
+      if (publishedIds.length) {
+        const records = await queryRunner.manager
           .createQueryBuilder()
           .select('*')
           .from(application.tables.version, 'version')
-          .where('version.name = :appName', { appName })
+          .where('version.release_id IN (:...releaseIds)', {
+            releaseIds: publishedIds
+          })
           .getRawMany<Record<string, unknown>>()
-        entries.push(...published.map(record => this.toPublished(record)))
+        for (const record of records) {
+          entries.set(
+            `published:${String(record.release_id)}`,
+            this.toPublished(record)
+          )
+        }
       }
-      if (await queryRunner.hasTable(application.tables.releaseDraft)) {
+      if (draftIds.length) {
         const drafts = await queryRunner.manager
           .createQueryBuilder()
           .select('*')
           .from(application.tables.releaseDraft, 'draft')
-          .where('draft.status = :status', { status: 'draft' })
+          .where('draft.release_id IN (:...releaseIds)', {
+            releaseIds: draftIds
+          })
           .getRawMany<StoredDraft>()
-        entries.push(...drafts.map(draft => this.toDraft(draft)))
+        for (const draft of drafts) {
+          entries.set(`draft:${draft.release_id}`, this.toDraft(draft))
+        }
       }
-      entries.sort(
-        (left, right) => this.entryTime(right) - this.entryTime(left)
-      )
-      const page = Math.max(Number(query.page) || 1, 1)
-      const pageSize = Math.min(Math.max(Number(query.pageSize) || 20, 1), 100)
-      const offset = (page - 1) * pageSize
+
       return apiUtil.page(
-        entries.slice(offset, offset + pageSize),
-        entries.length
+        keys
+          .map(key => entries.get(`${key.record_kind}:${key.record_key}`))
+          .filter((entry): entry is Record<string, unknown> => !!entry),
+        total
       )
     } finally {
       await queryRunner.release()
@@ -728,18 +797,6 @@ export class ReleaseDraftService {
       createdAt:
         release.legacyPayload.createdAt ?? release.legacyPayload.createTime
     }
-  }
-
-  private entryTime(entry: Record<string, unknown>) {
-    const value = entry.updatedAt ?? entry.createdAt
-    if (value instanceof Date) {
-      return value.getTime()
-    }
-    if (typeof value === 'string' || typeof value === 'number') {
-      const time = new Date(value).getTime()
-      return Number.isNaN(time) ? 0 : time
-    }
-    return 0
   }
 
   private storageKey(url: string) {

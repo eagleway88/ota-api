@@ -22,6 +22,12 @@ export class ReleaseListQueryDto {
   pageSize?: string
 }
 
+export class ReleaseCatalogListQueryDto extends ReleaseListQueryDto {
+  @IsOptional()
+  @IsIn(['draft', 'published'])
+  status?: 'draft' | 'published'
+}
+
 export class ReplaceReleaseUsersDto {
   @IsArray()
   @ArrayMaxSize(5000)
