@@ -81,6 +81,20 @@ export function createSuccessTable(name: string) {
       { name: 'platform', type: 'varchar', comment: '平台' },
       { name: 'ver', type: 'int', comment: '版本号(1.0.0=100)' },
       { name: 'ver_id', type: 'int', comment: 'tableName_version表id' },
+      {
+        name: 'release_sequence',
+        type: 'int',
+        isNullable: true,
+        comment: '正式发布序号'
+      },
+      {
+        name: 'report_id',
+        type: 'varchar',
+        length: '36',
+        isNullable: true,
+        isUnique: true,
+        comment: '可选幂等上报ID'
+      },
       { name: 'ip', type: 'varchar', isNullable: true, comment: 'IP' },
       { name: 'extras', type: 'json', isNullable: true, comment: '扩展信息' },
       {
@@ -89,7 +103,14 @@ export function createSuccessTable(name: string) {
         isNullable: true,
         comment: '用户名'
       },
-      { name: 'create_time', type: 'datetime', isNullable: true }
+      {
+        name: 'reported_username',
+        type: 'varchar',
+        isNullable: true,
+        comment: '正式上报展示用户名'
+      },
+      { name: 'create_time', type: 'datetime', isNullable: true },
+      { name: 'created_at', type: 'datetime', isNullable: true }
     ]
   })
 }
@@ -110,6 +131,20 @@ export function createErrorTable(name: string) {
       { name: 'platform', type: 'varchar', comment: '平台' },
       { name: 'ver', type: 'int', comment: '版本号(1.0.0=100)' },
       { name: 'ver_id', type: 'int', comment: 'tableName_version表id' },
+      {
+        name: 'release_sequence',
+        type: 'int',
+        isNullable: true,
+        comment: '正式发布序号'
+      },
+      {
+        name: 'report_id',
+        type: 'varchar',
+        length: '36',
+        isNullable: true,
+        isUnique: true,
+        comment: '可选幂等上报ID'
+      },
       { name: 'ip', type: 'varchar', isNullable: true, comment: 'IP' },
       { name: 'extras', type: 'json', isNullable: true, comment: '扩展信息' },
       { name: 'message', type: 'text', isNullable: true, comment: '错误信息' },
@@ -119,8 +154,16 @@ export function createErrorTable(name: string) {
         isNullable: true,
         comment: '用户名'
       },
+      {
+        name: 'reported_username',
+        type: 'varchar',
+        isNullable: true,
+        comment: '正式上报展示用户名'
+      },
       { name: 'update_time', type: 'datetime', isNullable: true },
-      { name: 'create_time', type: 'datetime', isNullable: true }
+      { name: 'create_time', type: 'datetime', isNullable: true },
+      { name: 'updated_at', type: 'datetime', isNullable: true },
+      { name: 'created_at', type: 'datetime', isNullable: true }
     ]
   })
 }
@@ -157,8 +200,16 @@ export function createAppErrorLogTable(name: string) {
         isNullable: true,
         comment: '用户名'
       },
+      {
+        name: 'reported_username',
+        type: 'varchar',
+        isNullable: true,
+        comment: '正式上报展示用户名'
+      },
       { name: 'update_time', type: 'datetime', isNullable: true },
-      { name: 'create_time', type: 'datetime', isNullable: true }
+      { name: 'create_time', type: 'datetime', isNullable: true },
+      { name: 'updated_at', type: 'datetime', isNullable: true },
+      { name: 'created_at', type: 'datetime', isNullable: true }
     ]
   })
 }

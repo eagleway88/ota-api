@@ -1,5 +1,12 @@
 import { IsString, IsNumber, IsNotEmpty, IsOptional } from 'class-validator'
-import { IsEnum, IsIn, IsInt, IsNumberString, Matches } from 'class-validator'
+import {
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsNumberString,
+  IsUUID,
+  Matches
+} from 'class-validator'
 import { Min } from 'class-validator'
 import { ApiProperty, OmitType } from '@nestjs/swagger'
 
@@ -177,6 +184,11 @@ export class StatusDto {
 
   username?: string
   extras?: string
+
+  /** 新版客户端可选的重试幂等标识 */
+  @IsOptional()
+  @IsUUID()
+  reportId?: string
 }
 
 export class CheckDto extends OmitType(VersionDto, ['id', 'platform']) {
@@ -239,7 +251,11 @@ export class ErrorDto extends OmitType(StatusDto, ['id']) {
   message: string
 }
 
-export class AppErrorLogDto extends OmitType(StatusDto, ['id', 'verId']) {
+export class AppErrorLogDto extends OmitType(StatusDto, [
+  'id',
+  'verId',
+  'reportId'
+]) {
   @IsString()
   @IsNotEmpty()
   kind: AppErrorKind

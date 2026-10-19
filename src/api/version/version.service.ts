@@ -238,17 +238,22 @@ export class VersionService {
   async success(req: Request, body: SuccessDto) {
     await this.assertVersionExists(body.name, body.verId)
 
-    const created = await this.insertIntoDynamicTable(
+    const createTime = new Date()
+    const created = await this.insertStatusReport(
       createSuccessTable(body.name),
       {
         ...body,
+        releaseSequence: body.verId,
+        reportedUsername: body.username,
         extras: this.normalizeExtras(body.extras),
         ip: fetchIP(req),
-        createTime: new Date()
-      }
+        createTime,
+        createdAt: createTime
+      },
+      body.reportId
     )
 
-    return apiUtil.data(created)
+    return apiUtil.data(this.serializeLegacyStatusRecord(created))
   }
 
   async error(req: Request, body: ErrorDto) {
@@ -261,27 +266,39 @@ export class VersionService {
         body.id,
         {
           ...body,
+          releaseSequence: body.verId,
+          reportedUsername: body.username,
           extras: this.normalizeExtras(body.extras),
           ip: fetchIP(req),
-          updateTime: now
+          updateTime: now,
+          updatedAt: now
         }
       )
 
-      return apiUtil.data(updated)
+      return apiUtil.data(
+        this.serializeLegacyStatusRecord(
+          updated as unknown as Record<string, unknown>
+        )
+      )
     }
 
-    const created = await this.insertIntoDynamicTable(
+    const created = await this.insertStatusReport(
       createErrorTable(body.name),
       {
         ...body,
+        releaseSequence: body.verId,
+        reportedUsername: body.username,
         extras: this.normalizeExtras(body.extras),
         ip: fetchIP(req),
         updateTime: now,
-        createTime: now
-      }
+        createTime: now,
+        updatedAt: now,
+        createdAt: now
+      },
+      body.reportId
     )
 
-    return apiUtil.data(created)
+    return apiUtil.data(this.serializeLegacyStatusRecord(created))
   }
 
   async appError(req: Request, body: AppErrorLogDto) {
@@ -308,7 +325,9 @@ export class VersionService {
           ip: fetchIP(req),
           extras,
           username: body.username,
-          updateTime: now
+          reportedUsername: body.username,
+          updateTime: now,
+          updatedAt: now
         })
 
         await queryRunner.manager
@@ -333,7 +352,12 @@ export class VersionService {
           .getRawOne()
 
         return apiUtil.data(
-          this.normalizeDynamicResult(table, updated ?? existing)
+          this.serializeLegacyStatusRecord(
+            this.normalizeDynamicResult(table, updated ?? existing) as Record<
+              string,
+              unknown
+            >
+          )
         )
       }
 
@@ -342,16 +366,23 @@ export class VersionService {
         table,
         {
           ...body,
+          reportedUsername: body.username,
           extras,
           errorHash,
           reportCount: 1,
           ip: fetchIP(req),
           updateTime: now,
-          createTime: now
+          createTime: now,
+          updatedAt: now,
+          createdAt: now
         }
       )
 
-      return apiUtil.data(created)
+      return apiUtil.data(
+        this.serializeLegacyStatusRecord(
+          created as unknown as Record<string, unknown>
+        )
+      )
     } finally {
       await queryRunner.release()
     }
@@ -530,6 +561,38 @@ export class VersionService {
     } finally {
       await queryRunner.release()
     }
+  }
+
+  private async insertStatusReport(
+    table: Table,
+    payload: Record<string, unknown>,
+    reportId?: string
+  ): Promise<Record<string, unknown>> {
+    if (reportId) {
+      const queryRunner = this.dataSource.createQueryRunner()
+      await queryRunner.connect()
+      try {
+        await this.ensureTable(queryRunner, table)
+        const existing = await queryRunner.manager
+          .createQueryBuilder()
+          .select('*')
+          .from(table.name, 'report')
+          .where('report.report_id = :reportId', { reportId })
+          .getRawOne<Record<string, unknown>>()
+        if (existing) {
+          return this.normalizeDynamicResult(table, existing) as Record<
+            string,
+            unknown
+          >
+        }
+      } finally {
+        await queryRunner.release()
+      }
+    }
+    return (await this.insertIntoDynamicTable(table, payload)) as Record<
+      string,
+      unknown
+    >
   }
 
   private async insertPublishedVersion(
@@ -973,6 +1036,31 @@ export class VersionService {
     if (!extras) return undefined
 
     return extras
+  }
+
+  private serializeLegacyStatusRecord(record: Record<string, unknown>) {
+    const fields = [
+      'id',
+      'name',
+      'platform',
+      'ver',
+      'verId',
+      'ip',
+      'extras',
+      'username',
+      'message',
+      'kind',
+      'stack',
+      'errorHash',
+      'reportCount',
+      'updateTime',
+      'createTime'
+    ]
+    return Object.fromEntries(
+      fields
+        .filter(field => record[field] !== undefined)
+        .map(field => [field, record[field]])
+    )
   }
 
   private buildAppErrorHash(body: AppErrorLogDto) {
