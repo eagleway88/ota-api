@@ -17,6 +17,8 @@ import { normalizeReleaseAudience } from './release-audience'
 import { OtaVersionQueryService } from '@/api/version/ota-version-query.service'
 import { WsService } from '@/ws/ws.service'
 import { ConfigService } from '@nestjs/config'
+import { ReleaseScope } from '@/contracts/releases'
+import { ReleaseScopeType } from '@/api/version/version.dto'
 import {
   canClaimPublishTask,
   PublishTaskStatus,
@@ -47,6 +49,20 @@ type PolicyMutation = {
     release: Record<string, unknown>
   ) => Promise<void>
 }
+
+type AudienceDraftRecord = {
+  release_id: string
+  payload: unknown
+  release_scope: string
+  user_ids: unknown
+  status: string
+}
+
+type DraftAudienceMutation =
+  | { userIds: readonly string[] }
+  | {
+      releaseScope: ReleaseScope
+    }
 
 function databaseDate(value: unknown) {
   if (value instanceof Date) {
@@ -179,21 +195,45 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
   }
 
   async users(appName: string, releaseId: string) {
-    const { application } = await this.findRelease(appName, releaseId)
+    const application = await this.applications.resolve(appName)
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     try {
-      if (!(await queryRunner.hasTable(application.tables.releaseUser))) {
-        return apiUtil.data([])
+      if (await queryRunner.hasTable(application.tables.version)) {
+        const published = await queryRunner.manager
+          .createQueryBuilder()
+          .select('version.release_id', 'releaseId')
+          .from(application.tables.version, 'version')
+          .where('version.release_id = :releaseId', { releaseId })
+          .andWhere('version.name = :appName', { appName })
+          .getRawOne<{ releaseId: string }>()
+        if (published) {
+          if (!(await queryRunner.hasTable(application.tables.releaseUser))) {
+            return apiUtil.data([])
+          }
+          const rows = await queryRunner.manager
+            .createQueryBuilder()
+            .select('audience.user_id', 'userId')
+            .from(application.tables.releaseUser, 'audience')
+            .where('audience.release_id = :releaseId', { releaseId })
+            .orderBy('audience.user_id', 'ASC')
+            .getRawMany<{ userId: string }>()
+          return apiUtil.data(rows.map(row => row.userId))
+        }
       }
-      const rows = await queryRunner.manager
-        .createQueryBuilder()
-        .select('audience.user_id', 'userId')
-        .from(application.tables.releaseUser, 'audience')
-        .where('audience.release_id = :releaseId', { releaseId })
-        .orderBy('audience.user_id', 'ASC')
-        .getRawMany<{ userId: string }>()
-      return apiUtil.data(rows.map(row => row.userId))
+      if (await queryRunner.hasTable(application.tables.releaseDraft)) {
+        const draft = await queryRunner.manager
+          .createQueryBuilder()
+          .select('draft.user_ids', 'userIds')
+          .from(application.tables.releaseDraft, 'draft')
+          .where('draft.release_id = :releaseId', { releaseId })
+          .andWhere('draft.status = :status', { status: 'draft' })
+          .getRawOne<{ userIds: unknown }>()
+        if (draft) {
+          return apiUtil.data(this.parseStoredUserIds(draft.userIds))
+        }
+      }
+      throw new NotFoundException('Release or draft does not exist')
     } finally {
       await queryRunner.release()
     }
@@ -205,6 +245,15 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
     body: ReplaceReleaseUsersDto,
     context: ReleaseOperationContext
   ) {
+    const draftResult = await this.mutateDraftAudience(
+      appName,
+      releaseId,
+      context,
+      { userIds: body.userIds }
+    )
+    if (draftResult) {
+      return draftResult
+    }
     const normalized = normalizeReleaseAudience({
       appName,
       platforms: (await this.findRelease(appName, releaseId)).release
@@ -247,6 +296,15 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
     body: ChangeReleaseScopeDto,
     context: ReleaseOperationContext
   ) {
+    const draftResult = await this.mutateDraftAudience(
+      appName,
+      releaseId,
+      context,
+      { releaseScope: body.releaseScope }
+    )
+    if (draftResult) {
+      return draftResult
+    }
     return this.mutatePolicy(appName, releaseId, context, {
       action: 'audience_changed',
       expectedRevision: body.expectedRevision,
@@ -258,6 +316,14 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
           .set({ release_scope: body.releaseScope })
           .where('release_id = :releaseId', { releaseId })
           .execute()
+        if (body.releaseScope === ReleaseScopeType.Public) {
+          await queryRunner.manager
+            .createQueryBuilder()
+            .delete()
+            .from(application.tables.releaseUser)
+            .where('release_id = :releaseId', { releaseId })
+            .execute()
+        }
       }
     })
   }
@@ -900,6 +966,145 @@ export class ReleaseManagementService implements OnModuleInit, OnModuleDestroy {
       )
     } finally {
       this.recoveringTasks = false
+    }
+  }
+
+  private async mutateDraftAudience(
+    appName: string,
+    releaseId: string,
+    context: ReleaseOperationContext,
+    mutation: DraftAudienceMutation
+  ) {
+    const application = await this.applications.resolve(appName)
+    const queryRunner = this.dataSource.createQueryRunner()
+    await queryRunner.connect()
+    try {
+      if (!(await queryRunner.hasTable(application.tables.releaseDraft))) {
+        return null
+      }
+      await queryRunner.startTransaction()
+      const draft = await queryRunner.manager
+        .createQueryBuilder()
+        .select('*')
+        .from(application.tables.releaseDraft, 'draft')
+        .setLock('pessimistic_write')
+        .where('draft.release_id = :releaseId', { releaseId })
+        .andWhere('draft.status = :status', { status: 'draft' })
+        .getRawOne<AudienceDraftRecord>()
+      if (!draft) {
+        await queryRunner.commitTransaction()
+        return null
+      }
+
+      const payload = this.parseDraftPayload(draft.payload)
+      const platforms = Array.isArray(payload.platforms)
+        ? payload.platforms.filter(
+            (platform): platform is string => typeof platform === 'string'
+          )
+        : []
+      const currentUserIds = this.parseStoredUserIds(draft.user_ids)
+      const currentScope: ReleaseScope =
+        draft.release_scope === 'allowlist' ? 'allowlist' : 'public'
+      const nextScope =
+        'releaseScope' in mutation ? mutation.releaseScope : currentScope
+      const nextUserIds =
+        'userIds' in mutation
+          ? [...mutation.userIds]
+          : nextScope === 'public'
+            ? []
+            : currentUserIds
+      const normalized = normalizeReleaseAudience({
+        appName,
+        platforms: platforms.join(','),
+        releaseScope: nextScope,
+        userIds: nextUserIds
+      })
+      const updatedAt = new Date()
+      await queryRunner.manager
+        .createQueryBuilder()
+        .update(application.tables.releaseDraft)
+        .set({
+          payload: JSON.stringify({
+            ...payload,
+            releaseScope: normalized.releaseScope,
+            userIds: normalized.userIds
+          }),
+          release_scope: normalized.releaseScope,
+          user_ids: JSON.stringify(normalized.userIds),
+          updated_at: updatedAt
+        })
+        .where('release_id = :releaseId', { releaseId })
+        .execute()
+      await queryRunner.manager
+        .createQueryBuilder()
+        .insert()
+        .into(application.tables.auditLog)
+        .values({
+          audit_id: randomUUID(),
+          operation_id: randomUUID(),
+          part_no: 1,
+          actor_type: 'admin',
+          actor_admin_id: context.actorAdminId,
+          actor_name_snapshot: context.actorName,
+          action: 'draft_audience_changed',
+          target_type: 'release_draft',
+          target_id: releaseId,
+          release_id: releaseId,
+          task_id: null,
+          revision_before: null,
+          revision_after: null,
+          change_summary: JSON.stringify({
+            releaseScope: normalized.releaseScope,
+            userCount: normalized.userIds.length
+          }),
+          result: 'succeeded',
+          request_id: context.requestId,
+          source_ip: context.sourceIp,
+          created_at: updatedAt
+        })
+        .execute()
+      await queryRunner.commitTransaction()
+      return apiUtil.data({
+        releaseId,
+        releaseScope: normalized.releaseScope,
+        userIds: normalized.userIds,
+        status: 'draft'
+      })
+    } catch (error) {
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction()
+      }
+      throw error
+    } finally {
+      await queryRunner.release()
+    }
+  }
+
+  private parseStoredUserIds(value: unknown) {
+    const parsed = this.parseJson(value)
+    if (
+      !Array.isArray(parsed) ||
+      !parsed.every(item => typeof item === 'string')
+    ) {
+      throw new Error('Stored release draft userIds are invalid')
+    }
+    return parsed.filter((item): item is string => typeof item === 'string')
+  }
+
+  private parseDraftPayload(value: unknown) {
+    const parsed = this.parseJson(value)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Stored release draft payload is invalid')
+    }
+    return parsed as Record<string, unknown>
+  }
+
+  private parseJson(value: unknown): unknown {
+    if (typeof value !== 'string') return value
+    try {
+      return JSON.parse(value) as unknown
+    } catch {
+      throw new Error('Stored release draft JSON is invalid')
     }
   }
 
