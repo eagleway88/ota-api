@@ -3,11 +3,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { join } from 'path'
 
-import { AdminModule } from './api/admin/admin.module'
-import { VersionModule } from './api/version/version.module'
-import { MessageModule } from './api/message/message.module'
 import { ReleasesModule } from './releases/releases.module'
 import { validateRuntimeConfig } from './infrastructure/config/validate-config'
+import { LegacyCompatibilityModule } from './compat/legacy/legacy.module'
 
 @Module({
   imports: [
@@ -30,9 +28,7 @@ import { validateRuntimeConfig } from './infrastructure/config/validate-config'
       }),
       inject: [ConfigService]
     }),
-    AdminModule,
-    MessageModule,
-    VersionModule,
+    LegacyCompatibilityModule,
     ReleasesModule
   ],
   controllers: []
