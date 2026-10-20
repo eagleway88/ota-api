@@ -2,6 +2,8 @@
 
 NestJS + TypeORM + MySQL + Socket.IO 的模块化 OTA 与普通消息服务。
 
+重构仍在进行中。当前已实现核心链路，但启停双写、订阅竞态、快照一致性、迁移和集成验证仍有缺口；详见 [完成度核对报告](docs/REFACTOR_PROGRESS.md)。以下能力清单不表示已经通过全部上线验收。
+
 ## 当前能力
 
 - 兼容原 `/api/version/*`、`/api/message/*`、管理员接口和 Socket.IO 事件。
