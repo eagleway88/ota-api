@@ -293,7 +293,7 @@ export class ReleaseManagementService {
         await queryRunner.manager
           .createQueryBuilder()
           .update(application.tables.version)
-          .set({ enable: enabled ? 1 : 0 })
+          .set({ enable: enabled ? 1 : 0, is_enabled: enabled ? 1 : 0 })
           .where('release_id = :releaseId', { releaseId })
           .execute()
       }
