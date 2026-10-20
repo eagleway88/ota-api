@@ -626,12 +626,10 @@ export class VersionService {
       ? await this.applications.prepare(appName, operationContext)
       : undefined
     if (application) {
-      table = createVersionTable(application.tablePrefix)
+      table = createVersionTable(application)
     }
     const queryRunner = this.dataSource.createQueryRunner()
-    const audienceTable = createReleaseUserTable(
-      application?.tablePrefix ?? appName
-    )
+    const audienceTable = createReleaseUserTable(application ?? appName)
     let created: Record<string, unknown> | undefined
     await queryRunner.connect()
 
@@ -993,7 +991,7 @@ export class VersionService {
     const application = this.applications
       ? await this.applications.resolve(appName)
       : undefined
-    return application?.tablePrefix ?? appName
+    return application ? { tablePrefix: application.tablePrefix } : appName
   }
 
   private stringList(value?: string) {

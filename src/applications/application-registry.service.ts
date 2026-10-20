@@ -351,17 +351,17 @@ export class ApplicationRegistryService {
     const prefix = tables.prefix
     await this.ensureReportingTable(
       queryRunner,
-      createSuccessTable(prefix),
+      createSuccessTable({ tablePrefix: prefix }),
       requiresBackfill
     )
     await this.ensureReportingTable(
       queryRunner,
-      createErrorTable(prefix),
+      createErrorTable({ tablePrefix: prefix }),
       requiresBackfill
     )
     await this.ensureReportingTable(
       queryRunner,
-      createAppErrorLogTable(prefix),
+      createAppErrorLogTable({ tablePrefix: prefix }),
       requiresBackfill
     )
     await queryRunner.query(`
@@ -495,7 +495,7 @@ export class ApplicationRegistryService {
     queryRunner: QueryRunner,
     tables: ApplicationTables
   ) {
-    const desired = createVersionTable(tables.prefix)
+    const desired = createVersionTable({ tablePrefix: tables.prefix })
     const current = await queryRunner.getTable(tables.version)
     if (!current) {
       await queryRunner.createTable(desired, true)

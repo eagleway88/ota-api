@@ -4,6 +4,7 @@ import { createErrorTable, createSuccessTable } from '@/utils/version'
 import { createVersionTable } from '@/utils/version'
 import { VersionService } from './version.service'
 import type { Request } from 'express'
+import { ApplicationRegistryService } from '@/applications/application-registry.service'
 
 function createQueryBuilder(result: Record<string, any>[]) {
   const builder = {
@@ -38,6 +39,30 @@ function createQueryBuilder(result: Record<string, any>[]) {
 }
 
 describe('VersionService.list', () => {
+  it('routes legacy version and report queries to the exact registered prefix', async () => {
+    const registered = { tablePrefix: 'desktop_123a' }
+    const getTables = jest.fn().mockResolvedValue([])
+    const runner = { connect: jest.fn(), release: jest.fn(), getTables }
+    const service = new VersionService(
+      {} as never,
+      { get: jest.fn() } as unknown as ConfigService,
+      { createQueryRunner: () => runner } as unknown as DataSource,
+      {
+        resolve: jest.fn().mockResolvedValue(registered)
+      } as unknown as ApplicationRegistryService
+    )
+    await service.list(
+      { headers: {}, ip: '127.0.0.1' } as Request,
+      'desktop-app',
+      {}
+    )
+    expect(getTables).toHaveBeenCalledWith([
+      'desktop_123a_version',
+      'desktop_123a_success',
+      'desktop_123a_error'
+    ])
+  })
+
   it('returns versions with filters and success/error totals', async () => {
     const versionBuilder = createQueryBuilder([
       {

@@ -65,8 +65,19 @@ export function createTableName(name: string) {
   return name.replace(/[^a-zA-Z]/g, '_')
 }
 
-export function createSuccessTable(name: string) {
-  const tableName = createTableName(name)
+/** Strings are legacy application names; objects are already registered prefixes. */
+type TableSource = string | { tablePrefix: string }
+
+function schemaPrefix(source: TableSource) {
+  if (typeof source === 'string') return createTableName(source)
+  if (!/^[A-Za-z0-9_]{1,40}$/.test(source.tablePrefix)) {
+    throw new Error('Invalid registered table prefix')
+  }
+  return source.tablePrefix
+}
+
+export function createSuccessTable(name: TableSource) {
+  const tableName = schemaPrefix(name)
   return new Table({
     name: `${tableName}_success`,
     columns: [
@@ -115,8 +126,8 @@ export function createSuccessTable(name: string) {
   })
 }
 
-export function createErrorTable(name: string) {
-  const tableName = createTableName(name)
+export function createErrorTable(name: TableSource) {
+  const tableName = schemaPrefix(name)
   return new Table({
     name: `${tableName}_error`,
     columns: [
@@ -168,8 +179,8 @@ export function createErrorTable(name: string) {
   })
 }
 
-export function createAppErrorLogTable(name: string) {
-  const tableName = createTableName(name)
+export function createAppErrorLogTable(name: TableSource) {
+  const tableName = schemaPrefix(name)
   return new Table({
     name: `${tableName}_error_log`,
     columns: [
@@ -214,8 +225,8 @@ export function createAppErrorLogTable(name: string) {
   })
 }
 
-export function createVersionTable(name: string) {
-  const tableName = createTableName(name)
+export function createVersionTable(name: TableSource) {
+  const tableName = schemaPrefix(name)
   return new Table({
     name: `${tableName}_version`,
     columns: [
@@ -403,8 +414,8 @@ export function createVersionTable(name: string) {
   })
 }
 
-export function createReleaseUserTable(name: string) {
-  const tableName = createTableName(name)
+export function createReleaseUserTable(name: TableSource) {
+  const tableName = schemaPrefix(name)
   return new Table({
     name: `${tableName}_release_user`,
     columns: [
