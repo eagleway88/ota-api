@@ -6,6 +6,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm'
 import { randomUUID } from 'crypto'
 import { DataSource, QueryRunner } from 'typeorm'
+import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
 import { apiUtil } from '@/utils/api'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { RegisteredApplication } from '@/applications/application-registry.service'
@@ -319,61 +320,54 @@ export class ReleaseManagementService {
     mutation: PolicyMutation
   ) {
     const application = await this.applications.prepare(appName, context)
-    const queryRunner = this.dataSource.createQueryRunner()
     const operationId = randomUUID()
     const taskId = randomUUID()
-    await queryRunner.connect()
-    await queryRunner.startTransaction()
     let revisionAfter = 0
-    try {
-      const release = await this.lockRelease(
-        queryRunner,
-        application,
-        releaseId
-      )
-      const revisionBefore = Number(release.policy_revision) || 1
-      if (
-        mutation.expectedRevision !== undefined &&
-        mutation.expectedRevision !== revisionBefore
-      ) {
-        throw new ConflictException('Release policy revision has changed')
+    await withApplicationWrite(
+      this.dataSource,
+      application,
+      async queryRunner => {
+        const release = await this.lockRelease(
+          queryRunner,
+          application,
+          releaseId
+        )
+        const revisionBefore = Number(release.policy_revision) || 1
+        if (
+          mutation.expectedRevision !== undefined &&
+          mutation.expectedRevision !== revisionBefore
+        ) {
+          throw new ConflictException('Release policy revision has changed')
+        }
+        await mutation.mutate(queryRunner, application, release)
+        revisionAfter = revisionBefore + 1
+        await queryRunner.manager
+          .createQueryBuilder()
+          .update(application.tables.version)
+          .set({ policy_revision: revisionAfter })
+          .where('release_id = :releaseId', { releaseId })
+          .execute()
+        const catalogRevision =
+          await this.applications.incrementCatalogRevision(queryRunner, appName)
+        await this.insertTask(queryRunner, application, {
+          taskId,
+          operationId,
+          releaseId,
+          action: mutation.action,
+          revision: catalogRevision
+        })
+        await this.insertAudit(queryRunner, application, {
+          context,
+          taskId,
+          operationId,
+          releaseId,
+          action: mutation.action,
+          revisionBefore,
+          revisionAfter,
+          changeSummary: mutation.changeSummary
+        })
       }
-      await mutation.mutate(queryRunner, application, release)
-      revisionAfter = revisionBefore + 1
-      await queryRunner.manager
-        .createQueryBuilder()
-        .update(application.tables.version)
-        .set({ policy_revision: revisionAfter })
-        .where('release_id = :releaseId', { releaseId })
-        .execute()
-      const catalogRevision = await this.applications.incrementCatalogRevision(
-        queryRunner,
-        appName
-      )
-      await this.insertTask(queryRunner, application, {
-        taskId,
-        operationId,
-        releaseId,
-        action: mutation.action,
-        revision: catalogRevision
-      })
-      await this.insertAudit(queryRunner, application, {
-        context,
-        taskId,
-        operationId,
-        releaseId,
-        action: mutation.action,
-        revisionBefore,
-        revisionAfter,
-        changeSummary: mutation.changeSummary
-      })
-      await queryRunner.commitTransaction()
-    } catch (error) {
-      await queryRunner.rollbackTransaction()
-      throw error
-    } finally {
-      await queryRunner.release()
-    }
+    )
 
     this.catalog.invalidate(appName)
     await this.taskWorker.execute(application, taskId, context.requestId)

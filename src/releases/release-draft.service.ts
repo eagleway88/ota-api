@@ -16,6 +16,7 @@ import { mapStoredReleaseRecord } from './release-record.mapper'
 import { ReleaseOperationContext } from '@/contracts/release-operation'
 import { ReleaseCatalogListQueryDto } from './release-management.dto'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
+import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
 import {
   CreateReleaseDraftDto,
   UpdateReleaseDraftDto
@@ -328,127 +329,127 @@ export class ReleaseDraftService {
     context: ReleaseOperationContext
   ) {
     const application = await this.applications.prepare(appName, context)
-    const queryRunner = this.dataSource.createQueryRunner()
     const operationId = randomUUID()
     const taskId = randomUUID()
-    await queryRunner.connect()
-    await queryRunner.startTransaction()
-    try {
-      const draft = await this.lockDraft(queryRunner, application, releaseId)
-      if (draft.status === 'published' && draft.published_sequence) {
-        await queryRunner.commitTransaction()
-        return apiUtil.data({
-          releaseId,
-          releaseSequence: Number(draft.published_sequence),
-          status: 'published'
-        })
-      }
-      if (draft.status !== 'draft') {
-        throw new ConflictException('Draft is not publishable')
-      }
-
-      const payload = this.parseDraftPayload(draft.payload)
-      const artifact = payload.artifactId
-        ? await this.lockArtifact(queryRunner, application, payload.artifactId)
-        : undefined
-      const urls = this.releaseUrls(payload, artifact)
-      const now = new Date()
-      await queryRunner.manager
-        .createQueryBuilder()
-        .insert()
-        .into(application.tables.version)
-        .values(
-          this.releaseInsertValues(
-            appName,
+    const result = await withApplicationWrite(
+      this.dataSource,
+      application,
+      async queryRunner => {
+        const draft = await this.lockDraft(queryRunner, application, releaseId)
+        if (draft.status === 'published' && draft.published_sequence) {
+          return apiUtil.data({
             releaseId,
-            payload,
-            urls,
-            artifact,
-            now
-          )
-        )
-        .execute()
-      const insertedRelease = await queryRunner.manager
-        .createQueryBuilder()
-        .select('version.id', 'id')
-        .from(application.tables.version, 'version')
-        .where('version.release_id = :releaseId', { releaseId })
-        .getRawOne<{ id: number | string }>()
-      const releaseSequence = Number(insertedRelease?.id)
-      if (!releaseSequence) {
-        throw new Error('Release sequence allocation failed')
-      }
-      if (payload.userIds.length) {
+            releaseSequence: Number(draft.published_sequence),
+            status: 'published'
+          })
+        }
+        if (draft.status !== 'draft') {
+          throw new ConflictException('Draft is not publishable')
+        }
+
+        const payload = this.parseDraftPayload(draft.payload)
+        const artifact = payload.artifactId
+          ? await this.lockArtifact(
+              queryRunner,
+              application,
+              payload.artifactId
+            )
+          : undefined
+        const urls = this.releaseUrls(payload, artifact)
+        const now = new Date()
         await queryRunner.manager
           .createQueryBuilder()
           .insert()
-          .into(application.tables.releaseUser)
+          .into(application.tables.version)
           .values(
-            payload.userIds.map(userId => ({
-              release_id: releaseId,
-              user_id: userId,
-              created_at: now
-            }))
+            this.releaseInsertValues(
+              appName,
+              releaseId,
+              payload,
+              urls,
+              artifact,
+              now
+            )
           )
           .execute()
-      }
-      if (artifact) {
+        const insertedRelease = await queryRunner.manager
+          .createQueryBuilder()
+          .select('version.id', 'id')
+          .from(application.tables.version, 'version')
+          .where('version.release_id = :releaseId', { releaseId })
+          .getRawOne<{ id: number | string }>()
+        const releaseSequence = Number(insertedRelease?.id)
+        if (!releaseSequence) {
+          throw new Error('Release sequence allocation failed')
+        }
+        if (payload.userIds.length) {
+          await queryRunner.manager
+            .createQueryBuilder()
+            .insert()
+            .into(application.tables.releaseUser)
+            .values(
+              payload.userIds.map(userId => ({
+                release_id: releaseId,
+                user_id: userId,
+                created_at: now
+              }))
+            )
+            .execute()
+        }
+        if (artifact) {
+          await queryRunner.manager
+            .createQueryBuilder()
+            .update(application.tables.artifact)
+            .set({ status: 'published', updated_at: now })
+            .where('artifact_id = :artifactId', {
+              artifactId: artifact.artifact_id
+            })
+            .execute()
+        }
         await queryRunner.manager
           .createQueryBuilder()
-          .update(application.tables.artifact)
-          .set({ status: 'published', updated_at: now })
-          .where('artifact_id = :artifactId', {
-            artifactId: artifact.artifact_id
+          .update(application.tables.releaseDraft)
+          .set({
+            status: 'published',
+            published_sequence: releaseSequence,
+            updated_at: now
           })
+          .where('release_id = :releaseId', { releaseId })
           .execute()
-      }
-      await queryRunner.manager
-        .createQueryBuilder()
-        .update(application.tables.releaseDraft)
-        .set({
-          status: 'published',
-          published_sequence: releaseSequence,
-          updated_at: now
+        const catalogRevision =
+          await this.applications.incrementCatalogRevision(
+            queryRunner,
+            appName,
+            now
+          )
+        await this.insertPublishTask(
+          queryRunner,
+          application,
+          taskId,
+          operationId,
+          releaseId,
+          catalogRevision,
+          now
+        )
+        await this.insertPublishAudit(queryRunner, application, {
+          taskId,
+          operationId,
+          releaseId,
+          releaseSequence,
+          context,
+          now
         })
-        .where('release_id = :releaseId', { releaseId })
-        .execute()
-      const catalogRevision = await this.applications.incrementCatalogRevision(
-        queryRunner,
-        appName,
-        now
-      )
-      await this.insertPublishTask(
-        queryRunner,
-        application,
-        taskId,
-        operationId,
-        releaseId,
-        catalogRevision,
-        now
-      )
-      await this.insertPublishAudit(queryRunner, application, {
-        taskId,
-        operationId,
-        releaseId,
-        releaseSequence,
-        context,
-        now
-      })
-      await queryRunner.commitTransaction()
-      this.catalog.invalidate(appName)
-      return apiUtil.data({
-        releaseId,
-        releaseSequence,
-        taskId,
-        operationId,
-        status: 'published'
-      })
-    } catch (error) {
-      await queryRunner.rollbackTransaction()
-      throw error
-    } finally {
-      await queryRunner.release()
-    }
+        return apiUtil.data({
+          releaseId,
+          releaseSequence,
+          taskId,
+          operationId,
+          status: 'published'
+        })
+      }
+    )
+    this.catalog.invalidate(appName)
+    return result
   }
 
   private normalizeDraft(

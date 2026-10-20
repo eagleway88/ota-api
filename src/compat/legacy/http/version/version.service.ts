@@ -27,6 +27,7 @@ import { normalizeLegacyReleaseAudience } from '@/compat/legacy/http/release-aud
 import { serializeLegacyReleaseRecord } from '@/compat/legacy/mappers/release.mapper'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ReleaseManagementService } from '@/releases/release-management.service'
+import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
 
 @Injectable()
 export class VersionService {
@@ -622,23 +623,20 @@ export class VersionService {
       requestId: randomUUID(),
       sourceIp: typeof payload.ip === 'string' ? payload.ip : undefined
     }
-    const application = this.applications
-      ? await this.applications.prepare(appName, operationContext)
-      : undefined
-    if (application) {
-      table = createVersionTable(application)
-    }
-    const queryRunner = this.dataSource.createQueryRunner()
-    const audienceTable = createReleaseUserTable(application ?? appName)
-    let created: Record<string, unknown> | undefined
-    await queryRunner.connect()
-
-    try {
-      await this.ensureTable(queryRunner, table)
-      await this.ensureTable(queryRunner, audienceTable)
-      await queryRunner.startTransaction()
-      try {
-        created = await this.insertIntoDynamicTableByQueryRunner(
+    if (!this.applications || !this.releaseManagement)
+      throw new Error('Registered publication persistence is not configured')
+    const releaseManagement = this.releaseManagement
+    const application = await this.applications.prepare(
+      appName,
+      operationContext
+    )
+    table = createVersionTable(application)
+    const audienceTable = createReleaseUserTable(application)
+    return withApplicationWrite(
+      this.dataSource,
+      application,
+      async queryRunner => {
+        const created = await this.insertIntoDynamicTableByQueryRunner(
           queryRunner,
           table,
           payload
@@ -658,26 +656,15 @@ export class VersionService {
             )
             .execute()
         }
-        if (application && this.releaseManagement) {
-          await this.releaseManagement.enqueuePublishedRelease(
-            queryRunner,
-            application,
-            releaseId,
-            operationContext
-          )
-        }
-        await queryRunner.commitTransaction()
-      } catch (error) {
-        await queryRunner.rollbackTransaction()
-        throw error
+        await releaseManagement.enqueuePublishedRelease(
+          queryRunner,
+          application,
+          releaseId,
+          operationContext
+        )
+        return created
       }
-      if (!created) {
-        throw new Error('Published release was not created')
-      }
-      return created
-    } finally {
-      await queryRunner.release()
-    }
+    )
   }
 
   private async insertIntoDynamicTableByQueryRunner(

@@ -1,4 +1,3 @@
-import { createHash } from 'crypto'
 import {
   MigratedTableKind,
   RowIssue
@@ -7,9 +6,7 @@ import {
 export const APPLICATION_DATA_MIGRATION = 'formal-fields-v1'
 export const APPLICATION_MIGRATION_LEDGER = 'ota_application_migrations'
 
-export function applicationPreparationLock(appName: string) {
-  return `ota_app_prepare_${createHash('sha256').update(appName).digest('hex').slice(0, 40)}`
-}
+export { applicationPreparationLock } from '@/infrastructure/persistence/application-lock'
 
 export type MigrationOptions = {
   appName: string

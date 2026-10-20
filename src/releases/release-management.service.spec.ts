@@ -25,12 +25,26 @@ function fixture() {
   }
   const writes: Array<{ table: string; values: Record<string, unknown> }> = []
   const tables = new ApplicationTableResolver().resolve('app', 'app')
-  const application = { appName: 'app', tables }
+  const application = { appName: 'app', tablePrefix: 'app', tables }
   const runner = {
     connect: jest.fn(),
-    startTransaction: jest.fn(),
-    commitTransaction: jest.fn(),
-    rollbackTransaction: jest.fn(),
+    isTransactionActive: false,
+    startTransaction: jest.fn(() => {
+      runner.isTransactionActive = true
+    }),
+    commitTransaction: jest.fn(() => {
+      runner.isTransactionActive = false
+    }),
+    rollbackTransaction: jest.fn(() => {
+      runner.isTransactionActive = false
+    }),
+    query: jest.fn((sql: string) =>
+      Promise.resolve(
+        sql.includes('GET_LOCK')
+          ? [{ acquired: 1 }]
+          : [{ table_prefix: 'app', status: 'ready', schema_version: 1 }]
+      )
+    ),
     release: jest.fn(),
     manager: {
       createQueryBuilder: () => {
