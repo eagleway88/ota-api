@@ -14,6 +14,8 @@
 
 `--confirm-backup` 和 `--confirm-writes-paused` 是操作确认，不是自动备份或自动停写功能。行锁和历史指纹用于防止覆盖与发现意外写入，不能代替维护窗口。
 
+旧发布、v2 发布和已发布策略修改现在与迁移共用应用锁，发布取得锁后会再次核实 ready 状态；这可以阻止在迁移途中分配新 ID。草稿编辑、上传、统计上报及 Worker 尚未全部纳入此互斥，仍必须按上述流程停写/暂停任务，不能把发布锁当作在线无停机迁移支持。
+
 ## 2. 全局迁移与确认映射
 
 1. 使用受控写凭证执行 `yarn typeorm:run`，包含新增的 `ApplicationDataMigration1792445100000`，建立 `ota_application_migrations` 和默认值为 `compatible` 的 `ota_applications.read_model`。
@@ -87,8 +89,12 @@ yarn migrate:app --app example-app --table-prefix example_app \
 ```bash
 OTA_MIGRATION_TEST_SOCKET=/private/tmp/ota-migration-mysql.EXAMPLE/mysql.sock \
   yarn test --runInBand --watchman=false application-data-migrator.mysql
+
+# 同一隔离实例也可运行发布竞争、回滚与集中双写验收
+OTA_MIGRATION_TEST_SOCKET=/private/tmp/ota-migration-mysql.EXAMPLE/mysql.sock \
+  yarn test --runInBand --watchman=false release-publication.mysql
 ```
 
 应使用 `mktemp -d /private/tmp/ota-migration-mysql.XXXXXX` 创建全新私有目录，再用 `mysqld --no-defaults --initialize-insecure --datadir=<目录>/data` 初始化；启动时同样使用 `--no-defaults`，显式指定 datadir/socket/pid/log，并启用 `--skip-networking --mysqlx=0 --skip-log-bin`。仅在这种独立、无网络、无业务数据的实例使用无密码 root；不要把生产 socket 传给测试。测试只创建并删除自身随机命名的 `ota_migration_test_*` 数据库，不读取项目 `.env`。结束后停止这个独立实例。
 
-本轮在本机 MySQL 26.7.0 上验证预演、续跑、事务回滚、准备互斥、冲突拒绝、历史计数/ID 和读取切换。仍须在目标 MySQL 版本、真实脱敏数据副本上重新演练；没有执行生产迁移。
+本轮在本机 MySQL 26.7.0 上运行 15 项真实数据库测试：9 项迁移测试，以及 6 项发布测试。发布测试让旧发布停在已分配 ID/未提交的位置，验证 v2 等待、迁移拒绝、其他应用可发布；同时验证同草稿并发幂等、旧/v2 审计失败回滚、ready 状态复查及发布→迁移切换→启停双写→水位保留。仍须在目标 MySQL 版本、真实脱敏数据副本上重新演练；没有执行生产迁移。
