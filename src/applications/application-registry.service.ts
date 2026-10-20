@@ -12,8 +12,12 @@ import {
   createSuccessTable,
   createVersionTable
 } from '@/utils/version'
-import { createHash, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import { GlobalAuditContext, insertGlobalAudit } from '@/audit/global-audit'
+import {
+  APPLICATION_MIGRATION_LEDGER,
+  applicationPreparationLock
+} from '@/infrastructure/migrations/application-migration-contract'
 
 export type RegisteredApplication = {
   appName: string
@@ -21,6 +25,7 @@ export type RegisteredApplication = {
   schemaVersion: number
   status: 'preparing' | 'ready' | 'failed'
   tables: ApplicationTables
+  readModel?: 'compatible' | 'formal'
 }
 
 @Injectable()
@@ -64,6 +69,9 @@ export class ApplicationRegistryService {
     if (!Number.isSafeInteger(catalogRevision) || catalogRevision < 0) {
       throw new ConflictException('Application catalog revision is invalid')
     }
+    const readModel = row?.read_model ?? 'compatible'
+    if (readModel !== 'compatible' && readModel !== 'formal')
+      throw new ConflictException('Unknown application read model')
     return {
       appName,
       tablePrefix,
@@ -72,7 +80,8 @@ export class ApplicationRegistryService {
         ? (String(row.status) as RegisteredApplication['status'])
         : 'preparing',
       tables: this.tableResolver.resolve(appName, tablePrefix),
-      catalogRevision
+      catalogRevision,
+      readModel
     }
   }
 
@@ -86,11 +95,9 @@ export class ApplicationRegistryService {
     const operationId = randomUUID()
     let tablePrefix: string | undefined
     let shouldAudit = false
-    const prepareLockName = `ota_app_prepare_${createHash('sha256')
-      .update(appName)
-      .digest('hex')
-      .slice(0, 40)}`
+    const prepareLockName = applicationPreparationLock(appName)
     let prepareLockAcquired = false
+    let shouldMarkFailure = false
     await queryRunner.connect()
     try {
       const lockRows = (await queryRunner.query(
@@ -101,7 +108,22 @@ export class ApplicationRegistryService {
       if (!prepareLockAcquired) {
         throw new ConflictException('Application preparation is busy')
       }
-      await this.ensureGlobalTables(queryRunner)
+      if (await queryRunner.hasTable(APPLICATION_MIGRATION_LEDGER)) {
+        const pending = (await queryRunner.query(
+          `SELECT migration_key FROM ${APPLICATION_MIGRATION_LEDGER} WHERE app_name = ? AND status <> 'completed' LIMIT 1`,
+          [appName]
+        )) as unknown[]
+        if (pending.length)
+          throw new ConflictException(
+            'Application data migration is unfinished; resume the migration tool first'
+          )
+      }
+      shouldMarkFailure = true
+      if (
+        !(await queryRunner.hasTable('ota_applications')) ||
+        !(await queryRunner.hasTable('ota_admin_audit_log'))
+      )
+        await this.ensureGlobalTables(queryRunner)
       await queryRunner.startTransaction()
       try {
         const existing = await queryRunner.manager
@@ -111,6 +133,22 @@ export class ApplicationRegistryService {
           .setLock('pessimistic_write')
           .where('application.app_name = :appName', { appName })
           .getRawOne<Record<string, unknown>>()
+        if (
+          existing?.status === 'ready' &&
+          Number(existing.schema_version) >= 1
+        ) {
+          await queryRunner.commitTransaction()
+          return {
+            appName,
+            tablePrefix: String(existing.table_prefix),
+            schemaVersion: Number(existing.schema_version),
+            status: 'ready',
+            tables: this.tableResolver.resolve(
+              appName,
+              String(existing.table_prefix)
+            )
+          }
+        }
         tablePrefix = existing
           ? String(existing.table_prefix)
           : await this.allocatePrefix(queryRunner, appName)
@@ -145,7 +183,7 @@ export class ApplicationRegistryService {
       }
       const tables = this.tableResolver.resolve(appName, tablePrefix)
       await this.ensureVersionTable(queryRunner, tables)
-      await this.ensureApplicationTables(queryRunner, tables, shouldAudit)
+      await this.ensureApplicationTables(queryRunner, tables)
       await queryRunner.startTransaction()
       try {
         await queryRunner.manager
@@ -182,7 +220,10 @@ export class ApplicationRegistryService {
       if (queryRunner.isTransactionActive) {
         await queryRunner.rollbackTransaction()
       }
-      if (await queryRunner.hasTable('ota_applications')) {
+      if (
+        shouldMarkFailure &&
+        (await queryRunner.hasTable('ota_applications'))
+      ) {
         await queryRunner.manager
           .createQueryBuilder()
           .update('ota_applications')
@@ -190,7 +231,10 @@ export class ApplicationRegistryService {
           .where('app_name = :appName', { appName })
           .execute()
       }
-      if (await queryRunner.hasTable('ota_admin_audit_log')) {
+      if (
+        shouldMarkFailure &&
+        (await queryRunner.hasTable('ota_admin_audit_log'))
+      ) {
         try {
           await insertGlobalAudit(queryRunner, {
             context: auditContext,
@@ -211,10 +255,13 @@ export class ApplicationRegistryService {
       }
       throw error
     } finally {
-      if (prepareLockAcquired) {
-        await queryRunner.query('SELECT RELEASE_LOCK(?)', [prepareLockName])
+      try {
+        if (prepareLockAcquired) {
+          await queryRunner.query('SELECT RELEASE_LOCK(?)', [prepareLockName])
+        }
+      } finally {
+        await queryRunner.release()
       }
-      await queryRunner.release()
     }
   }
 
@@ -345,24 +392,20 @@ export class ApplicationRegistryService {
 
   private async ensureApplicationTables(
     queryRunner: QueryRunner,
-    tables: ApplicationTables,
-    requiresBackfill: boolean
+    tables: ApplicationTables
   ) {
     const prefix = tables.prefix
     await this.ensureReportingTable(
       queryRunner,
-      createSuccessTable({ tablePrefix: prefix }),
-      requiresBackfill
+      createSuccessTable({ tablePrefix: prefix })
     )
     await this.ensureReportingTable(
       queryRunner,
-      createErrorTable({ tablePrefix: prefix }),
-      requiresBackfill
+      createErrorTable({ tablePrefix: prefix })
     )
     await this.ensureReportingTable(
       queryRunner,
-      createAppErrorLogTable({ tablePrefix: prefix }),
-      requiresBackfill
+      createAppErrorLogTable({ tablePrefix: prefix })
     )
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS \`${tables.releaseUser}\` (
@@ -509,6 +552,14 @@ export class ApplicationRegistryService {
       }
     }
 
+    const invalidPrivateIdentity = (await queryRunner.query(
+      `SELECT id FROM \`${tables.version}\`
+       WHERE release_scope = 'allowlist' AND (release_id IS NULL OR release_id = '') LIMIT 1`
+    )) as unknown[]
+    if (invalidPrivateIdentity.length)
+      throw new ConflictException(
+        'Private release is missing its stable identity; reconcile before preparation'
+      )
     await queryRunner.query(
       `UPDATE \`${tables.version}\`
        SET release_id = UUID()
@@ -516,8 +567,13 @@ export class ApplicationRegistryService {
     )
     await queryRunner.query(
       `UPDATE \`${tables.version}\`
-       SET release_scope = 'public', policy_revision = 1
-       WHERE release_scope IS NULL OR release_scope = '' OR policy_revision IS NULL OR policy_revision < 1`
+       SET release_scope = 'public'
+       WHERE release_scope IS NULL OR release_scope = ''`
+    )
+    await queryRunner.query(
+      `UPDATE \`${tables.version}\`
+       SET policy_revision = 1
+       WHERE policy_revision IS NULL OR policy_revision < 1`
     )
     const tableStatus = (await queryRunner.query(
       `SELECT AUTO_INCREMENT AS autoIncrement
@@ -539,8 +595,7 @@ export class ApplicationRegistryService {
 
   private async ensureReportingTable(
     queryRunner: QueryRunner,
-    desired: ReturnType<typeof createSuccessTable>,
-    requiresBackfill: boolean
+    desired: ReturnType<typeof createSuccessTable>
   ) {
     const current = await queryRunner.getTable(desired.name)
     if (!current) {
@@ -555,50 +610,6 @@ export class ApplicationRegistryService {
     if (missingColumns.length) {
       await queryRunner.addColumns(desired.name, missingColumns)
     }
-    if (missingColumns.length || requiresBackfill) {
-      await this.backfillReportingTable(queryRunner, desired.name)
-    }
-  }
-
-  private async backfillReportingTable(
-    queryRunner: QueryRunner,
-    tableName: string
-  ) {
-    if (tableName.endsWith('_success')) {
-      await queryRunner.query(
-        `UPDATE \`${tableName}\`
-         SET release_sequence = COALESCE(release_sequence, ver_id),
-             reported_username = COALESCE(reported_username, username),
-             created_at = COALESCE(created_at, create_time)
-         WHERE release_sequence IS NULL OR reported_username IS NULL OR created_at IS NULL`
-      )
-      return
-    }
-    if (tableName.endsWith('_error')) {
-      await queryRunner.query(
-        `UPDATE \`${tableName}\`
-         SET release_sequence = COALESCE(release_sequence, ver_id),
-             reported_username = COALESCE(reported_username, username),
-             created_at = COALESCE(created_at, create_time),
-             updated_at = COALESCE(updated_at, update_time, create_time)
-         WHERE release_sequence IS NULL OR reported_username IS NULL OR created_at IS NULL OR updated_at IS NULL`
-      )
-      return
-    }
-    if (tableName.endsWith('_error_log')) {
-      await queryRunner.query(
-        `UPDATE \`${tableName}\`
-         SET error_hash = COALESCE(NULLIF(error_hash, ''), MD5(CONCAT_WS('|',
-               IFNULL(name, ''), IFNULL(platform, ''), IFNULL(CAST(ver AS CHAR), ''),
-               IFNULL(kind, ''), IFNULL(message, ''), IFNULL(stack, '')))),
-             report_count = CASE WHEN report_count IS NULL OR report_count <= 0 THEN 1 ELSE report_count END,
-             reported_username = COALESCE(reported_username, username),
-             update_time = COALESCE(update_time, create_time),
-             created_at = COALESCE(created_at, create_time),
-             updated_at = COALESCE(updated_at, update_time, create_time)
-         WHERE error_hash IS NULL OR error_hash = '' OR report_count IS NULL OR report_count <= 0
-            OR reported_username IS NULL OR update_time IS NULL OR created_at IS NULL OR updated_at IS NULL`
-      )
-    }
+    // Historical backfill belongs to the resumable migration tool, not preparation.
   }
 }

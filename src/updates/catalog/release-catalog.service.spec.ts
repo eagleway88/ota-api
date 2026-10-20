@@ -26,7 +26,8 @@ const release = {
 
 function reader(
   revision: number,
-  pending?: ReturnType<typeof deferred<Record<string, unknown>[]>>
+  pending?: ReturnType<typeof deferred<Record<string, unknown>[]>>,
+  readModel = 'compatible'
 ) {
   const started = deferred<void>()
   const queries: string[] = []
@@ -61,6 +62,7 @@ function reader(
               table_prefix: 'app_123a',
               schema_version: 1,
               status: 'ready',
+              read_model: readModel,
               catalog_revision: revision
             })
           },
@@ -98,6 +100,23 @@ function serviceFor(...readers: ReturnType<typeof reader>[]) {
 }
 
 describe('ReleaseCatalogService snapshots', () => {
+  it('fails closed after formal cutover instead of silently using unmigrated legacy values', async () => {
+    const read = reader(42, undefined, 'formal')
+    const { service } = serviceFor(read)
+    await expect(service.loadCatalog('app')).rejects.toThrow(
+      'Formal release field is missing'
+    )
+    expect(read.runner.rollbackTransaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an unknown read model before loading version records', async () => {
+    const read = reader(42, undefined, 'unknown')
+    const { service } = serviceFor(read)
+    await expect(service.loadCatalog('app')).rejects.toThrow(
+      'Unknown application read model'
+    )
+    expect(read.queries).toEqual(['ota_applications'])
+  })
   it('reads mapping, application revision, versions and audience in one repeatable-read transaction', async () => {
     const read = reader(42)
     const { service, createQueryRunner } = serviceFor(read)

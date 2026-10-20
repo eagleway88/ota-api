@@ -17,6 +17,7 @@
     "typeorm:gen": "npx typeorm-ts-node-commonjs migration:generate ./src/migrations/migration -d ./src/typeorm.ts",
     "typeorm:run": "npx typeorm-ts-node-commonjs migration:run -d ./src/typeorm.ts",
     "audit:db": "ts-node -r tsconfig-paths/register scripts/audit-database.ts",
+    "migrate:app": "ts-node -r tsconfig-paths/register scripts/migrate-application.ts",
     "pm2": "yarn build && pm2 startOrReload ecosystem.config.js --update-env"
   },
   "dependencies": {

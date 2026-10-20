@@ -7,6 +7,7 @@ import {
   AvailableReleaseSnapshot
 } from '@/contracts/releases'
 import { mapStoredReleaseRecord } from '@/releases/release-record.mapper'
+import { mapFormalReleaseRecord } from '@/releases/formal-release.mapper'
 
 export type ReleaseCatalog = {
   available: AvailableReleaseSnapshot
@@ -91,7 +92,11 @@ export class ReleaseCatalogService {
         .where('version.name = :name', { name: appName })
         .getRawMany<Record<string, unknown>>()
 
-      const releases = records.map(mapStoredReleaseRecord)
+      const releases = records.map(
+        application.readModel === 'formal'
+          ? mapFormalReleaseRecord
+          : mapStoredReleaseRecord
+      )
       const userIdsByReleaseId = new Map<string, Set<string>>()
       if (await queryRunner.hasTable(releaseUser)) {
         const audienceRecords = await queryRunner.manager
