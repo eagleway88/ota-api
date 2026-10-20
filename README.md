@@ -14,6 +14,7 @@ NestJS + TypeORM + MySQL + Socket.IO 的模块化 OTA 与普通消息服务。
 - v2 资源、草稿、发布、名单、范围、启停、重推、任务和审计管理接口。
 - 发布任务使用数据库租约、退避重试和启动恢复。
 - 新发布序号至少从 `2000` 开始，并保留更高历史水位。
+- 外部管理员可查询更新统计、上报明细、客户端错误、任务执行日志和应用/全局审计，支持分页和时间筛选。
 
 ## 本地验证
 
@@ -25,6 +26,8 @@ yarn lint
 ```
 
 完整仓库已通过 ESLint、TypeScript 构建和 Jest 测试。`yarn lint` 带有 `--fix`，CI 中如需只检查不改文件，可直接执行 `eslint "{src,apps,libs,test}/**/*.ts"`。
+
+管理员接口测试会监听本机 `127.0.0.1` 随机端口，通过真实 HTTP 请求验证；数据库使用测试替身，不需要实际 MySQL 或 OSS。受限沙箱需允许本地端口监听。
 
 ## 数据库与启动
 
@@ -42,6 +45,8 @@ yarn lint
 - [SDK 与业务接入](docs/SDK_INTEGRATION.md)
 - [兼容层清理](docs/COMPATIBILITY_REMOVAL.md)
 - [性能验证](docs/PERFORMANCE.md)
+- [外部管理员 API](docs/ADMIN_API.md)
+- [目录与模块边界](docs/ARCHITECTURE.md)
 
 ## 关键约束
 

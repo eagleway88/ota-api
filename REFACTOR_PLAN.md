@@ -4,7 +4,7 @@
 
 最后修订：2026-10-20（Asia/Shanghai）
 
-状态：实施中。2026-10-20 复核发现服务端仍有功能、架构和验证缺口，撤回此前“仓库内重构完成”的结论。按 50 项等权交付条目计算，当前完成度为 54%（14 项已实现、26 项部分实现、10 项未实现或未验收）；这不是工时百分比或上线批准。
+状态：实施中。2026-10-20 复核发现服务端仍有功能、架构和验证缺口，撤回此前“仓库内重构完成”的结论。补充外部管理员 HTTP 接口测试后，按 50 项等权交付条目计算为 55%（14 项已实现、27 项部分实现、9 项未实现或未验收）；这不是工时百分比或上线批准。
 
 逐项证据、已复现缺陷、目录调整和后续顺序见 [重构完成度核对报告](docs/REFACTOR_PROGRESS.md)。生产环境核对、外部 SDK/业务项目交付与服务端代码缺口均纳入报告，不将未完成的代码事项归为环境限制。
 
@@ -534,6 +534,12 @@ Socket.IO 默认不为断线客户端持久化服务端遗漏消息，应用需�
 | `GET /api/v2/apps/:appName/tasks/:taskId/logs` | 分页查询各次执行、耗时、计数和失败摘要 |
 | `GET /api/v2/apps/:appName/audit-logs` | 查询该应用发布、名单、启停及配置的管理审计 |
 | `GET /api/v2/admin/audit-logs` | 查询管理员与全局配置的管理审计 |
+| `GET /api/v2/apps/:appName/statistics/summary` | 按时间、平台和发布序号查询成功/失败上报次数 |
+| `GET /api/v2/apps/:appName/telemetry/successes` | 分页查询安装成功上报明细 |
+| `GET /api/v2/apps/:appName/telemetry/failures` | 分页查询更新失败上报明细 |
+| `GET /api/v2/apps/:appName/telemetry/app-errors` | 按最后发生时间查询客户端运行错误/崩溃聚合 |
+
+外部管理员查询的认证、分页、90 天时间区间上限和统计含义见 [管理员 API 文档](docs/ADMIN_API.md)；实际目录职责见 [模块边界](docs/ARCHITECTURE.md)。
 
 管理操作继续使用管理员凭证。路径中的 `appName` 经应用登记映射后定位该应用的表，再按 `releaseId` 查询；不跨所有应用扫描 UUID，也不把原始参数直接拼进表名。涉及发布范围、启停和名单的修改记录操作者、时间、变更内容及修订号。名单替换必须原子执行，不能先清空再逐条新增并在中间状态推送。
 
@@ -958,11 +964,11 @@ P2 的数据扩展要为后续白名单预留安全兼容读取能力。P3 的�
 以下链接指向本次核对的本地源码。该方案不把源码行为等同于未经验证的生产行为。
 
 - [当前 OTA 实时广播与订阅](/Users/zhuwenbo/Documents/GitHub/ota-api/src/ws/ws.service.ts)
-- [当前 OTA 版本查询](/Users/zhuwenbo/Documents/GitHub/ota-api/src/api/version/ota-version-query.service.ts)
-- [当前发布、上报和动态补列](/Users/zhuwenbo/Documents/GitHub/ota-api/src/api/version/version.service.ts)
+- [当前 OTA 版本查询](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/http/version/ota-version-query.service.ts)
+- [当前发布、上报和动态补列](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/http/version/version.service.ts)
 - [当前动态表与版本编码](/Users/zhuwenbo/Documents/GitHub/ota-api/src/utils/version.ts)
-- [当前普通消息与 TTL 入口](/Users/zhuwenbo/Documents/GitHub/ota-api/src/api/message/message.service.ts)
-- [当前最后一条消息与 ACK 存储](/Users/zhuwenbo/Documents/GitHub/ota-api/src/api/message/last-message.service.ts)
+- [当前普通消息与 TTL 入口](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/http/message/message.service.ts)
+- [当前最后一条消息与 ACK 存储](/Users/zhuwenbo/Documents/GitHub/ota-api/src/messaging/last-message.service.ts)
 - [业务后端 OTA 适配器](/Users/zhuwenbo/Documents/Eagleway/eagleway-network-api/src/infrastructure/ota/ota.adapter.ts)
 - [业务后端发布服务](/Users/zhuwenbo/Documents/Eagleway/eagleway-network-api/src/manage/ota/ota.service.ts)
 - [业务后端在线状态查询](/Users/zhuwenbo/Documents/Eagleway/eagleway-network-api/src/manage/refresh-sessions/refresh-sessions.service.ts)

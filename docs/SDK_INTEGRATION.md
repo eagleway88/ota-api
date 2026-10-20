@@ -13,6 +13,7 @@
 - 旧 multipart 发布把 `userIds` 编码为 JSON 字符串数组。
 - 新版成功/失败上报可传 UUID `reportId` 实现重试幂等。
 - v2 管理 API 支持资源、草稿、发布、名单、范围、启停、重推、任务和审计。
+- 外部管理后台的统计、上报和日志查询参见 [外部管理员 API](ADMIN_API.md)，使用现有管理员登录签发的 Bearer Token。
 
 ## 客户端上下文
 
