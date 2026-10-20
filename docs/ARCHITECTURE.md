@@ -39,6 +39,8 @@ src/
 
 `ReleaseCatalogService` 只负责加载目录；旧参数归一化和旧响应序列化由 `compat/legacy/http/version/OtaVersionQueryService` 承接。正式发布服务通过目录服务失效缓存，不直接依赖旧查询适配器。
 
+目录加载在同一连接的 `REPEATABLE READ` 事务内读取应用表映射、应用级 `catalog_revision`、版本及名单。普通并发读取合并；失效/强制刷新后的旧加载只能采用新结果，不能回填缓存。后台分发校验执行记录修订号与快照一致，批次开始和结束（含零目标）校验租约及目录修订；变化进入重试。本地回归使用数据库替身，真实 MySQL 隔离级别与存储引擎仍需集成验收。
+
 `MessagingModule` 提供共享的 `LastMessageService`，由旧 HTTP 和 WebSocket 引用同一 Provider。存储服务只接收共用消息契约，不导入旧 HTTP DTO。
 
-尚未完成的边界：旧版本服务仍混合旧发布写入和上报写入；Gateway 仍混合旧事件、普通消息和 OTA 分发；正式/兼容 Repository 与字段双写尚未完全解耦。目录调整没有修复完成度报告中的启停、订阅修订和目录一致性缺陷。
+尚未完成的边界：旧版本服务仍混合旧发布写入和上报写入；Gateway 仍混合旧事件、普通消息和 OTA 分发；正式/兼容 Repository 与字段双写尚未完全解耦。启停、订阅修订和目录一致性已另行修复并补本地回归，不归功于目录移动。
