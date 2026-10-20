@@ -1,6 +1,8 @@
 import { DataSource, QueryRunner } from 'typeorm'
 import { OtaVersionQueryService } from './ota-version-query.service'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
+import { ApplicationRegistryService } from '@/applications/application-registry.service'
+import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
 
 function queryBuilder(rows: Record<string, unknown>[]) {
   const builder = {
@@ -40,8 +42,12 @@ describe('OtaVersionQueryService', () => {
     const releaseQueryRunner = jest.fn()
     const queryRunner = {
       connect: jest.fn(),
+      startTransaction: jest.fn(),
+      commitTransaction: jest.fn(),
       release: releaseQueryRunner,
-      hasTable: jest.fn().mockResolvedValue(true),
+      hasTable: jest.fn((name: string) =>
+        Promise.resolve(name !== 'ota_applications')
+      ),
       manager: {
         createQueryBuilder: jest
           .fn()
@@ -54,7 +60,13 @@ describe('OtaVersionQueryService', () => {
       createQueryRunner
     } as unknown as DataSource
     const service = new OtaVersionQueryService(
-      new ReleaseCatalogService(dataSource)
+      new ReleaseCatalogService(
+        dataSource,
+        new ApplicationRegistryService(
+          dataSource,
+          new ApplicationTableResolver()
+        )
+      )
     )
     const baseQuery = {
       name: 'app',

@@ -127,14 +127,30 @@ export class WsService {
 
   async dispatchApplicationUpdate(
     otaName: string,
-    isLeaseValid?: () => Promise<boolean>
+    isLeaseValid?: () => Promise<boolean>,
+    expectedRevision?: number
   ) {
     const catalog = await this.otaVersionQueryService.loadCatalog(otaName, true)
+    if (
+      expectedRevision !== undefined &&
+      (catalog.available.revision !== expectedRevision ||
+        catalog.audience.revision !== expectedRevision)
+    ) {
+      throw new Error('Publish catalog revision changed before dispatch')
+    }
+    if (isLeaseValid && !(await isLeaseValid())) {
+      throw new Error('Publish task lease was lost')
+    }
     const subscribers = this.subscriptions.getApplicationSubscribers(otaName)
     const result = { scanned: subscribers.length, updated: 0, revoked: 0 }
 
     for (let index = 0; index < subscribers.length; index += 1) {
-      if (index % 100 === 0 && isLeaseValid && !(await isLeaseValid())) {
+      if (
+        index > 0 &&
+        index % 100 === 0 &&
+        isLeaseValid &&
+        !(await isLeaseValid())
+      ) {
         throw new Error('Publish task lease was lost')
       }
       const emitted = this.emitCurrentDecision(
@@ -147,6 +163,10 @@ export class WsService {
       if ((index + 1) % 100 === 0) {
         await new Promise<void>(resolve => setImmediate(resolve))
       }
+    }
+    // Validate even an empty batch and detect changes during the final chunk.
+    if (isLeaseValid && !(await isLeaseValid())) {
+      throw new Error('Publish task lease was lost')
     }
     return result
   }

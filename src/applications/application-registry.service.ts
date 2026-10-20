@@ -37,36 +37,42 @@ export class ApplicationRegistryService {
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     try {
-      if (!(await queryRunner.hasTable('ota_applications'))) {
-        const tablePrefix = this.tableResolver.legacyPrefix(appName)
-        return {
-          appName,
-          tablePrefix,
-          schemaVersion: 0,
-          status: 'preparing',
-          tables: this.tableResolver.resolve(appName, tablePrefix)
-        }
-      }
-      const row = await queryRunner.manager
-        .createQueryBuilder()
-        .select('*')
-        .from('ota_applications', 'application')
-        .where('application.app_name = :appName', { appName })
-        .getRawOne<Record<string, unknown>>()
-      const tablePrefix = row
-        ? String(row.table_prefix)
-        : this.tableResolver.legacyPrefix(appName)
-      return {
-        appName,
-        tablePrefix,
-        schemaVersion: row ? Number(row.schema_version) : 0,
-        status: row
-          ? (String(row.status) as RegisteredApplication['status'])
-          : 'preparing',
-        tables: this.tableResolver.resolve(appName, tablePrefix)
-      }
+      return await this.resolveSnapshot(appName, queryRunner)
     } finally {
       await queryRunner.release()
+    }
+  }
+
+  /** Uses the caller's connection so catalog metadata shares its read snapshot. */
+  async resolveSnapshot(
+    appName: string,
+    queryRunner: QueryRunner
+  ): Promise<RegisteredApplication & { catalogRevision: number }> {
+    this.tableResolver.validateAppName(appName)
+    const row = (await queryRunner.hasTable('ota_applications'))
+      ? await queryRunner.manager
+          .createQueryBuilder()
+          .select('*')
+          .from('ota_applications', 'application')
+          .where('application.app_name = :appName', { appName })
+          .getRawOne<Record<string, unknown>>()
+      : undefined
+    const tablePrefix = row
+      ? String(row.table_prefix)
+      : this.tableResolver.legacyPrefix(appName)
+    const catalogRevision = row ? Number(row.catalog_revision) : 0
+    if (!Number.isSafeInteger(catalogRevision) || catalogRevision < 0) {
+      throw new ConflictException('Application catalog revision is invalid')
+    }
+    return {
+      appName,
+      tablePrefix,
+      schemaVersion: row ? Number(row.schema_version) : 0,
+      status: row
+        ? (String(row.status) as RegisteredApplication['status'])
+        : 'preparing',
+      tables: this.tableResolver.resolve(appName, tablePrefix),
+      catalogRevision
     }
   }
 

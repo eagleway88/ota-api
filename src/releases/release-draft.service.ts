@@ -15,6 +15,7 @@ import { normalizeReleaseAudience } from './release-audience'
 import { mapStoredReleaseRecord } from './release-record.mapper'
 import { ReleaseOperationContext } from '@/contracts/release-operation'
 import { ReleaseCatalogListQueryDto } from './release-management.dto'
+import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
 import {
   CreateReleaseDraftDto,
   UpdateReleaseDraftDto
@@ -43,7 +44,8 @@ type StoredDraft = {
 export class ReleaseDraftService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly applications: ApplicationRegistryService
+    private readonly applications: ApplicationRegistryService,
+    private readonly catalog: ReleaseCatalogService
   ) {}
 
   async createDraft(
@@ -433,6 +435,7 @@ export class ReleaseDraftService {
         now
       })
       await queryRunner.commitTransaction()
+      this.catalog.invalidate(appName)
       return apiUtil.data({
         releaseId,
         releaseSequence,

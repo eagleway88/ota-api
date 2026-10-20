@@ -1,7 +1,6 @@
-import { Injectable, Optional } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
-import { createVersionTable, createTableName } from '@/utils/version'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import {
   AudienceSnapshot,
@@ -24,16 +23,19 @@ export class ReleaseCatalogService {
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    @Optional() private readonly applications?: ApplicationRegistryService
+    private readonly applications: ApplicationRegistryService
   ) {}
 
   invalidate(appName: string) {
     this.cache.delete(appName)
+    // Existing callers will adopt the next load; stale work cannot refill cache.
+    this.loads.delete(appName)
   }
 
   async loadCatalog(appName: string, force = false): Promise<ReleaseCatalog> {
+    if (force) this.invalidate(appName)
     const cached = this.cache.get(appName)
-    if (!force && cached && cached.expiresAt > Date.now()) {
+    if (cached && cached.expiresAt > Date.now()) {
       return cached.catalog
     }
 
@@ -42,56 +44,60 @@ export class ReleaseCatalogService {
       return activeLoad
     }
 
-    const load = this.loadCatalogFromDatabase(appName).finally(() => {
-      this.loads.delete(appName)
-    })
+    const load: Promise<ReleaseCatalog> = this.loadCatalogFromDatabase(appName)
+      .then(
+        catalog => {
+          if (this.loads.get(appName) !== load) return this.loadCatalog(appName)
+          this.cache.set(appName, { catalog, expiresAt: Date.now() + 5_000 })
+          return catalog
+        },
+        (error: unknown) => {
+          if (this.loads.get(appName) !== load) return this.loadCatalog(appName)
+          throw error
+        }
+      )
+      .finally(() => {
+        if (this.loads.get(appName) === load) this.loads.delete(appName)
+      })
     this.loads.set(appName, load)
-    const catalog = await load
-    this.cache.set(appName, {
-      catalog,
-      expiresAt: Date.now() + 5_000
-    })
-    return catalog
+    return load
   }
 
   private async loadCatalogFromDatabase(
     appName: string
   ): Promise<ReleaseCatalog> {
-    const application = this.applications
-      ? await this.applications.resolve(appName)
-      : undefined
-    const table = createVersionTable(application?.tablePrefix ?? appName)
-    const audienceTableName =
-      application?.tables.releaseUser ??
-      `${createTableName(appName)}_release_user`
     const queryRunner = this.dataSource.createQueryRunner()
 
     await queryRunner.connect()
 
     try {
-      const hasTable = await queryRunner.hasTable(table.name)
+      await queryRunner.startTransaction('REPEATABLE READ')
+      const application = await this.applications.resolveSnapshot(
+        appName,
+        queryRunner
+      )
+      const { version, releaseUser } = application.tables
+      const revision = application.catalogRevision
+      const hasTable = await queryRunner.hasTable(version)
       if (!hasTable) {
-        return this.emptyCatalog()
+        await queryRunner.commitTransaction()
+        return this.emptyCatalog(revision)
       }
 
       const records = await queryRunner.manager
         .createQueryBuilder()
         .select('*')
-        .from(table.name, 'version')
+        .from(version, 'version')
         .where('version.name = :name', { name: appName })
         .getRawMany<Record<string, unknown>>()
 
       const releases = records.map(mapStoredReleaseRecord)
-      const revision = releases.reduce((maximum, release) => {
-        const value = Number(release.legacyPayload.policyRevision ?? 0)
-        return Math.max(maximum, Number.isFinite(value) ? value : 0)
-      }, 0)
       const userIdsByReleaseId = new Map<string, Set<string>>()
-      if (await queryRunner.hasTable(audienceTableName)) {
+      if (await queryRunner.hasTable(releaseUser)) {
         const audienceRecords = await queryRunner.manager
           .createQueryBuilder()
           .select(['audience.release_id', 'audience.user_id'])
-          .from(audienceTableName, 'audience')
+          .from(releaseUser, 'audience')
           .getRawMany<{ release_id: string; user_id: string }>()
         for (const record of audienceRecords) {
           const userIds =
@@ -101,19 +107,24 @@ export class ReleaseCatalogService {
         }
       }
 
+      await queryRunner.commitTransaction()
       return {
         available: { revision, releases },
         audience: { revision, userIdsByReleaseId }
       }
+    } catch (error) {
+      if (queryRunner.isTransactionActive)
+        await queryRunner.rollbackTransaction()
+      throw error
     } finally {
       await queryRunner.release()
     }
   }
 
-  private emptyCatalog(): ReleaseCatalog {
+  private emptyCatalog(revision: number): ReleaseCatalog {
     return {
-      available: { revision: 0, releases: [] },
-      audience: { revision: 0, userIdsByReleaseId: new Map() }
+      available: { revision, releases: [] },
+      audience: { revision, userIdsByReleaseId: new Map() }
     }
   }
 }

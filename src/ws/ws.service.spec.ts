@@ -182,4 +182,88 @@ describe('WsService OTA dispatch', () => {
     expect(queryService.loadCatalog).toHaveBeenCalledTimes(1)
     expect(queryService.resolveAvailableVersion).toHaveBeenCalledTimes(2)
   })
+
+  it.each([
+    { available: 41, audience: 41 },
+    { available: 42, audience: 41 }
+  ])(
+    'rejects a snapshot that differs from the task execution revision: %j',
+    async revisions => {
+      const queryService = {
+        loadCatalog: jest.fn().mockResolvedValue({
+          available: { revision: revisions.available, releases: [] },
+          audience: {
+            revision: revisions.audience,
+            userIdsByReleaseId: new Map()
+          }
+        }),
+        resolveAvailableVersion: jest.fn()
+      }
+      const service = new WsService(
+        queryService as never,
+        {} as never,
+        new ConnectionSubscriptionStore()
+      )
+      const lease = jest.fn().mockResolvedValue(true)
+      await expect(
+        service.dispatchApplicationUpdate('app', lease, 42)
+      ).rejects.toThrow('catalog revision changed')
+      expect(lease).not.toHaveBeenCalled()
+      expect(queryService.resolveAvailableVersion).not.toHaveBeenCalled()
+    }
+  )
+
+  it('validates lease and revision before and after an empty dispatch', async () => {
+    const queryService = {
+      loadCatalog: jest.fn().mockResolvedValue({
+        available: { revision: 42, releases: [] },
+        audience: { revision: 42, userIdsByReleaseId: new Map() }
+      })
+    }
+    const service = new WsService(
+      queryService as never,
+      {} as never,
+      new ConnectionSubscriptionStore()
+    )
+    const lease = jest.fn().mockResolvedValue(true)
+    await expect(
+      service.dispatchApplicationUpdate('app', lease, 42)
+    ).resolves.toEqual({ scanned: 0, updated: 0, revoked: 0 })
+    expect(lease).toHaveBeenCalledTimes(2)
+
+    lease
+      .mockReset()
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('Publish catalog revision changed'))
+    await expect(
+      service.dispatchApplicationUpdate('app', lease, 42)
+    ).rejects.toThrow('catalog revision changed')
+    expect(lease).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not emit when the lease is already lost', async () => {
+    const subscriptions = new ConnectionSubscriptionStore()
+    subscriptions.subscribeApplication('socket-1', {
+      appName: 'app',
+      platform: 'windows',
+      nativeVersionCode: 100,
+      installedReleaseSequence: 0
+    })
+    const queryService = {
+      loadCatalog: jest.fn().mockResolvedValue({
+        available: { revision: 42, releases: [] },
+        audience: { revision: 42, userIdsByReleaseId: new Map() }
+      }),
+      resolveAvailableVersion: jest.fn()
+    }
+    const service = new WsService(
+      queryService as never,
+      {} as never,
+      subscriptions
+    )
+    await expect(
+      service.dispatchApplicationUpdate('app', () => Promise.resolve(false), 42)
+    ).rejects.toThrow('lease was lost')
+    expect(queryService.resolveAvailableVersion).not.toHaveBeenCalled()
+  })
 })

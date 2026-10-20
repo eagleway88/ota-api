@@ -85,7 +85,8 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
             taskId,
             leaseToken,
             effectiveRevision
-          )
+          ),
+        effectiveRevision
       )
       const finishedAt = new Date()
       await queryRunner.startTransaction()
