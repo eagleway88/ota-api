@@ -15,6 +15,7 @@ NestJS + TypeORM + MySQL + Socket.IO 的模块化 OTA 与普通消息服务。
 - 发布任务使用数据库租约、退避重试和启动恢复。
 - 新发布序号至少从 `2000` 开始，并保留更高历史水位。
 - 外部管理员可查询更新统计、上报明细、客户端错误、任务执行日志和应用/全局审计，支持分页和时间筛选。
+- 逐应用历史数据迁移 CLI：只读预演、分批回填、断点续跑、计数/ID 对账和显式正式字段读取切换。
 
 ## 本地验证
 
@@ -29,13 +30,16 @@ yarn lint
 
 管理员接口测试会监听本机 `127.0.0.1` 随机端口，通过真实 HTTP 请求验证；数据库使用测试替身，不需要实际 MySQL 或 OSS。受限沙箱需允许本地端口监听。
 
+MySQL 迁移集成测试默认跳过，只有显式配置独立临时 socket 时运行，不读取项目 `.env`。初始化、运行与安全边界见 [迁移测试说明](docs/MIGRATION.md#6-隔离-mysql-回归)。
+
 ## 数据库与启动
 
 1. 从 `.env.example` 创建 `.env` 并填写全部必需配置。
 2. 先执行只读核对：`yarn audit:db`。
 3. 备份并验证恢复后执行全局迁移：`yarn typeorm:run`。
-4. 使用管理员 Token 调用 `POST /api/v2/apps/:appName/prepare`，逐应用准备分表。
-5. 构建并启动：`yarn build && yarn start:prod`。
+4. 历史应用先核实并登记实际物理前缀；使用管理员 Token 调用 `POST /api/v2/apps/:appName/prepare`，逐应用准备分表。
+5. 历史应用按迁移手册停止写入，运行 `yarn migrate:app` 预演、分批回填和验证；prepare 本身不代表数据迁移完成。
+6. 构建并启动：`yarn build && yarn start:prod`。正式字段读取须额外通过逐应用对账及显式切换。
 
 详细步骤见：
 

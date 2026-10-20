@@ -22,12 +22,14 @@ src/
     http/message/            旧普通消息 Controller/DTO/适配
     http/version/            旧版本 Controller/DTO/发布与上报适配
     mappers/                 旧响应序列化
+    persistence/             历史字段解释、回填及冲突检测
     legacy.module.ts         旧 HTTP 模块的集中入口
   contracts/                 共用类型、查询参数和消息契约
   infrastructure/
     persistence/             表路由、管理员只读连接、分页和时间范围
     tasks/                   任务执行器、任务查询接口、日志保留
     config/                  启动配置校验
+    migrations/              应用迁移预检、事务批次、断点账本和 CLI 参数
   migrations/                只追加的迁移历史
 ```
 
@@ -42,5 +44,7 @@ src/
 目录加载在同一连接的 `REPEATABLE READ` 事务内读取应用表映射、应用级 `catalog_revision`、版本及名单。普通并发读取合并；失效/强制刷新后的旧加载只能采用新结果，不能回填缓存。后台分发校验执行记录修订号与快照一致，批次开始和结束（含零目标）校验租约及目录修订；变化进入重试。本地回归使用数据库替身，真实 MySQL 隔离级别与存储引擎仍需集成验收。
 
 `MessagingModule` 提供共享的 `LastMessageService`，由旧 HTTP 和 WebSocket 引用同一 Provider。存储服务只接收共用消息契约，不导入旧 HTTP DTO。
+
+`scripts/migrate-application.ts` 是独立运维入口，不启动业务模块。`infrastructure/migrations/` 管理同应用互斥、只读对账和数据/进度原子提交；历史字段解释位于 `compat/legacy/persistence/`。目录根据应用登记的 `read_model` 选择兼容或严格正式映射；正式字段仍沿用旧 wire payload 出口，尚不是完整的可替换 Repository。
 
 尚未完成的边界：旧版本服务仍混合旧发布写入和上报写入；Gateway 仍混合旧事件、普通消息和 OTA 分发；正式/兼容 Repository 与字段双写尚未完全解耦。启停、订阅修订和目录一致性已另行修复并补本地回归，不归功于目录移动。
