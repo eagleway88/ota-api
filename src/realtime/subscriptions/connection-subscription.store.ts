@@ -21,6 +21,7 @@ export type ApplicationSubscriber = {
 type ConnectionState = {
   socketId: string
   generation: number
+  nextSubscriptionRevision: number
   userIds: Set<string>
   uniqueIds: Set<string>
   applications: Map<string, ApplicationSubscription>
@@ -43,6 +44,7 @@ export class ConnectionSubscriptionStore {
     this.connections.set(socketId, {
       socketId,
       generation,
+      nextSubscriptionRevision: 1,
       userIds: new Set(),
       uniqueIds: new Set(),
       applications: new Map()
@@ -70,7 +72,8 @@ export class ConnectionSubscriptionStore {
     input: Omit<ApplicationSubscription, 'revision'>
   ) {
     const state = this.getOrConnect(socketId)
-    const revision = (state.applications.get(input.appName)?.revision ?? 0) + 1
+    // Allocate from the connection lifetime, not the removable subscription.
+    const revision = state.nextSubscriptionRevision++
     const subscription = { ...input, revision }
     state.applications.set(input.appName, subscription)
     this.addToIndex(this.applicationSockets, input.appName, socketId)
@@ -165,7 +168,7 @@ export class ConnectionSubscriptionStore {
     for (const [appName, application] of state.applications) {
       state.applications.set(appName, {
         ...application,
-        revision: application.revision + 1
+        revision: state.nextSubscriptionRevision++
       })
     }
   }

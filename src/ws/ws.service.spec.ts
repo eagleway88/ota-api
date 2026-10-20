@@ -42,6 +42,61 @@ describe('WsService OTA dispatch', () => {
     }
   }
 
+  it('drops a delayed replay after unsubscribe and re-subscribe with another platform', async () => {
+    const subscriptions = new ConnectionSubscriptionStore()
+    const catalog = { available: { revision: 1, releases: [] } } as never
+    let finishOld!: (value: unknown) => void
+    let signalStarted!: () => void
+    const started = new Promise<void>(resolve => {
+      signalStarted = resolve
+    })
+    const oldLoad = new Promise(resolve => {
+      finishOld = resolve
+    })
+    const queryService = {
+      loadCatalog: jest
+        .fn()
+        .mockImplementationOnce(() => {
+          signalStarted()
+          return oldLoad
+        })
+        .mockResolvedValue(catalog),
+      resolveAvailableVersion: jest.fn((query: { platform: string }) => ({
+        id: query.platform === 'ios' ? 2001 : 2000,
+        name: 'app',
+        enable: 1
+      }))
+    }
+    const service = new WsService(
+      queryService as never,
+      {} as never,
+      subscriptions
+    )
+    const client = createClient()
+    const oldReplay = service.handleOtaNameSubscribe(client as never, {
+      otaName: 'app',
+      platform: 'windows',
+      ver: 100,
+      id: 0
+    })
+    await started
+    await service.handleOtaNameUnsubscribe(client as never, { otaName: 'app' })
+    await service.handleOtaNameSubscribe(client as never, {
+      otaName: 'app',
+      platform: 'ios',
+      ver: 200,
+      id: 0
+    })
+    finishOld(catalog)
+    await oldReplay
+    expect(client.emit).toHaveBeenCalledTimes(1)
+    expect(client.emit).toHaveBeenCalledWith(
+      'app',
+      expect.objectContaining({ id: 2001 })
+    )
+    expect(queryService.resolveAvailableVersion).toHaveBeenCalledTimes(1)
+  })
+
   it('recalculates OTA eligibility when user subscription arrives later', async () => {
     const subscriptions = new ConnectionSubscriptionStore()
     const catalog = { available: { revision: 1, releases: [] } } as never
