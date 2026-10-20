@@ -25,6 +25,7 @@ import {
   TaskListQueryDto
 } from './release-management.dto'
 import { ReleaseDraftService } from './release-draft.service'
+import { ArtifactService } from '@/artifacts/artifact.service'
 import {
   CreateReleaseDraftDto,
   UpdateReleaseDraftDto
@@ -40,7 +41,8 @@ type AuthenticatedRequest = Request & {
 export class ReleaseManagementController {
   constructor(
     private readonly service: ReleaseManagementService,
-    private readonly drafts: ReleaseDraftService
+    private readonly drafts: ReleaseDraftService,
+    private readonly artifacts: ArtifactService
   ) {}
 
   @Post('prepare')
@@ -67,7 +69,7 @@ export class ReleaseManagementController {
     @Param('appName') appName: string,
     @UploadedFile() file?: Express.Multer.File
   ) {
-    return this.drafts.uploadArtifact(appName, file, this.context(request))
+    return this.artifacts.uploadArtifact(appName, file, this.context(request))
   }
 
   @Post('releases')

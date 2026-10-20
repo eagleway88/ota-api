@@ -4,7 +4,7 @@ import { VersionController } from '.'
 import { VersionService } from './version.service'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { WsModule } from '@/ws'
-import { otaUploadMaxBytes } from './upload-policy'
+import { otaUploadMaxBytes } from '@/artifacts/upload-policy'
 import { ApplicationsModule } from '@/applications/applications.module'
 import { ReleasesModule } from '@/releases/releases.module'
 

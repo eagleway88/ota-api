@@ -6,14 +6,16 @@ import { ReleaseManagementService } from './release-management.service'
 import { ReleaseDraftService } from './release-draft.service'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { MulterModule } from '@nestjs/platform-express'
-import { otaUploadMaxBytes } from '@/api/version/upload-policy'
+import { otaUploadMaxBytes } from '@/artifacts/upload-policy'
 import { PublishTasksModule } from '@/infrastructure/tasks/publish-tasks.module'
 import { AdminAuditController } from '@/admin/admin-audit.controller'
 import { AdminAuditService } from '@/admin/admin-audit.service'
+import { ArtifactsModule } from '@/artifacts/artifacts.module'
 
 @Module({
   imports: [
     ApplicationsModule,
+    ArtifactsModule,
     WsModule,
     PublishTasksModule,
     ConfigModule,

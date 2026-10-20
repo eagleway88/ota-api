@@ -4,22 +4,16 @@ import {
   Injectable,
   NotFoundException
 } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { createHash, randomUUID } from 'crypto'
 import { DataSource, QueryRunner } from 'typeorm'
 import { apiUtil } from '@/utils/api'
-import { UpdaterUtil } from '@/utils/updater'
-import {
-  otaUploadMaxBytes,
-  validateOtaUpload
-} from '@/api/version/upload-policy'
-import { ReleaseScopeType, UpdateType } from '@/api/version/version.dto'
+import { ReleaseScopeType, UpdateType } from '@/contracts/release-values'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { RegisteredApplication } from '@/applications/application-registry.service'
 import { normalizeReleaseAudience } from './release-audience'
 import { mapStoredReleaseRecord } from './release-record.mapper'
-import { ReleaseOperationContext } from './release-management.service'
+import { ReleaseOperationContext } from '@/contracts/release-operation'
 import { ReleaseCatalogListQueryDto } from './release-management.dto'
 import {
   CreateReleaseDraftDto,
@@ -47,75 +41,10 @@ type StoredDraft = {
 
 @Injectable()
 export class ReleaseDraftService {
-  private readonly updater: UpdaterUtil
-
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly configService: ConfigService,
     private readonly applications: ApplicationRegistryService
-  ) {
-    this.updater = new UpdaterUtil(configService)
-  }
-
-  async uploadArtifact(
-    appName: string,
-    file: Express.Multer.File | undefined,
-    context: ReleaseOperationContext
-  ) {
-    if (!file) {
-      return apiUtil.error('File is required')
-    }
-    const uploadError = validateOtaUpload(
-      file,
-      otaUploadMaxBytes(this.configService.get('OTA_UPLOAD_MAX_BYTES'))
-    )
-    if (uploadError) {
-      return apiUtil.error(uploadError)
-    }
-
-    const application = await this.applications.prepare(appName, context)
-    const artifactId = randomUUID()
-    const checksumSha256 = createHash('sha256')
-      .update(file.buffer)
-      .digest('hex')
-    const uploaded = await this.updater.put(
-      `${appName}/artifacts/${artifactId}`,
-      file
-    )
-    if (!uploaded.url || uploaded.err) {
-      return apiUtil.error(uploaded.err || 'Upload failed')
-    }
-    const storageKey = this.storageKey(uploaded.url)
-    const queryRunner = this.dataSource.createQueryRunner()
-    await queryRunner.connect()
-    try {
-      const now = new Date()
-      await queryRunner.manager
-        .createQueryBuilder()
-        .insert()
-        .into(application.tables.artifact)
-        .values({
-          artifact_id: artifactId,
-          storage_key: storageKey,
-          url: uploaded.url,
-          size_bytes: file.size,
-          checksum_sha256: checksumSha256,
-          status: 'pending',
-          created_at: now,
-          updated_at: now
-        })
-        .execute()
-      return apiUtil.data({
-        artifactId,
-        url: uploaded.url,
-        sizeBytes: file.size,
-        checksumSha256,
-        status: 'pending'
-      })
-    } finally {
-      await queryRunner.release()
-    }
-  }
+  ) {}
 
   async createDraft(
     appName: string,
@@ -794,14 +723,6 @@ export class ReleaseDraftService {
       status: release.enabled ? 'published' : 'disabled',
       createdAt:
         release.legacyPayload.createdAt ?? release.legacyPayload.createTime
-    }
-  }
-
-  private storageKey(url: string) {
-    try {
-      return new URL(url).pathname.replace(/^\//, '')
-    } catch {
-      return url
     }
   }
 }

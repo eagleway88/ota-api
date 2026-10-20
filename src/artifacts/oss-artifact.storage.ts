@@ -1,10 +1,12 @@
 import { ConfigService } from '@nestjs/config'
 import AliOSS from 'ali-oss'
 import { join } from 'path'
-import { to } from '.'
+import { Injectable } from '@nestjs/common'
+import { to } from '@/utils'
 import { createHash } from 'crypto'
 
-export class UpdaterUtil {
+@Injectable()
+export class OssArtifactStorage {
   private oss?: AliOSS
   constructor(private readonly configService: ConfigService) {
     const opts = this.fetchOSSOptions()

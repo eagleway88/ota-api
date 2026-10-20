@@ -14,7 +14,7 @@ import { normalizeReleaseAudience } from './release-audience'
 import { OtaVersionQueryService } from '@/api/version/ota-version-query.service'
 import { PublishTaskWorkerService } from '@/infrastructure/tasks/publish-task-worker.service'
 import { ReleaseScope } from '@/contracts/releases'
-import { ReleaseScopeType } from '@/api/version/version.dto'
+import { ReleaseScopeType } from '@/contracts/release-values'
 import {
   ChangeReleaseScopeDto,
   AuditListQueryDto,
@@ -23,12 +23,7 @@ import {
   TaskListQueryDto
 } from './release-management.dto'
 
-export type ReleaseOperationContext = {
-  requestId: string
-  sourceIp?: string
-  actorAdminId?: number
-  actorName?: string
-}
+import { ReleaseOperationContext } from '@/contracts/release-operation'
 
 type PolicyMutation = {
   action: 'publish' | 'enable' | 'disable' | 'audience_changed' | 'redispatch'

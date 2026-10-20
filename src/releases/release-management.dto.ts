@@ -10,7 +10,7 @@ import {
   MaxLength,
   Min
 } from 'class-validator'
-import { ReleaseScopeType } from '@/api/version/version.dto'
+import { ReleaseScopeType } from '@/contracts/release-values'
 
 export class ReleaseListQueryDto {
   @IsOptional()

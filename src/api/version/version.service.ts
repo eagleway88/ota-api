@@ -5,7 +5,7 @@ import { Request } from 'express'
 import { createHash, randomUUID } from 'crypto'
 import { apiUtil } from '@/utils/api'
 import { ConfigService } from '@nestjs/config'
-import { UpdaterUtil } from '@/utils/updater'
+import { OssArtifactStorage } from '@/artifacts/oss-artifact.storage'
 import { OtaVersionQueryService } from './ota-version-query.service'
 import { createAppErrorLogTable, createErrorTable } from '@/utils/version'
 import { createSuccessTable, createVersionTable } from '@/utils/version'
@@ -21,7 +21,7 @@ import {
 import { AppErrorLogDto, CheckDto, CreateDto } from './version.dto'
 import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
 import { VersionListItemDto, VersionListQueryDto } from './version.dto'
-import { otaUploadMaxBytes, validateOtaUpload } from './upload-policy'
+import { otaUploadMaxBytes, validateOtaUpload } from '@/artifacts/upload-policy'
 import { userIdMatchesContext } from '@/contracts/user-id'
 import { normalizeLegacyReleaseAudience } from '@/compat/legacy/http/release-audience.mapper'
 import { serializeLegacyReleaseRecord } from '@/compat/legacy/mappers/release.mapper'
@@ -30,7 +30,7 @@ import { ReleaseManagementService } from '@/releases/release-management.service'
 
 @Injectable()
 export class VersionService {
-  private updater?: UpdaterUtil
+  private updater?: OssArtifactStorage
   constructor(
     private readonly otaVersionQueryService: OtaVersionQueryService,
     private readonly configService: ConfigService,
@@ -40,7 +40,7 @@ export class VersionService {
     @Optional()
     private readonly releaseManagement?: ReleaseManagementService
   ) {
-    this.updater = new UpdaterUtil(this.configService)
+    this.updater = new OssArtifactStorage(this.configService)
   }
 
   async list(req: Request, name: string, query: VersionListQueryDto) {

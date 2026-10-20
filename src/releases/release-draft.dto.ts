@@ -15,7 +15,7 @@ import {
   PlatformType,
   ReleaseScopeType,
   UpdateType
-} from '@/api/version/version.dto'
+} from '@/contracts/release-values'
 
 export class CreateReleaseDraftDto {
   @IsInt()
