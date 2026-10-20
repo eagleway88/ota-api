@@ -7,7 +7,7 @@ import { ReleaseDraftService } from './release-draft.service'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { MulterModule } from '@nestjs/platform-express'
 import { otaUploadMaxBytes } from '@/api/version/upload-policy'
-import { RetentionService } from '@/infrastructure/tasks/retention.service'
+import { PublishTasksModule } from '@/infrastructure/tasks/publish-tasks.module'
 import { AdminAuditController } from '@/admin/admin-audit.controller'
 import { AdminAuditService } from '@/admin/admin-audit.service'
 
@@ -15,6 +15,7 @@ import { AdminAuditService } from '@/admin/admin-audit.service'
   imports: [
     ApplicationsModule,
     WsModule,
+    PublishTasksModule,
     ConfigModule,
     MulterModule.registerAsync({
       imports: [ConfigModule],
@@ -27,12 +28,7 @@ import { AdminAuditService } from '@/admin/admin-audit.service'
     })
   ],
   controllers: [ReleaseManagementController, AdminAuditController],
-  providers: [
-    ReleaseManagementService,
-    ReleaseDraftService,
-    RetentionService,
-    AdminAuditService
-  ],
+  providers: [ReleaseManagementService, ReleaseDraftService, AdminAuditService],
   exports: [ReleaseManagementService]
 })
 export class ReleasesModule {}
