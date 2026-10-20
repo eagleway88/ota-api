@@ -22,6 +22,8 @@ import {
 } from '@/contracts/release-values'
 import { ApplicationDataMigrator } from '@/infrastructure/migrations/application-data-migrator'
 import { ApplicationTableResolver } from './application-table-resolver'
+import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
+import { inspectBackfillRow } from '@/compat/legacy/persistence/backfill-row'
 
 function deferred() {
   let resolve!: () => void
@@ -116,19 +118,22 @@ mysql('publication transactions on isolated MySQL', () => {
       source,
       applications,
       catalog as unknown as ReleaseCatalogService,
-      { execute: jest.fn() } as unknown as PublishTaskWorkerService
+      { execute: jest.fn() } as unknown as PublishTaskWorkerService,
+      new DualWriteReleaseRepository()
     )
     legacy = new VersionService(
       catalog as unknown as OtaVersionQueryService,
       { get: jest.fn() } as unknown as ConfigService,
       source,
       applications,
-      policy
+      policy,
+      new DualWriteReleaseRepository()
     )
     drafts = new ReleaseDraftService(
       source,
       applications,
-      catalog as unknown as ReleaseCatalogService
+      catalog as unknown as ReleaseCatalogService,
+      new DualWriteReleaseRepository()
     )
     catalog.invalidate.mockClear()
   })
@@ -155,14 +160,16 @@ mysql('publication transactions on isolated MySQL', () => {
     jest.spyOn(source, 'createQueryRunner').mockImplementation(mode => {
       const runner = createRunner(mode)
       const execute = runner.query.bind(runner) as QueryRunner['query']
-      runner.query = async (
+      const intercepted = async (
         sql: string,
         args?: unknown[],
         structured?: boolean
       ) => {
         if (paused && sql.includes('GET_LOCK') && args?.[0] !== undefined)
           competitor.resolve()
-        const result: unknown = await execute(sql, args, structured)
+        const result: unknown = structured
+          ? await execute(sql, args, true)
+          : await execute(sql, args)
         if (
           !paused &&
           sql.startsWith(`INSERT INTO \`${application.tables.version}\``)
@@ -173,6 +180,8 @@ mysql('publication transactions on isolated MySQL', () => {
         }
         return result
       }
+      // Forward the original overload's structured/raw result without changing it.
+      runner.query = intercepted as QueryRunner['query']
       return runner
     })
     const first = legacyPublish()
@@ -290,5 +299,51 @@ mysql('publication transactions on isolated MySQL', () => {
     expect(
       await query(`SELECT id FROM \`${application.tables.version}\``)
     ).toHaveLength(0)
+  })
+
+  it('both writers reconcile after formal cutover and policy changes keep the columns synchronized', async () => {
+    const old = await legacyPublish()
+    expect(old.data).toMatchObject({
+      ver: 110,
+      baseVersions: '100',
+      enable: 1,
+      mandatory: 0
+    })
+    const releaseId = await draft()
+    await drafts.publish(appName, releaseId, context)
+    const records = await query(
+      `SELECT * FROM \`${application.tables.version}\` ORDER BY id`
+    )
+    expect(records.map(row => inspectBackfillRow('version', row))).toEqual([
+      { patch: {}, issues: [] },
+      { patch: {}, issues: [] }
+    ])
+    expect(records[0].compatible_base_version_codes).toEqual([110, 100])
+    expect(records[1].compatible_base_version_codes).toEqual([100])
+    await new ApplicationDataMigrator(source).run({
+      appName,
+      tablePrefix: application.tablePrefix,
+      mode: 'apply',
+      batchSize: 1,
+      confirmedIssuedId: 5000,
+      confirmBackup: true,
+      confirmWritesPaused: true,
+      activateFormal: true
+    })
+    await policy.setEnabled(appName, releaseId, false, context)
+    const disabled = (
+      await query(
+        `SELECT enable, is_enabled FROM \`${application.tables.version}\` WHERE release_id = ?`,
+        [releaseId]
+      )
+    )[0]
+    expect(disabled).toEqual({ enable: 0, is_enabled: 0 })
+    const actualCatalog = new ReleaseCatalogService(source, applications)
+    expect(
+      (await actualCatalog.loadCatalog(appName)).available.releases.find(
+        row => row.releaseId === releaseId
+      )?.enabled
+    ).toBe(false)
+    expect((await legacyPublish()).data.id).toBe(5001)
   })
 })

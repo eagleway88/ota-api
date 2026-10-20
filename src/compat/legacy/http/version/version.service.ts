@@ -9,9 +9,8 @@ import { OssArtifactStorage } from '@/artifacts/oss-artifact.storage'
 import { OtaVersionQueryService } from './ota-version-query.service'
 import { createAppErrorLogTable, createErrorTable } from '@/utils/version'
 import { createSuccessTable, createVersionTable } from '@/utils/version'
-import { createReleaseUserTable } from '@/utils/version'
 import { calculateNextReleaseSequence } from '@/utils/version'
-import { normalizeVersionList, normalizeVersionValue } from '@/utils/version'
+import { normalizeVersionValue } from '@/utils/version'
 import {
   fetchIP,
   humpToUnderline,
@@ -28,6 +27,7 @@ import { serializeLegacyReleaseRecord } from '@/compat/legacy/mappers/release.ma
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ReleaseManagementService } from '@/releases/release-management.service'
 import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
+import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
 
 @Injectable()
 export class VersionService {
@@ -39,7 +39,9 @@ export class VersionService {
     @Optional()
     private readonly applications?: ApplicationRegistryService,
     @Optional()
-    private readonly releaseManagement?: ReleaseManagementService
+    private readonly releaseManagement?: ReleaseManagementService,
+    @Optional()
+    private readonly releaseWrites?: DualWriteReleaseRepository
   ) {
     this.updater = new OssArtifactStorage(this.configService)
   }
@@ -107,35 +109,14 @@ export class VersionService {
   async create(req: Request, body: CreateDto) {
     const audience = this.normalizeReleaseAudience(body)
     const createTime = new Date()
-    const targetVersionCode = normalizeVersionValue(body.ver) ?? body.ver
     const created = await this.insertPublishedVersion(
-      createVersionTable(await this.resolveTablePrefix(body.name)),
       {
         ...body,
         releaseId: randomUUID(),
         releaseScope: audience.releaseScope,
-        policyRevision: 1,
-        ver: targetVersionCode,
-        targetVersionCode,
-        baseVersions: normalizeVersionList(body.baseVersions),
-        compatibleBaseVersionCodes: this.legacyCompatibleVersionCodes(
-          targetVersionCode,
-          body.baseVersions
-        ),
-        releaseNotes: body.desc,
-        artifactSizeBytes: body.fileSize,
-        isEnabled: body.enable ?? 1,
-        isMandatory: body.mandatory ?? 1,
-        showUpdateDialog: body.showDialog ?? 1,
-        installerSourceUrl: body.installUrl,
-        bundleUrl: body.packageUrl,
-        platforms: this.stringList(body.platform),
-        architectures: this.stringList(body.architecture),
-        distributionChannel: body.channel,
         updateType: UpdateType.Full,
         ip: fetchIP(req),
-        createTime,
-        createdAt: createTime
+        createTime
       },
       audience.userIds
     )
@@ -192,7 +173,6 @@ export class VersionService {
       return apiUtil.error(uploadError)
     }
 
-    const normalizedVer = normalizeVersionValue(body.ver)
     const audience = this.normalizeReleaseAudience(body)
     const createTime = new Date()
     const dir = `${body.name}/${body.ver}`
@@ -202,35 +182,15 @@ export class VersionService {
     }
 
     const created = await this.insertPublishedVersion(
-      createVersionTable(await this.resolveTablePrefix(body.name)),
       {
         ...body,
         releaseId: randomUUID(),
         releaseScope: audience.releaseScope,
-        policyRevision: 1,
-        ver: normalizedVer ?? body.ver,
-        targetVersionCode: normalizedVer ?? body.ver,
-        baseVersions: normalizeVersionList(body.baseVersions),
-        compatibleBaseVersionCodes: this.legacyCompatibleVersionCodes(
-          normalizedVer ?? body.ver,
-          body.baseVersions
-        ),
-        releaseNotes: body.desc,
         fileSize: file.size,
-        artifactSizeBytes: file.size,
-        isEnabled: body.enable ?? 1,
-        isMandatory: body.mandatory ?? 1,
-        showUpdateDialog: body.showDialog ?? 1,
         packageUrl: uploadRes.url,
-        bundleUrl: uploadRes.url,
-        installerSourceUrl: body.installUrl,
-        platforms: this.stringList(body.platform),
-        architectures: this.stringList(body.architecture),
-        distributionChannel: body.channel,
         updateType: UpdateType.Hot,
         ip: fetchIP(req),
-        createTime,
-        createdAt: createTime
+        createTime
       },
       audience.userIds
     )
@@ -614,7 +574,6 @@ export class VersionService {
   }
 
   private async insertPublishedVersion(
-    table: Table,
     payload: Record<string, unknown>,
     userIds: readonly string[]
   ): Promise<Record<string, unknown>> {
@@ -623,22 +582,21 @@ export class VersionService {
       requestId: randomUUID(),
       sourceIp: typeof payload.ip === 'string' ? payload.ip : undefined
     }
-    if (!this.applications || !this.releaseManagement)
+    if (!this.applications || !this.releaseManagement || !this.releaseWrites)
       throw new Error('Registered publication persistence is not configured')
     const releaseManagement = this.releaseManagement
+    const releaseWrites = this.releaseWrites
     const application = await this.applications.prepare(
       appName,
       operationContext
     )
-    table = createVersionTable(application)
-    const audienceTable = createReleaseUserTable(application)
     return withApplicationWrite(
       this.dataSource,
       application,
       async queryRunner => {
-        const created = await this.insertIntoDynamicTableByQueryRunner(
+        const created = await releaseWrites.insertLegacy(
           queryRunner,
-          table,
+          application,
           payload
         )
         const releaseId = String(created.releaseId)
@@ -646,7 +604,7 @@ export class VersionService {
           await queryRunner.manager
             .createQueryBuilder()
             .insert()
-            .into(audienceTable.name)
+            .into(application.tables.releaseUser)
             .values(
               userIds.map(userId => ({
                 release_id: releaseId,
@@ -979,39 +937,6 @@ export class VersionService {
       ? await this.applications.resolve(appName)
       : undefined
     return application ? { tablePrefix: application.tablePrefix } : appName
-  }
-
-  private stringList(value?: string) {
-    if (!value) {
-      return []
-    }
-    return Array.from(
-      new Set(
-        value
-          .split(',')
-          .map(item => item.trim())
-          .filter(Boolean)
-      )
-    )
-  }
-
-  private versionCodeList(value?: string) {
-    return this.stringList(value)
-      .map(item => normalizeVersionValue(item))
-      .filter((item): item is number => item !== undefined)
-  }
-
-  private legacyCompatibleVersionCodes(
-    targetVersionCode: number | string,
-    value?: string
-  ) {
-    const target = normalizeVersionValue(targetVersionCode)
-    return Array.from(
-      new Set([
-        ...(target === undefined ? [] : [target]),
-        ...this.versionCodeList(value)
-      ])
-    )
   }
 
   private normalizeDynamicResult(

@@ -8,6 +8,7 @@ import { ConnectionSubscriptionStore } from '@/realtime/subscriptions/connection
 import { WsService } from '@/ws/ws.service'
 import { mapStoredReleaseRecord } from './release-record.mapper'
 import { ReleaseManagementService } from './release-management.service'
+import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
 
 function fixture() {
   const row: Record<string, unknown> = {
@@ -116,7 +117,8 @@ function fixture() {
     { createQueryRunner: () => runner as unknown as QueryRunner } as DataSource,
     applications as unknown as ApplicationRegistryService,
     catalog as unknown as ReleaseCatalogService,
-    worker as unknown as PublishTaskWorkerService
+    worker as unknown as PublishTaskWorkerService,
+    new DualWriteReleaseRepository()
   )
   const context = { requestId: 'request-a', actorAdminId: 1 }
   const updateQuery = { name: 'app', platform: 'windows', ver: 100, id: 0 }

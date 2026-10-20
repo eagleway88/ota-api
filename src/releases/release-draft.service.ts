@@ -17,6 +17,7 @@ import { ReleaseOperationContext } from '@/contracts/release-operation'
 import { ReleaseCatalogListQueryDto } from './release-management.dto'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
 import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
+import { ReleaseWriteRepository } from './ports/release-write.repository'
 import {
   CreateReleaseDraftDto,
   UpdateReleaseDraftDto
@@ -46,7 +47,8 @@ export class ReleaseDraftService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly applications: ApplicationRegistryService,
-    private readonly catalog: ReleaseCatalogService
+    private readonly catalog: ReleaseCatalogService,
+    private readonly releaseWrites: ReleaseWriteRepository
   ) {}
 
   async createDraft(
@@ -357,31 +359,25 @@ export class ReleaseDraftService {
           : undefined
         const urls = this.releaseUrls(payload, artifact)
         const now = new Date()
-        await queryRunner.manager
-          .createQueryBuilder()
-          .insert()
-          .into(application.tables.version)
-          .values(
-            this.releaseInsertValues(
-              appName,
-              releaseId,
-              payload,
-              urls,
-              artifact,
-              now
-            )
-          )
-          .execute()
-        const insertedRelease = await queryRunner.manager
-          .createQueryBuilder()
-          .select('version.id', 'id')
-          .from(application.tables.version, 'version')
-          .where('version.release_id = :releaseId', { releaseId })
-          .getRawOne<{ id: number | string }>()
-        const releaseSequence = Number(insertedRelease?.id)
-        if (!releaseSequence) {
-          throw new Error('Release sequence allocation failed')
-        }
+        const { releaseSequence } = await this.releaseWrites.insert(
+          queryRunner,
+          application,
+          {
+            ...payload,
+            ...urls,
+            appName,
+            releaseId,
+            sourceIp: context.sourceIp,
+            artifactSizeBytes: artifact
+              ? Number(artifact.size_bytes)
+              : payload.artifactSizeBytes,
+            architectures: payload.architectures ?? [],
+            enabled: payload.enabled ?? true,
+            mandatory: payload.mandatory ?? true,
+            showUpdateDialog: payload.showUpdateDialog ?? true,
+            createdAt: now
+          }
+        )
         if (payload.userIds.length) {
           await queryRunner.manager
             .createQueryBuilder()
@@ -485,57 +481,6 @@ export class ReleaseDraftService {
       compatibleBaseVersionCodes,
       userIds: audience.userIds,
       releaseScope: audience.releaseScope as ReleaseScopeType
-    }
-  }
-
-  private releaseInsertValues(
-    appName: string,
-    releaseId: string,
-    payload: CreateReleaseDraftDto,
-    urls: { installerSourceUrl?: string; bundleUrl?: string },
-    artifact: StoredArtifact | undefined,
-    now: Date
-  ) {
-    const enabled = payload.enabled ?? true
-    const mandatory = payload.mandatory ?? true
-    const showDialog = payload.showUpdateDialog ?? true
-    const sizeBytes = artifact
-      ? Number(artifact.size_bytes)
-      : payload.artifactSizeBytes
-    return {
-      release_id: releaseId,
-      release_scope: payload.releaseScope,
-      policy_revision: 1,
-      target_version_code: payload.targetVersionCode,
-      compatible_base_version_codes: JSON.stringify(
-        payload.compatibleBaseVersionCodes
-      ),
-      release_notes: payload.releaseNotes,
-      artifact_size_bytes: sizeBytes,
-      is_enabled: enabled ? 1 : 0,
-      is_mandatory: mandatory ? 1 : 0,
-      show_update_dialog: showDialog ? 1 : 0,
-      installer_source_url: urls.installerSourceUrl,
-      bundle_url: urls.bundleUrl,
-      platforms: JSON.stringify(payload.platforms),
-      architectures: JSON.stringify(payload.architectures ?? []),
-      distribution_channel: payload.distributionChannel,
-      created_at: now,
-      name: appName,
-      ver: payload.targetVersionCode,
-      base_versions: payload.compatibleBaseVersionCodes.join(','),
-      desc: payload.releaseNotes,
-      file_size: sizeBytes,
-      enable: enabled ? 1 : 0,
-      mandatory: mandatory ? 1 : 0,
-      show_dialog: showDialog ? 1 : 0,
-      install_url: urls.installerSourceUrl,
-      package_url: urls.bundleUrl,
-      update_type: payload.updateType,
-      channel: payload.distributionChannel,
-      platform: payload.platforms.join(','),
-      architecture: (payload.architectures ?? []).join(','),
-      create_time: now
     }
   }
 

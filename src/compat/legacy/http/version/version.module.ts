@@ -7,12 +7,14 @@ import { WsModule } from '@/ws'
 import { otaUploadMaxBytes } from '@/artifacts/upload-policy'
 import { ApplicationsModule } from '@/applications/applications.module'
 import { ReleasesModule } from '@/releases/releases.module'
+import { ReleasePersistenceModule } from '@/infrastructure/persistence/release-persistence.module'
 
 @Module({
   imports: [
     WsModule,
     ApplicationsModule,
     ReleasesModule,
+    ReleasePersistenceModule,
     ConfigModule,
     MulterModule.registerAsync({
       imports: [ConfigModule],

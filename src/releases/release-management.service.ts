@@ -7,6 +7,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { randomUUID } from 'crypto'
 import { DataSource, QueryRunner } from 'typeorm'
 import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
+import { ReleaseWriteRepository } from './ports/release-write.repository'
 import { apiUtil } from '@/utils/api'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { RegisteredApplication } from '@/applications/application-registry.service'
@@ -55,7 +56,8 @@ export class ReleaseManagementService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly applications: ApplicationRegistryService,
     private readonly catalog: ReleaseCatalogService,
-    private readonly taskWorker: PublishTaskWorkerService
+    private readonly taskWorker: PublishTaskWorkerService,
+    private readonly releaseWrites: ReleaseWriteRepository
   ) {}
 
   async prepare(appName: string, context: ReleaseOperationContext) {
@@ -291,12 +293,12 @@ export class ReleaseManagementService {
       action: enabled ? 'enable' : 'disable',
       changeSummary: { enabled },
       mutate: async (queryRunner, application) => {
-        await queryRunner.manager
-          .createQueryBuilder()
-          .update(application.tables.version)
-          .set({ enable: enabled ? 1 : 0, is_enabled: enabled ? 1 : 0 })
-          .where('release_id = :releaseId', { releaseId })
-          .execute()
+        await this.releaseWrites.setEnabled(
+          queryRunner,
+          application,
+          releaseId,
+          enabled
+        )
       }
     })
   }

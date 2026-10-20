@@ -9,10 +9,12 @@ import { otaUploadMaxBytes } from '@/artifacts/upload-policy'
 import { PublishTasksModule } from '@/infrastructure/tasks/publish-tasks.module'
 import { ArtifactsModule } from '@/artifacts/artifacts.module'
 import { ReleaseCatalogModule } from '@/updates/catalog/release-catalog.module'
+import { ReleasePersistenceModule } from '@/infrastructure/persistence/release-persistence.module'
 
 @Module({
   imports: [
     ApplicationsModule,
+    ReleasePersistenceModule,
     ReleaseCatalogModule,
     ArtifactsModule,
     PublishTasksModule,
