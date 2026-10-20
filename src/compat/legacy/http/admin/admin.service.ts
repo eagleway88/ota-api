@@ -8,7 +8,7 @@ import { AuthService } from '@/auth/auth.service'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { PasswordHasher } from '@/admin/password-hasher'
-import { GlobalAuditContext, insertGlobalAudit } from '@/admin/global-audit'
+import { GlobalAuditContext, insertGlobalAudit } from '@/audit/global-audit'
 import { randomUUID } from 'crypto'
 
 @Injectable()

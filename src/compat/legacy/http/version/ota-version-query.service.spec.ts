@@ -1,5 +1,6 @@
 import { DataSource, QueryRunner } from 'typeorm'
 import { OtaVersionQueryService } from './ota-version-query.service'
+import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
 
 function queryBuilder(rows: Record<string, unknown>[]) {
   const builder = {
@@ -52,7 +53,9 @@ describe('OtaVersionQueryService', () => {
     const dataSource = {
       createQueryRunner
     } as unknown as DataSource
-    const service = new OtaVersionQueryService(dataSource)
+    const service = new OtaVersionQueryService(
+      new ReleaseCatalogService(dataSource)
+    )
     const baseQuery = {
       name: 'app',
       platform: 'windows',

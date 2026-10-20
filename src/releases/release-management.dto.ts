@@ -50,19 +50,3 @@ export class ChangeReleaseScopeDto {
   @Min(1)
   expectedRevision?: number
 }
-
-export class TaskListQueryDto extends ReleaseListQueryDto {
-  @IsOptional()
-  @IsIn(['pending', 'running', 'retry_wait', 'succeeded', 'failed'])
-  status?: string
-
-  @IsOptional()
-  @IsString()
-  releaseId?: string
-}
-
-export class AuditListQueryDto extends ReleaseListQueryDto {
-  @IsOptional()
-  @IsString()
-  action?: string
-}

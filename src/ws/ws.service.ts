@@ -4,14 +4,14 @@ import { SubscribeMessage } from '@nestjs/websockets'
 import {
   OtaVersionQueryService,
   ReleaseCatalog
-} from '@/api/version/ota-version-query.service'
+} from '@/compat/legacy/http/version/ota-version-query.service'
 import { Server, Socket } from 'socket.io'
-import { LastMessageService } from '@/api/message/last-message.service'
+import { LastMessageService } from '@/messaging/last-message.service'
 import {
   AckUniqueIdDto,
   AckUserIdDto,
   TargetedMessageEnvelope
-} from '@/api/message/message.dto'
+} from '@/compat/legacy/http/message/message.dto'
 import {
   ApplicationSubscriber,
   ConnectionSubscriptionStore

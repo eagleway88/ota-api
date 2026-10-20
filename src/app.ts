@@ -6,6 +6,8 @@ import { join } from 'path'
 import { ReleasesModule } from './releases/releases.module'
 import { validateRuntimeConfig } from './infrastructure/config/validate-config'
 import { LegacyCompatibilityModule } from './compat/legacy/legacy.module'
+import { AuthModule } from './auth/auth.module'
+import { AdministrationModule } from './admin/administration.module'
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { LegacyCompatibilityModule } from './compat/legacy/legacy.module'
       }),
       inject: [ConfigService]
     }),
+    AuthModule,
+    AdministrationModule,
     LegacyCompatibilityModule,
     ReleasesModule
   ],

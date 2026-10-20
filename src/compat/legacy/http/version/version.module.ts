@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common'
 import { MulterModule } from '@nestjs/platform-express'
-import { VersionController } from '.'
+import { VersionController } from './version.controller'
 import { VersionService } from './version.service'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { WsModule } from '@/ws'

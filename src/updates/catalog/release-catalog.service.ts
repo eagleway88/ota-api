@@ -1,38 +1,21 @@
 import { Injectable, Optional } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
-import { createVersionTable } from '@/utils/version'
+import { createVersionTable, createTableName } from '@/utils/version'
+import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import {
   AudienceSnapshot,
-  AvailableReleaseSnapshot,
-  defaultApplicationUpdatePolicy,
-  ClientUpdateContext
+  AvailableReleaseSnapshot
 } from '@/contracts/releases'
-import { resolveUpdate } from '@/updates/decision/resolve-update'
-import {
-  mapLegacyReleaseRecord,
-  serializeLegacyRelease
-} from '@/compat/legacy/mappers/release.mapper'
-import { createTableName } from '@/utils/version'
-import { ApplicationRegistryService } from '@/applications/application-registry.service'
+import { mapStoredReleaseRecord } from '@/releases/release-record.mapper'
 
 export type ReleaseCatalog = {
   available: AvailableReleaseSnapshot
   audience: AudienceSnapshot
 }
 
-export type OtaVersionQuery = {
-  name: string
-  platform: string
-  architecture?: string
-  channel?: string
-  ver: number
-  id?: number
-  userIds?: readonly string[]
-}
-
 @Injectable()
-export class OtaVersionQueryService {
+export class ReleaseCatalogService {
   private readonly cache = new Map<
     string,
     { expiresAt: number; catalog: ReleaseCatalog }
@@ -43,15 +26,6 @@ export class OtaVersionQueryService {
     @InjectDataSource() private readonly dataSource: DataSource,
     @Optional() private readonly applications?: ApplicationRegistryService
   ) {}
-
-  async findLatestAvailableVersion(query: OtaVersionQuery) {
-    if (!query.name || !query.platform || query.ver == null) {
-      return null
-    }
-
-    const catalog = await this.loadCatalog(query.name)
-    return this.resolveAvailableVersion(query, catalog)
-  }
 
   invalidate(appName: string) {
     this.cache.delete(appName)
@@ -78,35 +52,6 @@ export class OtaVersionQueryService {
       expiresAt: Date.now() + 5_000
     })
     return catalog
-  }
-
-  resolveAvailableVersion(
-    query: OtaVersionQuery,
-    catalog: ReleaseCatalog
-  ): Record<string, unknown> | null {
-    const context: ClientUpdateContext = {
-      appName: query.name,
-      platform: query.platform,
-      architecture: query.architecture,
-      distributionChannel: query.channel,
-      nativeVersionCode: query.ver,
-      installedReleaseSequence: query.id ?? 0,
-      userIds: new Set(query.userIds ?? [])
-    }
-    const decision = resolveUpdate(
-      context,
-      catalog.available,
-      catalog.audience,
-      defaultApplicationUpdatePolicy
-    )
-
-    return decision.release
-      ? serializeLegacyRelease(
-          decision.release,
-          decision.mandatory,
-          decision.showUpdateDialog
-        )
-      : null
   }
 
   private async loadCatalogFromDatabase(
@@ -136,7 +81,7 @@ export class OtaVersionQueryService {
         .where('version.name = :name', { name: appName })
         .getRawMany<Record<string, unknown>>()
 
-      const releases = records.map(mapLegacyReleaseRecord)
+      const releases = records.map(mapStoredReleaseRecord)
       const revision = releases.reduce((maximum, release) => {
         const value = Number(release.legacyPayload.policyRevision ?? 0)
         return Math.max(maximum, Number.isFinite(value) ? value : 0)

@@ -18,11 +18,8 @@ import { fetchIP } from '@/utils'
 import { ReleaseManagementService } from './release-management.service'
 import {
   ChangeReleaseScopeDto,
-  AuditListQueryDto,
   ReleaseCatalogListQueryDto,
-  ReleaseListQueryDto,
-  ReplaceReleaseUsersDto,
-  TaskListQueryDto
+  ReplaceReleaseUsersDto
 } from './release-management.dto'
 import { ReleaseDraftService } from './release-draft.service'
 import { ArtifactService } from '@/artifacts/artifact.service'
@@ -192,41 +189,6 @@ export class ReleaseManagementController {
     @Param('releaseId') releaseId: string
   ) {
     return this.service.redispatch(appName, releaseId, this.context(request))
-  }
-
-  @Get('releases/:releaseId/delivery')
-  delivery(
-    @Param('appName') appName: string,
-    @Param('releaseId') releaseId: string
-  ) {
-    return this.service.delivery(appName, releaseId)
-  }
-
-  @Get('tasks')
-  tasks(@Param('appName') appName: string, @Query() query: TaskListQueryDto) {
-    return this.service.tasks(appName, query)
-  }
-
-  @Get('tasks/:taskId')
-  task(@Param('appName') appName: string, @Param('taskId') taskId: string) {
-    return this.service.task(appName, taskId)
-  }
-
-  @Get('tasks/:taskId/logs')
-  taskLogs(
-    @Param('appName') appName: string,
-    @Param('taskId') taskId: string,
-    @Query() query: ReleaseListQueryDto
-  ) {
-    return this.service.taskLogs(appName, taskId, query)
-  }
-
-  @Get('audit-logs')
-  auditLogs(
-    @Param('appName') appName: string,
-    @Query() query: AuditListQueryDto
-  ) {
-    return this.service.auditLogs(appName, query)
   }
 
   private context(request: AuthenticatedRequest) {

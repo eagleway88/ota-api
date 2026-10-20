@@ -10,7 +10,7 @@ import { SendUserIdDto, SendUniqueIdDto } from './message.dto'
 import { Request } from 'express'
 import { ConfigService } from '@nestjs/config'
 import { isRequestIpAllowed } from '@/utils'
-import { LastMessageService } from './last-message.service'
+import { LastMessageService } from '@/messaging/last-message.service'
 
 @Injectable()
 export class MessageService {

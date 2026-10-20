@@ -11,16 +11,14 @@ import { ApplicationRegistryService } from '@/applications/application-registry.
 import { RegisteredApplication } from '@/applications/application-registry.service'
 import { mapStoredReleaseRecord } from './release-record.mapper'
 import { normalizeReleaseAudience } from './release-audience'
-import { OtaVersionQueryService } from '@/api/version/ota-version-query.service'
+import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
 import { PublishTaskWorkerService } from '@/infrastructure/tasks/publish-task-worker.service'
 import { ReleaseScope } from '@/contracts/releases'
 import { ReleaseScopeType } from '@/contracts/release-values'
 import {
   ChangeReleaseScopeDto,
-  AuditListQueryDto,
   ReleaseListQueryDto,
-  ReplaceReleaseUsersDto,
-  TaskListQueryDto
+  ReplaceReleaseUsersDto
 } from './release-management.dto'
 
 import { ReleaseOperationContext } from '@/contracts/release-operation'
@@ -55,7 +53,7 @@ export class ReleaseManagementService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly applications: ApplicationRegistryService,
-    private readonly otaVersionQueryService: OtaVersionQueryService,
+    private readonly catalog: ReleaseCatalogService,
     private readonly taskWorker: PublishTaskWorkerService
   ) {}
 
@@ -314,165 +312,6 @@ export class ReleaseManagementService {
     })
   }
 
-  async tasks(appName: string, query: TaskListQueryDto) {
-    const application = await this.applications.resolve(appName)
-    const queryRunner = this.dataSource.createQueryRunner()
-    await queryRunner.connect()
-    try {
-      if (!(await queryRunner.hasTable(application.tables.publishTask))) {
-        return apiUtil.page([], 0)
-      }
-      const page = Math.max(Number(query.page) || 1, 1)
-      const pageSize = Math.min(Math.max(Number(query.pageSize) || 20, 1), 100)
-      const filter = queryRunner.manager
-        .createQueryBuilder()
-        .from(application.tables.publishTask, 'task')
-      if (query.status) {
-        filter.andWhere('task.status = :status', { status: query.status })
-      }
-      if (query.releaseId) {
-        filter.andWhere('task.release_id = :releaseId', {
-          releaseId: query.releaseId
-        })
-      }
-      const count = await filter
-        .clone()
-        .select('COUNT(*)', 'total')
-        .getRawOne<{ total: string | number }>()
-      const rows = await filter
-        .select('task.*')
-        .orderBy('task.created_at', 'DESC')
-        .skip((page - 1) * pageSize)
-        .take(pageSize)
-        .getRawMany<Record<string, unknown>>()
-      return apiUtil.page(rows, Number(count?.total ?? 0))
-    } finally {
-      await queryRunner.release()
-    }
-  }
-
-  async task(appName: string, taskId: string) {
-    const application = await this.applications.resolve(appName)
-    const queryRunner = this.dataSource.createQueryRunner()
-    await queryRunner.connect()
-    try {
-      if (!(await queryRunner.hasTable(application.tables.publishTask))) {
-        throw new NotFoundException('Task does not exist or is past retention')
-      }
-      const task = await queryRunner.manager
-        .createQueryBuilder()
-        .select('*')
-        .from(application.tables.publishTask, 'task')
-        .where('task.task_id = :taskId', { taskId })
-        .getRawOne<Record<string, unknown>>()
-      if (!task) {
-        throw new NotFoundException('Task does not exist or is past retention')
-      }
-      const latestLog = await queryRunner.manager
-        .createQueryBuilder()
-        .select('*')
-        .from(application.tables.publishTaskLog, 'log')
-        .where('log.task_id = :taskId', { taskId })
-        .orderBy('log.attempt_no', 'DESC')
-        .getRawOne<Record<string, unknown>>()
-      return apiUtil.data({ task, latestLog: latestLog ?? null })
-    } finally {
-      await queryRunner.release()
-    }
-  }
-
-  async taskLogs(appName: string, taskId: string, query: ReleaseListQueryDto) {
-    await this.task(appName, taskId)
-    const application = await this.applications.resolve(appName)
-    const queryRunner = this.dataSource.createQueryRunner()
-    const page = Math.max(Number(query.page) || 1, 1)
-    const pageSize = Math.min(Math.max(Number(query.pageSize) || 20, 1), 100)
-    await queryRunner.connect()
-    try {
-      const count = await queryRunner.manager
-        .createQueryBuilder()
-        .select('COUNT(*)', 'total')
-        .from(application.tables.publishTaskLog, 'log')
-        .where('log.task_id = :taskId', { taskId })
-        .getRawOne<{ total: string | number }>()
-      const rows = await queryRunner.manager
-        .createQueryBuilder()
-        .select('*')
-        .from(application.tables.publishTaskLog, 'log')
-        .where('log.task_id = :taskId', { taskId })
-        .orderBy('log.attempt_no', 'DESC')
-        .skip((page - 1) * pageSize)
-        .take(pageSize)
-        .getRawMany<Record<string, unknown>>()
-      return apiUtil.page(rows, Number(count?.total ?? 0))
-    } finally {
-      await queryRunner.release()
-    }
-  }
-
-  async auditLogs(appName: string, query: AuditListQueryDto) {
-    const application = await this.applications.resolve(appName)
-    const queryRunner = this.dataSource.createQueryRunner()
-    const page = Math.max(Number(query.page) || 1, 1)
-    const pageSize = Math.min(Math.max(Number(query.pageSize) || 20, 1), 100)
-    await queryRunner.connect()
-    try {
-      if (!(await queryRunner.hasTable(application.tables.auditLog))) {
-        return apiUtil.page([], 0)
-      }
-      const filter = queryRunner.manager
-        .createQueryBuilder()
-        .from(application.tables.auditLog, 'audit')
-      if (query.action) {
-        filter.andWhere('audit.action = :action', { action: query.action })
-      }
-      const count = await filter
-        .clone()
-        .select('COUNT(*)', 'total')
-        .getRawOne<{ total: string | number }>()
-      const rows = await filter
-        .select('audit.*')
-        .orderBy('audit.created_at', 'DESC')
-        .skip((page - 1) * pageSize)
-        .take(pageSize)
-        .getRawMany<Record<string, unknown>>()
-      return apiUtil.page(rows, Number(count?.total ?? 0))
-    } finally {
-      await queryRunner.release()
-    }
-  }
-
-  async delivery(appName: string, releaseId: string) {
-    await this.findRelease(appName, releaseId)
-    const application = await this.applications.resolve(appName)
-    const queryRunner = this.dataSource.createQueryRunner()
-    await queryRunner.connect()
-    try {
-      if (!(await queryRunner.hasTable(application.tables.publishTask))) {
-        return apiUtil.data({
-          releaseId,
-          tasks: [],
-          receiveConfirmationAvailable: false
-        })
-      }
-      const tasks = await queryRunner.manager
-        .createQueryBuilder()
-        .select('*')
-        .from(application.tables.publishTask, 'task')
-        .where('task.release_id = :releaseId', { releaseId })
-        .orderBy('task.created_at', 'DESC')
-        .getRawMany<Record<string, unknown>>()
-      return apiUtil.data({
-        releaseId,
-        tasks,
-        receiveConfirmationAvailable: false,
-        note: 'Counts represent server send attempts, not unique recipients or installations.'
-      })
-    } finally {
-      await queryRunner.release()
-    }
-  }
-
   private async mutatePolicy(
     appName: string,
     releaseId: string,
@@ -536,7 +375,7 @@ export class ReleaseManagementService {
       await queryRunner.release()
     }
 
-    this.otaVersionQueryService.invalidate(appName)
+    this.catalog.invalidate(appName)
     await this.taskWorker.execute(application, taskId, context.requestId)
     return apiUtil.data({
       taskId,

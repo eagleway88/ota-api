@@ -13,7 +13,7 @@ import {
   createVersionTable
 } from '@/utils/version'
 import { createHash, randomUUID } from 'crypto'
-import { GlobalAuditContext, insertGlobalAudit } from '@/admin/global-audit'
+import { GlobalAuditContext, insertGlobalAudit } from '@/audit/global-audit'
 
 export type RegisteredApplication = {
   appName: string

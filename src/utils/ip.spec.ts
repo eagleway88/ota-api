@@ -9,7 +9,7 @@ describe('trusted request IP', () => {
         'x-real-ip': '198.51.100.1',
         'x-forwarded-for': '198.51.100.2'
       }
-    } as Request
+    } as unknown as Request
 
     expect(fetchIP(request)).toBe('203.0.113.5')
     expect(isRequestIpAllowed(request, '203.0.113.5')).toBe(true)

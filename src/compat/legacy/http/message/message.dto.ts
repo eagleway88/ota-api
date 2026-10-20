@@ -2,13 +2,7 @@ import { IsNotEmpty, IsString, MaxLength } from 'class-validator'
 
 const TARGETED_MESSAGE_ID_MAX_LENGTH = 191
 
-export type TargetedMessageEnvelope = {
-  messageId: string | null
-  data: unknown
-  updatedAt: string
-  expiresAt: string | null
-  ackRequired: boolean
-}
+export type { TargetedMessageEnvelope } from '@/contracts/messaging'
 
 export class SendGlobalDto {
   data?: unknown

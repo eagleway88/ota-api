@@ -2,8 +2,13 @@ import { Injectable } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { randomUUID } from 'crypto'
-import { SendUserIdDto, TargetedMessageEnvelope } from './message.dto'
-import { AckUniqueIdDto, AckUserIdDto, SendUniqueIdDto } from './message.dto'
+import {
+  UserMessageCommand,
+  DeviceMessageCommand,
+  UserMessageAck,
+  DeviceMessageAck,
+  TargetedMessageEnvelope
+} from '@/contracts/messaging'
 import { UserIdMessage } from '@/entities/user-id.entity'
 import { UniqueIdMessage } from '@/entities/unique-id.entity'
 
@@ -66,7 +71,7 @@ export class LastMessageService {
     return !date || date.getTime() <= Date.now()
   }
 
-  async queryUserId(body: Pick<SendUserIdDto, 'userId'>) {
+  async queryUserId(body: Pick<UserMessageCommand, 'userId'>) {
     const entity = await this.tUserId.findOneBy({
       userId: body.userId
     })
@@ -84,7 +89,7 @@ export class LastMessageService {
     return this.toEnvelope(entity, dates)
   }
 
-  async createUserId(body: SendUserIdDto, ttlMs: number) {
+  async createUserId(body: UserMessageCommand, ttlMs: number) {
     const now = new Date()
     const messageId = randomUUID()
     const expiresAt = new Date(now.getTime() + ttlMs)
@@ -108,7 +113,7 @@ export class LastMessageService {
     } satisfies TargetedMessageEnvelope
   }
 
-  async ackUserId(body: AckUserIdDto) {
+  async ackUserId(body: UserMessageAck) {
     const result = await this.tUserId.delete({
       userId: body.userId,
       messageId: body.messageId
@@ -116,7 +121,7 @@ export class LastMessageService {
     return Boolean(result.affected)
   }
 
-  async queryUniqueId(body: Pick<SendUniqueIdDto, 'uniqueId'>) {
+  async queryUniqueId(body: Pick<DeviceMessageCommand, 'uniqueId'>) {
     const entity = await this.tUniqueId.findOneBy({
       uniqueId: body.uniqueId
     })
@@ -134,7 +139,7 @@ export class LastMessageService {
     return this.toEnvelope(entity, dates)
   }
 
-  async createUniqueId(body: SendUniqueIdDto, ttlMs: number) {
+  async createUniqueId(body: DeviceMessageCommand, ttlMs: number) {
     const now = new Date()
     const messageId = randomUUID()
     const expiresAt = new Date(now.getTime() + ttlMs)
@@ -158,7 +163,7 @@ export class LastMessageService {
     } satisfies TargetedMessageEnvelope
   }
 
-  async ackUniqueId(body: AckUniqueIdDto) {
+  async ackUniqueId(body: DeviceMessageAck) {
     const result = await this.tUniqueId.delete({
       uniqueId: body.uniqueId,
       messageId: body.messageId
