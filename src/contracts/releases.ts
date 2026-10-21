@@ -47,11 +47,22 @@ export type ApplicationUpdatePolicy = {
 export type UpdateDecisionReason =
   'update-available' | 'no-enabled-release' | 'no-compatible-release'
 
+export type UpdateSkipReason =
+  | 'no_enabled_release'
+  | 'application_mismatch'
+  | 'platform_mismatch'
+  | 'architecture_mismatch'
+  | 'channel_mismatch'
+  | 'audience_mismatch'
+  | 'base_version_mismatch'
+  | 'already_current'
+
 export type UpdateDecision = {
   release: Release | null
   mandatory: boolean
   showUpdateDialog: boolean
   reason: UpdateDecisionReason
+  skipReason?: UpdateSkipReason
   revision: number
 }
 

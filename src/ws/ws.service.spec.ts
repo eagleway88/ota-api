@@ -1,5 +1,18 @@
 import { WsService } from './ws.service'
 import { ConnectionSubscriptionStore } from '@/realtime/subscriptions/connection-subscription.store'
+import { DispatchMetrics } from '@/realtime/dispatch/dispatch-progress'
+
+function selected(payload: Record<string, unknown>) {
+  return {
+    payload,
+    decision: {
+      release: {
+        releaseId: `release-${Number(payload.id)}`,
+        releaseSequence: Number(payload.id)
+      }
+    }
+  }
+}
 
 describe('WsService.getSubscribedUserIds', () => {
   it('returns unique sorted userIds from active subscription rooms', async () => {
@@ -42,6 +55,145 @@ describe('WsService OTA dispatch', () => {
     }
   }
 
+  it('checkpoints inspected connections, skip reasons and send errors in bounded batches', async () => {
+    const subscriptions = new ConnectionSubscriptionStore()
+    const sockets = new Map<string, ReturnType<typeof createClient>>()
+    for (let index = 0; index < 205; index++) {
+      const id = `socket-${index}`
+      subscriptions.subscribeApplication(id, {
+        appName: 'app',
+        platform: 'windows',
+        nativeVersionCode: index,
+        installedReleaseSequence: 0
+      })
+      sockets.set(id, { ...createClient(), id })
+    }
+    sockets.delete('socket-1')
+    sockets
+      .get('socket-0')!
+      .emit.mockImplementation(() =>
+        subscriptions.unsubscribeApplication('socket-4', 'app')
+      )
+    sockets.get('socket-2')!.emit.mockImplementation(() => {
+      throw new Error('transport private details')
+    })
+    sockets.get('socket-3')!.emit.mockReturnValue(false)
+    const service = new WsService(
+      {
+        loadCatalog: jest
+          .fn()
+          .mockResolvedValue({ available: { revision: 1 } }),
+        resolveAvailableDecision: jest.fn((query: { ver: number }) =>
+          query.ver === 5
+            ? {
+                payload: null,
+                decision: { release: null, skipReason: 'platform_mismatch' }
+              }
+            : selected({ id: 2000, name: 'app' })
+        )
+      } as never,
+      {} as never,
+      subscriptions
+    )
+    service.server = { sockets: { sockets } } as never
+    const checkpoint = jest.fn().mockResolvedValue(true)
+    const result = await service.dispatchApplicationUpdate('app', checkpoint)
+    expect(
+      checkpoint.mock.calls.map(
+        ([progress]) => (progress as { scanned: number }).scanned
+      )
+    ).toEqual([0, 100, 200, 205])
+    expect(result).toMatchObject({
+      scanned: 205,
+      eligible: 202,
+      updated: 202,
+      revoked: 0,
+      emitErrors: 2,
+      skipSummary: {
+        disconnected: 1,
+        subscription_changed: 1,
+        platform_mismatch: 1
+      },
+      releaseSummary: {
+        complete: true,
+        entries: [
+          {
+            releaseId: 'release-2000',
+            releaseSequence: 2000,
+            eligible: 202,
+            updated: 202,
+            revoked: 0,
+            emitErrors: 2
+          }
+        ]
+      }
+    })
+  })
+
+  it('counts the actual revoked release and retries a failed revoke before sending the new release', async () => {
+    const subscriptions = new ConnectionSubscriptionStore()
+    subscriptions.subscribeApplication('socket-1', {
+      appName: 'app',
+      platform: 'windows',
+      nativeVersionCode: 100,
+      installedReleaseSequence: 0
+    })
+    const query = {
+      loadCatalog: jest.fn().mockResolvedValue({ available: { revision: 1 } }),
+      resolveAvailableDecision: jest
+        .fn()
+        .mockReturnValue(selected({ id: 2000, name: 'app' }))
+    }
+    const service = new WsService(query as never, {} as never, subscriptions)
+    const client = createClient()
+    service.server = {
+      sockets: { sockets: new Map([[client.id, client]]) }
+    } as never
+    await service.dispatchApplicationUpdate('app')
+    query.resolveAvailableDecision.mockReturnValue(
+      selected({ id: 2001, name: 'app' })
+    )
+    client.emit.mockImplementationOnce(() => {
+      throw new Error('send failed')
+    })
+    const failed = await service.dispatchApplicationUpdate('app')
+    expect(failed).toMatchObject({
+      eligible: 1,
+      updated: 0,
+      revoked: 1,
+      emitErrors: 1,
+      skipSummary: { revoke_emit_failed: 1 }
+    })
+    expect(failed.releaseSummary.entries).toEqual([
+      {
+        releaseId: 'release-2001',
+        releaseSequence: 2001,
+        eligible: 1,
+        updated: 0,
+        revoked: 0,
+        emitErrors: 0
+      },
+      {
+        releaseId: 'release-2000',
+        releaseSequence: 2000,
+        eligible: 0,
+        updated: 0,
+        revoked: 1,
+        emitErrors: 1
+      }
+    ])
+    expect(await service.dispatchApplicationUpdate('app')).toMatchObject({
+      eligible: 1,
+      updated: 1,
+      revoked: 1,
+      emitErrors: 0
+    })
+    expect(client.emit).toHaveBeenLastCalledWith('app', {
+      id: 2001,
+      name: 'app'
+    })
+  })
+
   it('drops a delayed replay after unsubscribe and re-subscribe with another platform', async () => {
     const subscriptions = new ConnectionSubscriptionStore()
     const catalog = { available: { revision: 1, releases: [] } } as never
@@ -61,11 +213,13 @@ describe('WsService OTA dispatch', () => {
           return oldLoad
         })
         .mockResolvedValue(catalog),
-      resolveAvailableVersion: jest.fn((query: { platform: string }) => ({
-        id: query.platform === 'ios' ? 2001 : 2000,
-        name: 'app',
-        enable: 1
-      }))
+      resolveAvailableDecision: jest.fn((query: { platform: string }) =>
+        selected({
+          id: query.platform === 'ios' ? 2001 : 2000,
+          name: 'app',
+          enable: 1
+        })
+      )
     }
     const service = new WsService(
       queryService as never,
@@ -94,7 +248,7 @@ describe('WsService OTA dispatch', () => {
       'app',
       expect.objectContaining({ id: 2001 })
     )
-    expect(queryService.resolveAvailableVersion).toHaveBeenCalledTimes(1)
+    expect(queryService.resolveAvailableDecision).toHaveBeenCalledTimes(1)
   })
 
   it('recalculates OTA eligibility when user subscription arrives later', async () => {
@@ -102,13 +256,15 @@ describe('WsService OTA dispatch', () => {
     const catalog = { available: { revision: 1, releases: [] } } as never
     const queryService = {
       loadCatalog: jest.fn().mockResolvedValue(catalog),
-      resolveAvailableVersion: jest
+      resolveAvailableDecision: jest
         .fn()
-        .mockImplementation((query: { userIds: readonly string[] }) => ({
-          id: query.userIds.length ? 2001 : 2000,
-          name: 'app',
-          enable: 1
-        }))
+        .mockImplementation((query: { userIds: readonly string[] }) =>
+          selected({
+            id: query.userIds.length ? 2001 : 2000,
+            name: 'app',
+            enable: 1
+          })
+        )
     }
     const lastMessageService = { queryUserId: jest.fn() }
     const service = new WsService(
@@ -158,10 +314,12 @@ describe('WsService OTA dispatch', () => {
     const catalog = { available: { revision: 1, releases: [] } } as never
     const queryService = {
       loadCatalog: jest.fn().mockResolvedValue(catalog),
-      resolveAvailableVersion: jest.fn().mockReturnValue({
-        id: 2000,
-        name: 'app'
-      })
+      resolveAvailableDecision: jest.fn().mockReturnValue(
+        selected({
+          id: 2000,
+          name: 'app'
+        })
+      )
     }
     const sockets = new Map([
       ['socket-1', createClient()],
@@ -174,13 +332,15 @@ describe('WsService OTA dispatch', () => {
     )
     service.server = { sockets: { sockets } } as never
 
-    await expect(service.dispatchApplicationUpdate('app')).resolves.toEqual({
+    await expect(
+      service.dispatchApplicationUpdate('app')
+    ).resolves.toMatchObject({
       scanned: 2,
       updated: 2,
       revoked: 0
     })
     expect(queryService.loadCatalog).toHaveBeenCalledTimes(1)
-    expect(queryService.resolveAvailableVersion).toHaveBeenCalledTimes(2)
+    expect(queryService.resolveAvailableDecision).toHaveBeenCalledTimes(2)
   })
 
   it.each([
@@ -197,7 +357,7 @@ describe('WsService OTA dispatch', () => {
             userIdsByReleaseId: new Map()
           }
         }),
-        resolveAvailableVersion: jest.fn()
+        resolveAvailableDecision: jest.fn()
       }
       const service = new WsService(
         queryService as never,
@@ -209,7 +369,7 @@ describe('WsService OTA dispatch', () => {
         service.dispatchApplicationUpdate('app', lease, 42)
       ).rejects.toThrow('catalog revision changed')
       expect(lease).not.toHaveBeenCalled()
-      expect(queryService.resolveAvailableVersion).not.toHaveBeenCalled()
+      expect(queryService.resolveAvailableDecision).not.toHaveBeenCalled()
     }
   )
 
@@ -228,7 +388,7 @@ describe('WsService OTA dispatch', () => {
     const lease = jest.fn().mockResolvedValue(true)
     await expect(
       service.dispatchApplicationUpdate('app', lease, 42)
-    ).resolves.toEqual({ scanned: 0, updated: 0, revoked: 0 })
+    ).resolves.toEqual(new DispatchMetrics().snapshot())
     expect(lease).toHaveBeenCalledTimes(2)
 
     lease
@@ -254,7 +414,7 @@ describe('WsService OTA dispatch', () => {
         available: { revision: 42, releases: [] },
         audience: { revision: 42, userIdsByReleaseId: new Map() }
       }),
-      resolveAvailableVersion: jest.fn()
+      resolveAvailableDecision: jest.fn()
     }
     const service = new WsService(
       queryService as never,
@@ -264,6 +424,6 @@ describe('WsService OTA dispatch', () => {
     await expect(
       service.dispatchApplicationUpdate('app', () => Promise.resolve(false), 42)
     ).rejects.toThrow('lease was lost')
-    expect(queryService.resolveAvailableVersion).not.toHaveBeenCalled()
+    expect(queryService.resolveAvailableDecision).not.toHaveBeenCalled()
   })
 })

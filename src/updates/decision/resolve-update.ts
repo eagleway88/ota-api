@@ -4,7 +4,8 @@ import {
   AvailableReleaseSnapshot,
   ClientUpdateContext,
   Release,
-  UpdateDecision
+  UpdateDecision,
+  UpdateSkipReason
 } from '@/contracts/releases'
 
 function matchesAudience(
@@ -65,22 +66,6 @@ function matchesChannel(
   return release.distributionChannel === context.distributionChannel
 }
 
-function isCompatibleCandidate(
-  release: Release,
-  context: ClientUpdateContext,
-  audience: AudienceSnapshot,
-  policy: ApplicationUpdatePolicy
-) {
-  return (
-    release.appName === context.appName &&
-    release.enabled &&
-    release.platforms.includes(context.platform) &&
-    matchesArchitecture(release, context, policy) &&
-    matchesChannel(release, context, policy) &&
-    matchesAudience(release, context, audience)
-  )
-}
-
 function selectFullRelease(releases: readonly Release[]) {
   return [...releases].sort((left, right) => {
     return (
@@ -103,9 +88,39 @@ export function resolveUpdate(
   policy: ApplicationUpdatePolicy
 ): UpdateDecision {
   const enabled = available.releases.filter(release => release.enabled)
-  const eligible = enabled.filter(release => {
-    return isCompatibleCandidate(release, context, audience, policy)
-  })
+  // A single reason per connection: the first stage eliminating all candidates.
+  // This diagnoses the same selection, without a second, divergent rule engine.
+  const stages: Array<[UpdateSkipReason, (release: Release) => boolean]> = [
+    ['application_mismatch', release => release.appName === context.appName],
+    [
+      'platform_mismatch',
+      release => release.platforms.includes(context.platform)
+    ],
+    [
+      'architecture_mismatch',
+      release => matchesArchitecture(release, context, policy)
+    ],
+    ['channel_mismatch', release => matchesChannel(release, context, policy)],
+    [
+      'audience_mismatch',
+      release => matchesAudience(release, context, audience)
+    ],
+    [
+      'base_version_mismatch',
+      release =>
+        release.updateType === 'full' ||
+        release.compatibleBaseVersionCodes.includes(context.nativeVersionCode)
+    ]
+  ]
+  let eligible = enabled
+  let skipReason: UpdateSkipReason = enabled.length
+    ? 'already_current'
+    : 'no_enabled_release'
+  for (const [reason, matches] of stages) {
+    if (!eligible.length) break
+    eligible = eligible.filter(matches)
+    if (!eligible.length) skipReason = reason
+  }
 
   const fullCandidates = eligible.filter(release => {
     return (
@@ -132,6 +147,7 @@ export function resolveUpdate(
       mandatory: false,
       showUpdateDialog: false,
       reason: enabled.length ? 'no-compatible-release' : 'no-enabled-release',
+      skipReason,
       revision: Math.max(available.revision, audience.revision)
     }
   }

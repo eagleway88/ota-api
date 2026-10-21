@@ -49,6 +49,29 @@ function audience(entries: [string, string[]][] = []): AudienceSnapshot {
 }
 
 describe('resolveUpdate', () => {
+  it.each([
+    ['no_enabled_release', { enabled: false }],
+    ['application_mismatch', { appName: 'other' }],
+    ['platform_mismatch', { platforms: ['linux'] }],
+    ['architecture_mismatch', { architectures: ['arm64'] }],
+    ['channel_mismatch', { distributionChannel: 'beta' }],
+    ['audience_mismatch', { scope: 'allowlist' }],
+    ['base_version_mismatch', { compatibleBaseVersionCodes: [999] }],
+    ['already_current', { updateType: 'full', targetVersionCode: 100 }]
+  ] as Array<[string, Partial<Release>]>)(
+    'diagnoses %s from the same selection rules',
+    (reason, overrides) => {
+      const decision = resolveUpdate(
+        context(),
+        { revision: 1, releases: [release(overrides)] },
+        audience(),
+        defaultApplicationUpdatePolicy
+      )
+      expect(decision.release).toBeNull()
+      expect(decision.skipReason).toBe(reason)
+    }
+  )
+
   it('does not send a hot update to an incompatible native version', () => {
     const decision = resolveUpdate(
       context(),

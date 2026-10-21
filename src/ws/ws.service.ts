@@ -16,6 +16,13 @@ import {
   ApplicationSubscriber,
   ConnectionSubscriptionStore
 } from '@/realtime/subscriptions/connection-subscription.store'
+import {
+  DispatchMetrics,
+  DispatchProgress,
+  DispatchRelease
+} from '@/realtime/dispatch/dispatch-progress'
+
+type DeliveredRelease = DispatchRelease & { payload: Record<string, unknown> }
 
 type OtaNameMessage = {
   otaName: string
@@ -77,7 +84,7 @@ export class WsService {
 
   private readonly deliveredReleases = new Map<
     string,
-    Map<string, Record<string, unknown>>
+    Map<string, DeliveredRelease>
   >()
 
   constructor(
@@ -127,7 +134,7 @@ export class WsService {
 
   async dispatchApplicationUpdate(
     otaName: string,
-    isLeaseValid?: () => Promise<boolean>,
+    isLeaseValid?: (progress: DispatchProgress) => Promise<boolean>,
     expectedRevision?: number
   ) {
     const catalog = await this.otaVersionQueryService.loadCatalog(otaName, true)
@@ -138,37 +145,36 @@ export class WsService {
     ) {
       throw new Error('Publish catalog revision changed before dispatch')
     }
-    if (isLeaseValid && !(await isLeaseValid())) {
+    const metrics = new DispatchMetrics()
+    if (isLeaseValid && !(await isLeaseValid(metrics.snapshot()))) {
       throw new Error('Publish task lease was lost')
     }
     const subscribers = this.subscriptions.getApplicationSubscribers(otaName)
-    const result = { scanned: subscribers.length, updated: 0, revoked: 0 }
-
     for (let index = 0; index < subscribers.length; index += 1) {
       if (
         index > 0 &&
         index % 100 === 0 &&
         isLeaseValid &&
-        !(await isLeaseValid())
+        !(await isLeaseValid(metrics.snapshot()))
       ) {
         throw new Error('Publish task lease was lost')
       }
-      const emitted = this.emitCurrentDecision(
+      this.emitCurrentDecision(
         subscribers[index],
         catalog,
-        true
+        true,
+        undefined,
+        metrics
       )
-      result.updated += emitted.updated
-      result.revoked += emitted.revoked
       if ((index + 1) % 100 === 0) {
         await new Promise<void>(resolve => setImmediate(resolve))
       }
     }
     // Validate even an empty batch and detect changes during the final chunk.
-    if (isLeaseValid && !(await isLeaseValid())) {
+    if (isLeaseValid && !(await isLeaseValid(metrics.snapshot()))) {
       throw new Error('Publish task lease was lost')
     }
-    return result
+    return metrics.snapshot()
   }
 
   sendUserIdMessage(userId: string, data: TargetedMessageEnvelope) {
@@ -391,57 +397,89 @@ export class WsService {
     subscriber: ApplicationSubscriber,
     catalog: ReleaseCatalog,
     force: boolean,
-    knownClient?: Socket
+    knownClient?: Socket,
+    metrics = new DispatchMetrics()
   ) {
-    const result = { updated: 0, revoked: 0 }
+    metrics.scan()
     if (!this.subscriptions.isCurrent(subscriber)) {
-      return result
+      metrics.skip('subscription_changed')
+      return
     }
 
     const client =
       knownClient ?? this.server.sockets.sockets.get(subscriber.socketId)
     if (!client) {
-      return result
+      metrics.skip('disconnected')
+      return
     }
     const application = subscriber.application
-    const payload = this.otaVersionQueryService.resolveAvailableVersion(
-      {
-        name: application.appName,
-        platform: application.platform,
-        architecture: application.architecture,
-        channel: application.distributionChannel,
-        ver: application.nativeVersionCode,
-        id: application.installedReleaseSequence,
-        userIds: Array.from(subscriber.userIds)
-      },
-      catalog
-    )
+    const { payload, decision } =
+      this.otaVersionQueryService.resolveAvailableDecision(
+        {
+          name: application.appName,
+          platform: application.platform,
+          architecture: application.architecture,
+          channel: application.distributionChannel,
+          ver: application.nativeVersionCode,
+          id: application.installedReleaseSequence,
+          userIds: Array.from(subscriber.userIds)
+        },
+        catalog
+      )
+    if (decision.release) metrics.count('eligible', decision.release)
     if (!this.subscriptions.isCurrent(subscriber)) {
-      return result
+      metrics.skip('subscription_changed')
+      return
     }
+    if (!payload) metrics.skip(decision.skipReason ?? 'already_current')
 
     const socketDeliveries =
       this.deliveredReleases.get(subscriber.socketId) ??
-      new Map<string, Record<string, unknown>>()
+      new Map<string, DeliveredRelease>()
     const previous = socketDeliveries.get(application.appName)
-    const previousId = Number(previous?.id)
-    const nextId = Number(payload?.id)
+    const previousId = previous?.releaseSequence
+    const nextId = decision.release?.releaseSequence
+
+    const emit = (
+      release: DispatchRelease,
+      data: Record<string, unknown>,
+      kind: 'updated' | 'revoked'
+    ) => {
+      metrics.count(kind, release) // Attempts, not delivery acknowledgements.
+      try {
+        if (client.emit(application.appName, data) === false) {
+          metrics.count('emitErrors', release)
+          return false
+        }
+        return true
+      } catch {
+        metrics.count('emitErrors', release)
+        return false
+      }
+    }
 
     if (previous && (!payload || previousId !== nextId)) {
-      client.emit(application.appName, { ...previous, enable: 0 })
+      if (!emit(previous, { ...previous.payload, enable: 0 }, 'revoked')) {
+        if (payload) metrics.skip('revoke_emit_failed')
+        return
+      }
       socketDeliveries.delete(application.appName)
-      result.revoked += 1
     }
-    if (payload && (force || previousId !== nextId)) {
-      client.emit(application.appName, payload)
-      socketDeliveries.set(application.appName, payload)
-      result.updated += 1
+    if (payload && decision.release) {
+      if (force || previousId !== nextId) {
+        if (emit(decision.release, payload, 'updated')) {
+          socketDeliveries.set(application.appName, {
+            payload,
+            releaseId: decision.release.releaseId,
+            releaseSequence: decision.release.releaseSequence
+          })
+        }
+      } else metrics.skip('unchanged')
     }
     if (socketDeliveries.size) {
       this.deliveredReleases.set(subscriber.socketId, socketDeliveries)
     } else {
       this.deliveredReleases.delete(subscriber.socketId)
     }
-    return result
   }
 }

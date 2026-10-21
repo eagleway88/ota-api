@@ -7,12 +7,14 @@ import {
 import { ConfigService } from '@nestjs/config'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { randomUUID } from 'crypto'
-import { DataSource } from 'typeorm'
+import { DataSource, QueryRunner } from 'typeorm'
 import {
   ApplicationRegistryService,
   RegisteredApplication
 } from '@/applications/application-registry.service'
 import { WsService } from '@/ws/ws.service'
+import { DispatchProgress } from '@/realtime/dispatch/dispatch-progress'
+import { dispatchProgressValues } from './dispatch-progress.values'
 import {
   canClaimPublishTask,
   PublishTaskStatus,
@@ -67,29 +69,52 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
     if (this.configService.get('PUBLISH_TASKS_PAUSED') === 'true') {
       return false
     }
-    const claimed = await this.claimTask(application, taskId, requestId)
+    const executionRequestId = requestId?.slice(0, 64) || randomUUID()
+    const claimed = await this.claimTask(
+      application,
+      taskId,
+      executionRequestId
+    )
     if (!claimed) {
       return false
     }
 
     const { attemptNo, leaseToken, logId, startedAt, effectiveRevision } =
       claimed
+    this.logger.log(
+      JSON.stringify({
+        event: 'publish_task_started',
+        taskId,
+        logId,
+        attemptNo,
+        requestId: executionRequestId
+      })
+    )
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     try {
       const result = await this.wsService.dispatchApplicationUpdate(
         application.appName,
-        () =>
+        progress =>
           this.renewTaskLease(
             application,
             taskId,
             leaseToken,
-            effectiveRevision
+            effectiveRevision,
+            logId,
+            progress
           ),
         effectiveRevision
       )
-      const finishedAt = new Date()
+      if (result.emitErrors) throw new Error('Publish emit failed')
       await queryRunner.startTransaction()
+      await this.requireCatalogRevision(
+        queryRunner,
+        application,
+        effectiveRevision
+      )
+      await this.requireLiveLease(queryRunner, application, taskId, leaseToken)
+      const finishedAt = new Date()
       const completion = await queryRunner.manager
         .createQueryBuilder()
         .update(application.tables.publishTask)
@@ -101,8 +126,14 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
           finished_at: finishedAt
         })
         .where(
-          'task_id = :taskId AND status = :status AND lease_token = :leaseToken',
-          { taskId, status: 'running', leaseToken }
+          'task_id = :taskId AND status = :status AND lease_token = :leaseToken AND lease_owner = :owner AND lease_until > :now',
+          {
+            taskId,
+            status: 'running',
+            leaseToken,
+            owner: this.workerId,
+            now: finishedAt
+          }
         )
         .execute()
       if (!completion.affected) {
@@ -116,17 +147,18 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
           status: 'succeeded',
           finished_at: finishedAt,
           duration_ms: finishedAt.getTime() - startedAt.getTime(),
-          scanned_count: result.scanned,
-          eligible_count: result.updated,
-          update_emit_count: result.updated,
-          revoke_emit_count: result.revoked,
-          metrics_complete: 1,
-          last_checkpoint_at: finishedAt
+          ...dispatchProgressValues(result, finishedAt),
+          metrics_complete: 1
         })
-        .where('log_id = :logId AND status = :status', {
-          logId,
-          status: 'running'
-        })
+        .where(
+          'log_id = :logId AND status = :status AND lease_token = :leaseToken AND worker_id = :owner',
+          {
+            logId,
+            status: 'running',
+            leaseToken,
+            owner: this.workerId
+          }
+        )
         .execute()
       if (!logCompletion.affected) {
         await queryRunner.rollbackTransaction()
@@ -139,13 +171,21 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
         await queryRunner.rollbackTransaction()
       }
       const failedAt = new Date()
-      const summary =
-        error instanceof Error ? error.message.slice(0, 512) : 'Dispatch failed'
-      const errorCode = summary.includes('catalog revision')
+      const message = error instanceof Error ? error.message : ''
+      const errorCode = message.includes('catalog revision')
         ? 'catalog_revision_changed'
-        : summary.includes('lease')
+        : message.includes('lease')
           ? 'lease_lost'
-          : 'dispatch_failed'
+          : message === 'Publish emit failed'
+            ? 'emit_failed'
+            : 'dispatch_failed'
+      // SQL/transport exceptions can contain client data or credentials. Persist only fixed summaries.
+      const summary = {
+        catalog_revision_changed: 'Publish catalog revision changed',
+        lease_lost: 'Publish task lease was lost',
+        emit_failed: 'One or more socket send attempts failed',
+        dispatch_failed: 'Publish dispatch failed'
+      }[errorCode]
       await queryRunner.startTransaction()
       const task = await queryRunner.manager
         .createQueryBuilder()
@@ -153,11 +193,20 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
         .from(application.tables.publishTask, 'task')
         .setLock('pessimistic_write')
         .where(
-          'task.task_id = :taskId AND task.status = :status AND task.lease_token = :leaseToken',
-          { taskId, status: 'running', leaseToken }
+          'task.task_id = :taskId AND task.status = :status AND task.lease_token = :leaseToken AND task.lease_owner = :owner AND task.lease_until > :now',
+          {
+            taskId,
+            status: 'running',
+            leaseToken,
+            owner: this.workerId,
+            now: failedAt
+          }
         )
         .getRawOne<Record<string, unknown>>()
-      if (!task) {
+      if (
+        !task ||
+        (databaseDate(task.lease_until)?.getTime() ?? 0) <= Date.now()
+      ) {
         await queryRunner.commitTransaction()
         return false
       }
@@ -192,10 +241,15 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
           error_summary: summary,
           metrics_complete: 0
         })
-        .where('log_id = :logId AND status = :status', {
-          logId,
-          status: 'running'
-        })
+        .where(
+          'log_id = :logId AND status = :status AND lease_token = :leaseToken AND worker_id = :owner',
+          {
+            logId,
+            status: 'running',
+            leaseToken,
+            owner: this.workerId
+          }
+        )
         .execute()
       if (!logFailure.affected) {
         await queryRunner.rollbackTransaction()
@@ -220,6 +274,12 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
     await queryRunner.connect()
     await queryRunner.startTransaction()
     try {
+      // All paths needing both locks take application first, then task/log.
+      const catalog = await this.lockCatalog(queryRunner, application)
+      const effectiveRevision = Number(catalog?.catalogRevision)
+      if (!Number.isSafeInteger(effectiveRevision) || effectiveRevision < 0) {
+        throw new Error('Application catalog revision is unavailable')
+      }
       const task = await queryRunner.manager
         .createQueryBuilder()
         .select('*')
@@ -277,19 +337,6 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
 
       const leaseToken = Number(task.lease_token) + 1
       const logId = randomUUID()
-      const catalog = await queryRunner.manager
-        .createQueryBuilder()
-        .select('application.catalog_revision', 'catalogRevision')
-        .from('ota_applications', 'application')
-        .setLock('pessimistic_read')
-        .where('application.app_name = :appName', {
-          appName: application.appName
-        })
-        .getRawOne<{ catalogRevision: number | string }>()
-      const effectiveRevision = Number(catalog?.catalogRevision)
-      if (!Number.isSafeInteger(effectiveRevision)) {
-        throw new Error('Application catalog revision is unavailable')
-      }
       await queryRunner.manager
         .createQueryBuilder()
         .update(application.tables.publishTask)
@@ -341,25 +388,20 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
     application: RegisteredApplication,
     taskId: string,
     leaseToken: number,
-    effectiveRevision: number
+    effectiveRevision: number,
+    logId: string,
+    progress: DispatchProgress
   ) {
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     await queryRunner.startTransaction()
     try {
-      const catalog = await queryRunner.manager
-        .createQueryBuilder()
-        .select('application.catalog_revision', 'catalogRevision')
-        .from('ota_applications', 'application')
-        .setLock('pessimistic_read')
-        .where('application.app_name = :appName', {
-          appName: application.appName
-        })
-        .getRawOne<{ catalogRevision: number | string }>()
-      if (Number(catalog?.catalogRevision) !== effectiveRevision) {
-        await queryRunner.commitTransaction()
-        throw new Error('Publish catalog revision changed')
-      }
+      await this.requireCatalogRevision(
+        queryRunner,
+        application,
+        effectiveRevision
+      )
+      await this.requireLiveLease(queryRunner, application, taskId, leaseToken)
       const now = new Date()
       const renewal = await queryRunner.manager
         .createQueryBuilder()
@@ -369,12 +411,35 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
           updated_at: now
         })
         .where(
-          'task_id = :taskId AND status = :status AND lease_token = :leaseToken AND lease_until > :now',
-          { taskId, status: 'running', leaseToken, now }
+          'task_id = :taskId AND status = :status AND lease_token = :leaseToken AND lease_owner = :owner AND lease_until > :now',
+          { taskId, status: 'running', leaseToken, owner: this.workerId, now }
         )
         .execute()
+      if (!renewal.affected) {
+        await queryRunner.rollbackTransaction()
+        return false
+      }
+      const checkpoint = await queryRunner.manager
+        .createQueryBuilder()
+        .update(application.tables.publishTaskLog)
+        .set({ ...dispatchProgressValues(progress, now), metrics_complete: 0 })
+        .where(
+          'log_id = :logId AND task_id = :taskId AND status = :status AND lease_token = :leaseToken AND worker_id = :owner',
+          {
+            logId,
+            taskId,
+            status: 'running',
+            leaseToken,
+            owner: this.workerId
+          }
+        )
+        .execute()
+      if (!checkpoint.affected) {
+        await queryRunner.rollbackTransaction()
+        return false
+      }
       await queryRunner.commitTransaction()
-      return Boolean(renewal.affected)
+      return true
     } catch (error) {
       if (queryRunner.isTransactionActive) {
         await queryRunner.rollbackTransaction()
@@ -383,6 +448,54 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
     } finally {
       await queryRunner.release()
     }
+  }
+
+  private lockCatalog(runner: QueryRunner, application: RegisteredApplication) {
+    return runner.manager
+      .createQueryBuilder()
+      .select('application.catalog_revision', 'catalogRevision')
+      .from('ota_applications', 'application')
+      .setLock('pessimistic_read')
+      .where('application.app_name = :appName', {
+        appName: application.appName
+      })
+      .getRawOne<{ catalogRevision: number | string }>()
+  }
+
+  private async requireLiveLease(
+    runner: QueryRunner,
+    application: RegisteredApplication,
+    taskId: string,
+    leaseToken: number
+  ) {
+    const task = await runner.manager
+      .createQueryBuilder()
+      .select('task.lease_until', 'lease_until')
+      .from(application.tables.publishTask, 'task')
+      .setLock('pessimistic_write')
+      .where(
+        'task.task_id = :taskId AND task.status = :status AND task.lease_token = :leaseToken AND task.lease_owner = :owner',
+        {
+          taskId,
+          status: 'running',
+          leaseToken,
+          owner: this.workerId
+        }
+      )
+      .getRawOne<{ lease_until: unknown }>()
+    // Evaluate after acquiring the row lock, not before a potentially long wait.
+    if (!task || (databaseDate(task.lease_until)?.getTime() ?? 0) <= Date.now())
+      throw new Error('Publish task lease was lost')
+  }
+
+  private async requireCatalogRevision(
+    runner: QueryRunner,
+    application: RegisteredApplication,
+    revision: number
+  ) {
+    const catalog = await this.lockCatalog(runner, application)
+    if (Number(catalog?.catalogRevision) !== revision)
+      throw new Error('Publish catalog revision changed')
   }
 
   private async recoverTasks() {

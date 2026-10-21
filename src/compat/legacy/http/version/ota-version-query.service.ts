@@ -46,6 +46,10 @@ export class OtaVersionQueryService {
     query: OtaVersionQuery,
     catalog: ReleaseCatalog
   ): Record<string, unknown> | null {
+    return this.resolveAvailableDecision(query, catalog).payload
+  }
+
+  resolveAvailableDecision(query: OtaVersionQuery, catalog: ReleaseCatalog) {
     const context: ClientUpdateContext = {
       appName: query.name,
       platform: query.platform,
@@ -62,12 +66,13 @@ export class OtaVersionQueryService {
       defaultApplicationUpdatePolicy
     )
 
-    return decision.release
+    const payload = decision.release
       ? serializeLegacyRelease(
           decision.release,
           decision.mandatory,
           decision.showUpdateDialog
         )
       : null
+    return { payload, decision }
   }
 }
