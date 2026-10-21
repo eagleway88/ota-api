@@ -98,6 +98,22 @@ Authorization: Bearer <JWT>
 
 日志响应中的 `historyNotice` 提醒：迁移前可能未采集，超过保留期可能已清理。没有记录不表示操作从未发生。当前审计写入仍有缺口，详见 [完成度报告](REFACTOR_PROGRESS.md)。
 
+## 发布操作失败审计
+
+现有 `GET /api/v2/apps/:appName/audit-logs?result=failed` 可查询新增失败记录，仍要求管理员 Bearer Token；支持按 `requestId`、`operationId`、`releaseId` 和时间范围筛选，不新增公开入口。旧发布现在沿用 HTTP 的请求 ID 与已认证管理员身份，不另造无关联的请求 ID。
+
+覆盖已进入应用写入边界的旧/v2 发布、启用/停用、已发布名单替换/范围修改、重新分发和草稿名单/范围修改。名单归一化在锁定版本后执行，非法应用/平台标识返回 `400` 并记录固定错误分类，不将完整名单或异常正文写入失败摘要。成功审计仍与业务变更、修订及任务同事务提交。
+
+- 业务确认回滚后，用独立连接/事务追加 `result=failed`；`task_id`、`revision_before`、`revision_after` 为空，不关联已回滚的任务，也不声称修订已生效。`release_id/target_id` 是尝试操作的对象，可能不存在（包括发布回滚和跨应用 ID 请求）。
+- `change_summary` 只保留允许的意图字段：启用状态、范围、人数、重推标记或入口来源。它不是已生效的差异；失败审计不保存请求正文、URL、名单、SQL、原始异常或堆栈。
+- `error_code` 使用 `INVALID_OPERATION`、`RELEASE_NOT_FOUND`、`OPERATION_CONFLICT`、`DATABASE_WRITE_FAILED` 或 `APPLICATION_OPERATION_FAILED`，不透出数据库错误详情。
+- 每次管理请求尝试生成独立 `operation_id`；失败后重试不会覆盖失败记录。草稿重复发布仍复用原序号，不重复创建成功审计。启停/名单/重推尚无通用幂等键，不应在响应异常后盲目重放。
+- 提交后的 Worker 错误不转为失败管理审计。提交响应丢失、回滚失败等结果未知情况也不伪造 `failed`；先查询版本、草稿、任务和成功审计，核实实际结果。
+
+失败审计自身无法写入时输出 ERROR 事件 `application_failure_audit_unavailable`；提交结果未知或提交后清理异常输出 `application_operation_outcome_requires_review`（含实际追踪状态）；连接/锁清理异常还会输出 `application_write_cleanup_failed`。事件保留应用、操作、请求等关联元数据，不附加原始异常。它们是服务端运行日志，不是本接口中的数据库记录；部署方仍需配置日志采集与告警，当前没有独立的告警投递或运行日志查询后端。
+
+应用解析/准备失败、鉴权/DTO 校验等前置拒绝、旧上传 OSS 阶段、草稿创建/普通编辑、文件上传和完整名单差异尚未由这条失败审计链路全部覆盖。应用不就绪、映射变化或审计表不可用时也不能保证失败记录落库；不会为补审计临时建表或修改映射。没有审计不能推断操作从未发生。
+
 ## 发布任务运行进度
 
 管理员可轮询 `GET /api/v2/apps/:appName/tasks/:taskId` 的 `data.latestLog`，或使用 `GET /api/v2/apps/:appName/tasks/:taskId/logs` 查看各次执行。认证沿用管理员 Bearer Token；本轮未新增公开日志入口。运行中每检查 100 个连接保存一次聚合进度，执行前和最后不足一批也保存；数据库写入与续租同事务，不按连接插入明细日志。
