@@ -97,4 +97,6 @@ OTA_MIGRATION_TEST_SOCKET=/private/tmp/ota-migration-mysql.EXAMPLE/mysql.sock \
 
 应使用 `mktemp -d /private/tmp/ota-migration-mysql.XXXXXX` 创建全新私有目录，再用 `mysqld --no-defaults --initialize-insecure --datadir=<目录>/data` 初始化；启动时同样使用 `--no-defaults`，显式指定 datadir/socket/pid/log，并启用 `--skip-networking --mysqlx=0 --skip-log-bin`。仅在这种独立、无网络、无业务数据的实例使用无密码 root；不要把生产 socket 传给测试。测试只创建并删除自身随机命名的 `ota_migration_test_*` 数据库，不读取项目 `.env`。结束后停止这个独立实例。
 
-本轮在本机 MySQL 26.7.0 上运行 15 项真实数据库测试：9 项迁移测试，以及 6 项发布测试。发布测试让旧发布停在已分配 ID/未提交的位置，验证 v2 等待、迁移拒绝、其他应用可发布；同时验证同草稿并发幂等、旧/v2 审计失败回滚、ready 状态复查及发布→迁移切换→启停双写→水位保留。仍须在目标 MySQL 版本、真实脱敏数据副本上重新演练；没有执行生产迁移。
+当前在本机 MySQL 26.7.0 上运行 23 项真实数据库测试：9 项迁移、6 项发布、8 项任务测试。发布测试让旧发布停在已分配 ID/未提交的位置，验证 v2 等待、迁移拒绝、其他应用可发布；同时验证同草稿并发幂等、旧/v2 审计失败回滚、ready 状态复查及发布→迁移切换→启停双写→水位保留。任务测试验证进度事务、竞争领取与租约接管，不是进程 kill/重启测试。仍须在目标 MySQL 版本、真实脱敏数据副本上重新演练；没有执行生产迁移。
+
+任务进度功能沿用已准备的执行日志列，没有新增字段、没有回写历史日志。历史 `skip_summary/release_summary` 为空表示未采集，不应补成空对象并声称零跳过；旧统计语义与展示限制见 [管理员接口](ADMIN_API.md)。

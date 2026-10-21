@@ -96,6 +96,43 @@ Authorization: Bearer <JWT>
 
 日志响应中的 `historyNotice` 提醒：迁移前可能未采集，超过保留期可能已清理。没有记录不表示操作从未发生。当前审计写入仍有缺口，详见 [完成度报告](REFACTOR_PROGRESS.md)。
 
+## 发布任务运行进度
+
+管理员可轮询 `GET /api/v2/apps/:appName/tasks/:taskId` 的 `data.latestLog`，或使用 `GET /api/v2/apps/:appName/tasks/:taskId/logs` 查看各次执行。认证沿用管理员 Bearer Token；本轮未新增公开日志入口。运行中每检查 100 个连接保存一次聚合进度，执行前和最后不足一批也保存；数据库写入与续租同事务，不按连接插入明细日志。
+
+| 日志字段 | 含义 |
+| --- | --- |
+| `scanned_count` | 已检查的订阅上下文数，不是批次开始时的在线总数 |
+| `eligible_count` | 决策得到可用版本的上下文数；之后连接变化或发送失败仍可能未成功发送 |
+| `update_emit_count` / `revoke_emit_count` | 实际调用更新/撤销发送的尝试次数，包含同步失败的尝试 |
+| `emit_error_count` | 同步抛错或返回 false 的发送次数，不检测客户端最终收到与否 |
+| `skip_summary` | 连接级跳过原因计数，不按每个候选版本重复计数 |
+| `release_summary` | 实际候选/撤销版本的聚合，不等同于触发任务的版本 |
+| `last_checkpoint_at` | 最近一次已提交进度时间；不能当作客户端在线心跳 |
+| `metrics_complete` | 只有本轮完整成功提交时为 1；运行中、失败和租约过期为 0 |
+| `request_id` | 当前执行的关联标识；恢复执行没有原请求时生成新的 UUID，不冒充原管理请求 ID |
+
+无候选时按启用→应用→平台→架构→渠道→名单→基础版本→是否已有更新的顺序，记录第一个清空候选集合的阶段。原因键为 `no_enabled_release/application_mismatch/platform_mismatch/architecture_mismatch/channel_mismatch/audience_mismatch/base_version_mismatch/already_current`。连接状态另有 `subscription_changed/disconnected`，重复内容与撤销失败阻止新发送分别为 `unchanged/revoke_emit_failed`。无可用新版本时仍可能撤销旧版本，因此跳过计数与发送尝试数不能直接相加还原检查数。
+
+`release_summary` 示例（字段使用 JSON 对象，不是逐连接列表）：
+
+```json
+{
+  "limit": 100,
+  "complete": true,
+  "omittedCounts": { "eligible": 0, "updated": 0, "revoked": 0, "emitErrors": 0 },
+  "entries": [
+    { "releaseId": "发布 UUID", "releaseSequence": 2000, "eligible": 100, "updated": 100, "revoked": 0, "emitErrors": 0 }
+  ]
+}
+```
+
+最多保存最先遇到的 100 个实际版本，后续不同版本的计数进入 `omittedCounts` 并设置 `complete: false`，总计数仍正常累计。已列版本的计数会继续更新；摘要不含连接 ID、userId 或完整发布内容。`release_summary.complete` 只表示已持久化计数的版本归类是否截断，与执行是否完成的 `metrics_complete` 独立：完整成功的任务也可能有截断的逐版本摘要。
+
+即时发送错误会令本轮进入重试；重试可能再次发送，因此不能将不同执行记录累加为独立接收人数。修订变化或进程异常后保留最后已提交 checkpoint，未提交的末批可能缺失。过期接管建立新的执行记录，旧执行者不能覆盖新结果。零目标可以成功完成，仍不代表客户端安装成功。
+
+本轮没有变更表结构，也不补造历史计数。旧日志的 `skip_summary/release_summary` 为 null 时表示未采集，不是空结果；旧实现的 `eligible_count` 曾等于更新发送计数，不能据此推断历史资格分布。错误摘要采用固定脱敏分类，不通过管理 API 暴露原 SQL/传输异常中的业务数据。
+
 ## 调用示例
 
 以下为接入示例，域名和 Token 由调用方填写：
@@ -115,4 +152,4 @@ curl --get 'https://ota.example.com/api/v2/apps/eagleway-network/statistics/summ
 
 当前 API 提供数据库中的客户端错误、发布任务执行日志、应用审计和全局审计。服务端标准输出/PM2 文件日志尚无持久化查询后端，因此不在这组接口中；也不提供读取任意服务器日志文件的接口。
 
-自动化测试通过本机真实 HTTP 请求验证认证、参数、响应、应用路由隔离和 TypeORM 生成的参数化 SQL，数据库返回使用测试替身。真实 MySQL 的时间精度、索引执行计划、查询负载和现有数据结构仍需在目标测试环境验证。
+自动化测试通过本机真实 HTTP 请求验证认证、参数、响应、应用路由隔离和 TypeORM 生成的参数化 SQL，该 HTTP 套件的数据库返回使用测试替身。另有独立 MySQL 任务套件，验证管理查询能读到运行中进度、租约接管及失败回滚；Socket 发送使用内存替身。目标 MySQL 的时间精度、索引执行计划、查询负载、真实网络和现有数据结构仍需在目标测试环境验证。

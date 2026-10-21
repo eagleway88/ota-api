@@ -17,6 +17,7 @@ src/
     catalog/                 候选目录加载和缓存
     decision/                无 I/O 的更新决策函数
   realtime/subscriptions/    连接状态和反向索引
+  realtime/dispatch/         无 I/O 的有界计数、跳过原因与实际版本摘要
   ws/                        现有 WebSocket Gateway（仍待进一步拆分）
   compat/legacy/
     http/admin/              旧管理员 Controller/DTO/适配
@@ -47,6 +48,8 @@ src/
 `ReleaseCatalogService` 只负责加载目录；旧参数归一化和旧响应序列化由 `compat/legacy/http/version/OtaVersionQueryService` 承接。正式发布服务通过目录服务失效缓存，不直接依赖旧查询适配器。
 
 目录加载在同一连接的 `REPEATABLE READ` 事务内读取应用表映射、应用级 `catalog_revision`、版本及名单。普通并发读取合并；失效/强制刷新后的旧加载只能采用新结果，不能回填缓存。后台分发校验执行记录修订号与快照一致，批次开始和结束（含零目标）校验租约及目录修订；变化进入重试。本地回归使用数据库替身，真实 MySQL 隔离级别与存储引擎仍需集成验收。
+
+`DispatchMetrics` 只聚合计数，不保存身份或发布 payload；`resolveUpdate()` 在原选择规则中给出跳过原因，旧协议仍只序列化原发布字段。Gateway 每 100 个连接及结束时把快照交给 Worker；Worker 以应用→任务→执行日志的锁顺序原子续租并保存 checkpoint，成功事务再次核对修订和租约。每次恢复建立新执行记录，过期旧记录保留不完整计数。相关真实 MySQL 竞争/回滚已有回归，仍不等于真实进程崩溃与网络发送验证。
 
 `MessagingModule` 提供共享的 `LastMessageService`，由旧 HTTP 和 WebSocket 引用同一 Provider。存储服务只接收共用消息契约，不导入旧 HTTP DTO。
 
