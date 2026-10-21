@@ -15,11 +15,12 @@ import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
 import { VersionListItemDto, VersionListQueryDto } from './version.dto'
 import { otaUploadMaxBytes, validateOtaUpload } from '@/artifacts/upload-policy'
 import { userIdMatchesContext } from '@/contracts/user-id'
+import { ReleaseOperationContext } from '@/contracts/release-operation'
 import { normalizeLegacyReleaseAudience } from '@/compat/legacy/http/release-audience.mapper'
 import { serializeLegacyReleaseRecord } from '@/compat/legacy/mappers/release.mapper'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ReleaseManagementService } from '@/releases/release-management.service'
-import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
+import { withAuditedApplicationWrite } from '@/audit/application-write-audit'
 import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
 
 import { TelemetryWriteService } from '@/telemetry/telemetry-write.service'
@@ -120,7 +121,8 @@ export class VersionService {
         ip: fetchIP(req),
         createTime
       },
-      audience.userIds
+      audience.userIds,
+      this.operationContext(req)
     )
 
     if (created) {
@@ -194,7 +196,8 @@ export class VersionService {
         ip: fetchIP(req),
         createTime
       },
-      audience.userIds
+      audience.userIds,
+      this.operationContext(req)
     )
     if (created) {
       this.otaVersionQueryService.invalidate(body.name)
@@ -360,13 +363,10 @@ export class VersionService {
 
   private async insertPublishedVersion(
     payload: Record<string, unknown>,
-    userIds: readonly string[]
+    userIds: readonly string[],
+    operationContext: ReleaseOperationContext
   ): Promise<Record<string, unknown>> {
     const appName = String(payload.name)
-    const operationContext = {
-      requestId: randomUUID(),
-      sourceIp: typeof payload.ip === 'string' ? payload.ip : undefined
-    }
     if (!this.applications || !this.releaseManagement || !this.releaseWrites)
       throw new Error('Registered publication persistence is not configured')
     const releaseManagement = this.releaseManagement
@@ -375,9 +375,18 @@ export class VersionService {
       appName,
       operationContext
     )
-    return withApplicationWrite(
+    const operationId = randomUUID()
+    return withAuditedApplicationWrite(
       this.dataSource,
       application,
+      {
+        operationId,
+        context: operationContext,
+        releaseId: String(payload.releaseId),
+        action: 'publish',
+        targetType: 'release',
+        changeSummary: { source: 'legacy-http' }
+      },
       async queryRunner => {
         const created = await releaseWrites.insertLegacy(
           queryRunner,
@@ -403,11 +412,26 @@ export class VersionService {
           queryRunner,
           application,
           releaseId,
-          operationContext
+          operationContext,
+          operationId
         )
         return created
       }
     )
+  }
+
+  private operationContext(request: Request): ReleaseOperationContext {
+    const user = (
+      request as Request & {
+        user?: { sub?: number; uid?: number; username?: string }
+      }
+    ).user
+    return {
+      requestId: String(request.headers['x-request-id'] || randomUUID()),
+      sourceIp: fetchIP(request),
+      actorAdminId: Number(user?.sub ?? user?.uid) || undefined,
+      actorName: user?.username
+    }
   }
 
   private normalizeReleaseAudience(body: CreateDto | UploadDto) {

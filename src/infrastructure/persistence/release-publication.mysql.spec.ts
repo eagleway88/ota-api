@@ -2,6 +2,7 @@ import 'reflect-metadata'
 import { randomUUID } from 'crypto'
 import type { Request } from 'express'
 import { ConfigService } from '@nestjs/config'
+import { Logger } from '@nestjs/common'
 import { DataSource, QueryRunner } from 'typeorm'
 import { RefactoringFoundation1792444800000 } from '@/migrations/1792444800000-RefactoringFoundation'
 import { ApplicationDataMigration1792445100000 } from '@/migrations/1792445100000-ApplicationDataMigration'
@@ -24,6 +25,8 @@ import { ApplicationDataMigrator } from '@/infrastructure/migrations/application
 import { ApplicationTableResolver } from './application-table-resolver'
 import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
 import { inspectBackfillRow } from '@/compat/legacy/persistence/backfill-row'
+import { AuditQueryService } from '@/audit/audit-query.service'
+import { AdminReadRepository } from './admin-read.repository'
 
 function deferred() {
   let resolve!: () => void
@@ -45,8 +48,13 @@ mysql('publication transactions on isolated MySQL', () => {
   let policy: ReleaseManagementService
   const appName = 'publishing-app'
   const context = { requestId: 'publish-test' }
-  const request = { headers: {}, ip: '127.0.0.1' } as Request
+  const request = {
+    headers: { 'x-request-id': 'legacy-publish-test' },
+    ip: '127.0.0.1',
+    user: { sub: 17, username: 'legacy-operator' }
+  } as unknown as Request
   const catalog = { invalidate: jest.fn() }
+  const worker = { execute: jest.fn() }
   const connection = {
     type: 'mysql' as const,
     username: 'root',
@@ -118,7 +126,7 @@ mysql('publication transactions on isolated MySQL', () => {
       source,
       applications,
       catalog as unknown as ReleaseCatalogService,
-      { execute: jest.fn() } as unknown as PublishTaskWorkerService,
+      worker as unknown as PublishTaskWorkerService,
       new DualWriteReleaseRepository()
     )
     legacy = new VersionService(
@@ -136,6 +144,7 @@ mysql('publication transactions on isolated MySQL', () => {
       new DualWriteReleaseRepository()
     )
     catalog.invalidate.mockClear()
+    worker.execute.mockReset()
   })
   afterEach(async () => {
     jest.restoreAllMocks()
@@ -346,4 +355,359 @@ mysql('publication transactions on isolated MySQL', () => {
     ).toBe(false)
     expect((await legacyPublish()).data.id).toBe(5001)
   })
+
+  const rejectSuccessAudit = () =>
+    query(
+      `CREATE TRIGGER reject_success_audit BEFORE INSERT ON \`${application.tables.auditLog}\`
+     FOR EACH ROW BEGIN
+       IF NEW.result = 'succeeded' THEN
+         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected secret SQL payload';
+       END IF;
+     END`
+    )
+  const auditRows = () =>
+    query(
+      `SELECT * FROM \`${application.tables.auditLog}\` ORDER BY created_at, audit_id`
+    )
+
+  it.each(['legacy', 'v2'] as const)(
+    'persists an independent failed %s publication audit after complete rollback',
+    async kind => {
+      const releaseId = kind === 'v2' ? await draft() : undefined
+      await rejectSuccessAudit()
+      await expect(
+        releaseId
+          ? drafts.publish(appName, releaseId, context)
+          : legacyPublish()
+      ).rejects.toThrow('injected secret SQL payload')
+      expect(
+        await query(`SELECT id FROM \`${application.tables.version}\``)
+      ).toEqual([])
+      expect(
+        await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
+      ).toEqual([])
+      expect(
+        Number(
+          (
+            await query(
+              'SELECT catalog_revision FROM ota_applications WHERE app_name = ?',
+              [appName]
+            )
+          )[0].catalog_revision
+        )
+      ).toBe(0)
+      const rows = await auditRows()
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({
+        action: 'publish',
+        result: 'failed',
+        error_code: 'DATABASE_WRITE_FAILED',
+        task_id: null,
+        revision_before: null,
+        revision_after: null,
+        change_summary: { source: kind === 'legacy' ? 'legacy-http' : 'v2' }
+      })
+      expect(JSON.stringify(rows)).not.toMatch(/secret|payload|example\.test/)
+      if (kind === 'legacy') {
+        expect(rows[0]).toMatchObject({
+          request_id: 'legacy-publish-test',
+          actor_admin_id: 17,
+          actor_name_snapshot: 'legacy-operator',
+          actor_type: 'admin'
+        })
+      }
+      if (releaseId) {
+        expect(rows[0].release_id).toBe(releaseId)
+        expect(
+          (
+            await query(
+              `SELECT status FROM \`${application.tables.releaseDraft}\``
+            )
+          )[0].status
+        ).toBe('draft')
+      }
+      expect(catalog.invalidate).not.toHaveBeenCalled()
+      await query('DROP TRIGGER reject_success_audit')
+      if (releaseId) await drafts.publish(appName, releaseId, context)
+      else await legacyPublish()
+      expect((await auditRows()).map(row => row.result).sort()).toEqual([
+        'failed',
+        'succeeded'
+      ])
+    }
+  )
+
+  it.each(['enable', 'disable', 'redispatch', 'users', 'scope'] as const)(
+    'rolls back %s mutations and exposes the failed audit to administrators, then permits a clean retry',
+    async action => {
+      const releaseId = await draft()
+      await drafts.publish(appName, releaseId, context)
+      const before = (
+        await query(`SELECT * FROM \`${application.tables.version}\``)
+      )[0]
+      catalog.invalidate.mockClear()
+      const operationContext = {
+        requestId: `failed-${action}`,
+        actorAdminId: 7,
+        actorName: 'operator',
+        sourceIp: '127.0.0.1'
+      }
+      const mutate = () => {
+        if (action === 'enable' || action === 'disable')
+          return policy.setEnabled(
+            appName,
+            releaseId,
+            action === 'enable',
+            operationContext
+          )
+        if (action === 'redispatch')
+          return policy.redispatch(appName, releaseId, operationContext)
+        if (action === 'users')
+          return policy.replaceUsers(
+            appName,
+            releaseId,
+            { userIds: [`${appName}:windows:private-user`] },
+            operationContext
+          )
+        return policy.changeScope(
+          appName,
+          releaseId,
+          { releaseScope: ReleaseScopeType.Allowlist },
+          operationContext
+        )
+      }
+      await rejectSuccessAudit()
+      await expect(mutate()).rejects.toThrow('injected secret SQL payload')
+      expect(
+        (await query(`SELECT * FROM \`${application.tables.version}\``))[0]
+      ).toEqual(before)
+      expect(
+        await query(`SELECT * FROM \`${application.tables.releaseUser}\``)
+      ).toEqual([])
+      expect(
+        await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
+      ).toHaveLength(1)
+      expect(
+        Number(
+          (
+            await query(
+              'SELECT catalog_revision FROM ota_applications WHERE app_name = ?',
+              [appName]
+            )
+          )[0].catalog_revision
+        )
+      ).toBe(1)
+      expect(catalog.invalidate).not.toHaveBeenCalled()
+      expect(worker.execute).not.toHaveBeenCalled()
+      const read = new AuditQueryService(
+        new AdminReadRepository(source, applications)
+      )
+      const page = await read.listApplication(appName, {
+        result: 'failed',
+        requestId: operationContext.requestId,
+        releaseId,
+        // DATETIME(0) can round inserts into the following second.
+        from: new Date(Date.now() - 60_000).toISOString(),
+        to: new Date(Date.now() + 60_000).toISOString()
+      })
+      expect(page.data.data).toHaveLength(1)
+      expect(page.data.data[0]).toMatchObject({
+        result: 'failed',
+        error_code: 'DATABASE_WRITE_FAILED',
+        actor_admin_id: 7,
+        request_id: operationContext.requestId,
+        release_id: releaseId,
+        task_id: null,
+        revision_before: null,
+        revision_after: null
+      })
+      expect(JSON.stringify(page)).not.toMatch(/secret|private-user/)
+      await query('DROP TRIGGER reject_success_audit')
+      await mutate()
+      const attempts = (await auditRows()).filter(
+        row => row.request_id === operationContext.requestId
+      )
+      expect(attempts.map(row => row.result).sort()).toEqual([
+        'failed',
+        'succeeded'
+      ])
+      expect(new Set(attempts.map(row => row.operation_id)).size).toBe(2)
+    }
+  )
+
+  it('audits revision conflicts, invalid audiences and wrong-application IDs without storing user input', async () => {
+    const releaseId = await draft()
+    await drafts.publish(appName, releaseId, context)
+    await expect(
+      policy.replaceUsers(
+        appName,
+        releaseId,
+        { expectedRevision: 99, userIds: [] },
+        { requestId: 'conflict' }
+      )
+    ).rejects.toThrow('revision has changed')
+    await expect(
+      policy.replaceUsers(
+        appName,
+        releaseId,
+        { userIds: ['other:windows:secret-user'] },
+        { requestId: 'invalid-users' }
+      )
+    ).rejects.toThrow('audience is invalid')
+    const other = await applications.prepare('other-app')
+    await expect(
+      policy.setEnabled('other-app', releaseId, false, {
+        requestId: 'wrong-app'
+      })
+    ).rejects.toThrow('does not exist')
+    const rows = await auditRows()
+    expect(rows.find(row => row.request_id === 'conflict')).toMatchObject({
+      result: 'failed',
+      error_code: 'OPERATION_CONFLICT'
+    })
+    expect(rows.find(row => row.request_id === 'invalid-users')).toMatchObject({
+      result: 'failed',
+      error_code: 'INVALID_OPERATION'
+    })
+    expect(rows.some(row => row.request_id === 'wrong-app')).toBe(false)
+    expect(
+      await query(`SELECT result, error_code FROM \`${other.tables.auditLog}\``)
+    ).toEqual([{ result: 'failed', error_code: 'RELEASE_NOT_FOUND' }])
+    expect(JSON.stringify(rows)).not.toContain('secret-user')
+    expect(
+      (
+        await query(
+          `SELECT policy_revision FROM \`${application.tables.version}\``
+        )
+      )[0].policy_revision
+    ).toBe(1)
+  })
+
+  it('records draft-audience failures after rollback without creating a publish task', async () => {
+    const releaseId = await draft()
+    const before = (
+      await query(`SELECT * FROM \`${application.tables.releaseDraft}\``)
+    )[0]
+    await rejectSuccessAudit()
+    await expect(
+      policy.changeScope(
+        appName,
+        releaseId,
+        { releaseScope: ReleaseScopeType.Allowlist },
+        context
+      )
+    ).rejects.toThrow('injected secret SQL payload')
+    expect(
+      (await query(`SELECT * FROM \`${application.tables.releaseDraft}\``))[0]
+    ).toEqual(before)
+    expect(await auditRows()).toEqual([
+      expect.objectContaining({
+        action: 'draft_audience_changed',
+        target_type: 'release_draft',
+        result: 'failed',
+        task_id: null
+      })
+    ])
+    expect(
+      await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
+    ).toEqual([])
+    await query('DROP TRIGGER reject_success_audit')
+    await policy.changeScope(
+      appName,
+      releaseId,
+      { releaseScope: ReleaseScopeType.Allowlist },
+      context
+    )
+    await expect(
+      policy.replaceUsers(
+        appName,
+        releaseId,
+        { userIds: ['other:windows:secret-user'] },
+        context
+      )
+    ).rejects.toThrow('audience is invalid')
+    expect(
+      (await auditRows()).filter(row => row.result === 'failed')
+    ).toHaveLength(2)
+    expect(JSON.stringify(await auditRows())).not.toContain('secret-user')
+  })
+
+  it('keeps only the committed success audit if post-commit dispatch fails', async () => {
+    const releaseId = await draft()
+    await drafts.publish(appName, releaseId, context)
+    worker.execute.mockRejectedValueOnce(new Error('dispatch failed'))
+    await expect(
+      policy.setEnabled(appName, releaseId, false, context)
+    ).rejects.toThrow('dispatch failed')
+    expect(
+      (
+        await query(
+          `SELECT enable, is_enabled, policy_revision FROM \`${application.tables.version}\``
+        )
+      )[0]
+    ).toEqual({ enable: 0, is_enabled: 0, policy_revision: 2 })
+    expect((await auditRows()).map(row => row.result)).toEqual([
+      'succeeded',
+      'succeeded'
+    ])
+  })
+
+  it.each(['commit-ack', 'unlock'] as const)(
+    'does not invent a failed publication after a successful commit and lost %s response',
+    async stage => {
+      const releaseId = await draft()
+      const log = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined)
+      const createRunner = source.createQueryRunner.bind(
+        source
+      ) as DataSource['createQueryRunner']
+      let injected = false
+      let wroteRelease = false
+      jest.spyOn(source, 'createQueryRunner').mockImplementation(mode => {
+        const runner = createRunner(mode)
+        const execute = runner.query.bind(runner) as QueryRunner['query']
+        runner.query = (async (
+          sql: string,
+          args?: unknown[],
+          structured?: boolean
+        ) => {
+          const result: unknown = structured
+            ? await execute(sql, args, true)
+            : await execute(sql, args)
+          if (sql.startsWith(`INSERT INTO \`${application.tables.version}\``))
+            wroteRelease = true
+          if (
+            !injected &&
+            wroteRelease &&
+            (stage === 'commit-ack'
+              ? sql === 'COMMIT'
+              : sql.includes('RELEASE_LOCK'))
+          ) {
+            injected = true
+            throw new Error('lost response secret')
+          }
+          return result
+        }) as QueryRunner['query']
+        return runner
+      })
+      await expect(drafts.publish(appName, releaseId, context)).rejects.toThrow(
+        'lost response secret'
+      )
+      expect(injected).toBe(true)
+      expect((await auditRows()).map(row => row.result)).toEqual(['succeeded'])
+      expect(
+        await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
+      ).toHaveLength(1)
+      expect(log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'application_operation_outcome_requires_review',
+          outcome: stage === 'commit-ack' ? 'unknown' : 'committed'
+        })
+      )
+      expect(JSON.stringify(log.mock.calls)).not.toContain('secret')
+      await drafts.publish(appName, releaseId, context)
+      expect(await auditRows()).toHaveLength(1)
+    }
+  )
 })

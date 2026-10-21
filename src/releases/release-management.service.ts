@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException
@@ -6,7 +7,10 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm'
 import { randomUUID } from 'crypto'
 import { DataSource, QueryRunner } from 'typeorm'
-import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
+import {
+  ApplicationWriteAudit,
+  withAuditedApplicationWrite
+} from '@/audit/application-write-audit'
 import { ReleaseWriteRepository } from './ports/release-write.repository'
 import { apiUtil } from '@/utils/api'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
@@ -28,7 +32,7 @@ import { ReleaseOperationContext } from '@/contracts/release-operation'
 type PolicyMutation = {
   action: 'publish' | 'enable' | 'disable' | 'audience_changed' | 'redispatch'
   expectedRevision?: number
-  changeSummary: Record<string, unknown>
+  changeSummary: NonNullable<ApplicationWriteAudit['changeSummary']>
   mutate: (
     queryRunner: QueryRunner,
     application: RegisteredApplication,
@@ -74,9 +78,9 @@ export class ReleaseManagementService {
     queryRunner: QueryRunner,
     application: RegisteredApplication,
     releaseId: string,
-    context: ReleaseOperationContext
+    context: ReleaseOperationContext,
+    operationId = randomUUID()
   ) {
-    const operationId = randomUUID()
     const taskId = randomUUID()
     const catalogRevision = await this.applications.incrementCatalogRevision(
       queryRunner,
@@ -209,18 +213,24 @@ export class ReleaseManagementService {
     if (draftResult) {
       return draftResult
     }
-    const normalized = normalizeReleaseAudience({
-      appName,
-      platforms: (await this.findRelease(appName, releaseId)).release
-        .platform as string,
-      releaseScope: 'allowlist',
-      userIds: body.userIds
-    })
+    const changeSummary = { userCount: body.userIds.length }
     return this.mutatePolicy(appName, releaseId, context, {
       action: 'audience_changed',
       expectedRevision: body.expectedRevision,
-      changeSummary: { userCount: normalized.userIds.length },
-      mutate: async (queryRunner, application) => {
+      changeSummary,
+      mutate: async (queryRunner, application, release) => {
+        let normalized: ReturnType<typeof normalizeReleaseAudience>
+        try {
+          normalized = normalizeReleaseAudience({
+            appName,
+            platforms: String(release.platform),
+            releaseScope: 'allowlist',
+            userIds: body.userIds
+          })
+        } catch {
+          throw new BadRequestException('Release audience is invalid')
+        }
+        changeSummary.userCount = normalized.userIds.length
         await queryRunner.manager
           .createQueryBuilder()
           .delete()
@@ -325,9 +335,17 @@ export class ReleaseManagementService {
     const operationId = randomUUID()
     const taskId = randomUUID()
     let revisionAfter = 0
-    await withApplicationWrite(
+    await withAuditedApplicationWrite(
       this.dataSource,
       application,
+      {
+        operationId,
+        context,
+        releaseId,
+        action: mutation.action,
+        targetType: 'release',
+        changeSummary: mutation.changeSummary
+      },
       async queryRunner => {
         const release = await this.lockRelease(
           queryRunner,
@@ -388,108 +406,119 @@ export class ReleaseManagementService {
     mutation: DraftAudienceMutation
   ) {
     const application = await this.applications.resolve(appName)
-    const queryRunner = this.dataSource.createQueryRunner()
-    await queryRunner.connect()
-    try {
-      if (!(await queryRunner.hasTable(application.tables.releaseDraft))) {
-        return null
-      }
-      await queryRunner.startTransaction()
-      const draft = await queryRunner.manager
-        .createQueryBuilder()
-        .select('*')
-        .from(application.tables.releaseDraft, 'draft')
-        .setLock('pessimistic_write')
-        .where('draft.release_id = :releaseId', { releaseId })
-        .andWhere('draft.status = :status', { status: 'draft' })
-        .getRawOne<AudienceDraftRecord>()
-      if (!draft) {
-        await queryRunner.commitTransaction()
-        return null
-      }
-
-      const payload = this.parseDraftPayload(draft.payload)
-      const platforms = Array.isArray(payload.platforms)
-        ? payload.platforms.filter(
-            (platform): platform is string => typeof platform === 'string'
-          )
-        : []
-      const currentUserIds = this.parseStoredUserIds(draft.user_ids)
-      const currentScope: ReleaseScope =
-        draft.release_scope === 'allowlist' ? 'allowlist' : 'public'
-      const nextScope =
-        'releaseScope' in mutation ? mutation.releaseScope : currentScope
-      const nextUserIds =
+    const audit: ApplicationWriteAudit = {
+      operationId: randomUUID(),
+      context,
+      releaseId,
+      action: 'audience_changed',
+      targetType: 'release',
+      changeSummary:
         'userIds' in mutation
-          ? [...mutation.userIds]
-          : nextScope === 'public'
-            ? []
-            : currentUserIds
-      const normalized = normalizeReleaseAudience({
-        appName,
-        platforms: platforms.join(','),
-        releaseScope: nextScope,
-        userIds: nextUserIds
-      })
-      const updatedAt = new Date()
-      await queryRunner.manager
-        .createQueryBuilder()
-        .update(application.tables.releaseDraft)
-        .set({
-          payload: JSON.stringify({
-            ...payload,
-            releaseScope: normalized.releaseScope,
-            userIds: normalized.userIds
-          }),
-          release_scope: normalized.releaseScope,
-          user_ids: JSON.stringify(normalized.userIds),
-          updated_at: updatedAt
-        })
-        .where('release_id = :releaseId', { releaseId })
-        .execute()
-      await queryRunner.manager
-        .createQueryBuilder()
-        .insert()
-        .into(application.tables.auditLog)
-        .values({
-          audit_id: randomUUID(),
-          operation_id: randomUUID(),
-          part_no: 1,
-          actor_type: 'admin',
-          actor_admin_id: context.actorAdminId,
-          actor_name_snapshot: context.actorName,
-          action: 'draft_audience_changed',
-          target_type: 'release_draft',
-          target_id: releaseId,
-          release_id: releaseId,
-          task_id: null,
-          revision_before: null,
-          revision_after: null,
-          change_summary: JSON.stringify({
-            releaseScope: normalized.releaseScope,
-            userCount: normalized.userIds.length
-          }),
-          result: 'succeeded',
-          request_id: context.requestId,
-          source_ip: context.sourceIp,
-          created_at: updatedAt
-        })
-        .execute()
-      await queryRunner.commitTransaction()
-      return apiUtil.data({
-        releaseId,
-        releaseScope: normalized.releaseScope,
-        userIds: normalized.userIds,
-        status: 'draft'
-      })
-    } catch (error) {
-      if (queryRunner.isTransactionActive) {
-        await queryRunner.rollbackTransaction()
-      }
-      throw error
-    } finally {
-      await queryRunner.release()
+          ? { userCount: mutation.userIds.length }
+          : { releaseScope: mutation.releaseScope }
     }
+    return withAuditedApplicationWrite(
+      this.dataSource,
+      application,
+      audit,
+      async queryRunner => {
+        if (!(await queryRunner.hasTable(application.tables.releaseDraft))) {
+          return null
+        }
+        const draft = await queryRunner.manager
+          .createQueryBuilder()
+          .select('*')
+          .from(application.tables.releaseDraft, 'draft')
+          .setLock('pessimistic_write')
+          .where('draft.release_id = :releaseId', { releaseId })
+          .andWhere('draft.status = :status', { status: 'draft' })
+          .getRawOne<AudienceDraftRecord>()
+        if (!draft) {
+          return null
+        }
+        audit.action = 'draft_audience_changed'
+        audit.targetType = 'release_draft'
+
+        const payload = this.parseDraftPayload(draft.payload)
+        const platforms = Array.isArray(payload.platforms)
+          ? payload.platforms.filter(
+              (platform): platform is string => typeof platform === 'string'
+            )
+          : []
+        const currentUserIds = this.parseStoredUserIds(draft.user_ids)
+        const currentScope: ReleaseScope =
+          draft.release_scope === 'allowlist' ? 'allowlist' : 'public'
+        const nextScope =
+          'releaseScope' in mutation ? mutation.releaseScope : currentScope
+        const nextUserIds =
+          'userIds' in mutation
+            ? [...mutation.userIds]
+            : nextScope === 'public'
+              ? []
+              : currentUserIds
+        let normalized: ReturnType<typeof normalizeReleaseAudience>
+        try {
+          normalized = normalizeReleaseAudience({
+            appName,
+            platforms: platforms.join(','),
+            releaseScope: nextScope,
+            userIds: nextUserIds
+          })
+        } catch {
+          throw new BadRequestException('Release audience is invalid')
+        }
+        const updatedAt = new Date()
+        await queryRunner.manager
+          .createQueryBuilder()
+          .update(application.tables.releaseDraft)
+          .set({
+            payload: JSON.stringify({
+              ...payload,
+              releaseScope: normalized.releaseScope,
+              userIds: normalized.userIds
+            }),
+            release_scope: normalized.releaseScope,
+            user_ids: JSON.stringify(normalized.userIds),
+            updated_at: updatedAt
+          })
+          .where('release_id = :releaseId', { releaseId })
+          .execute()
+        await queryRunner.manager
+          .createQueryBuilder()
+          .insert()
+          .into(application.tables.auditLog)
+          .values({
+            audit_id: randomUUID(),
+            operation_id: audit.operationId,
+            part_no: 1,
+            actor_type: context.actorAdminId === undefined ? 'system' : 'admin',
+            actor_admin_id: context.actorAdminId,
+            actor_name_snapshot: context.actorName,
+            action: 'draft_audience_changed',
+            target_type: 'release_draft',
+            target_id: releaseId,
+            release_id: releaseId,
+            task_id: null,
+            revision_before: null,
+            revision_after: null,
+            change_summary: JSON.stringify({
+              releaseScope: normalized.releaseScope,
+              userCount: normalized.userIds.length
+            }),
+            result: 'succeeded',
+            request_id: context.requestId,
+            source_ip: context.sourceIp,
+            created_at: updatedAt
+          })
+          .execute()
+        return apiUtil.data({
+          releaseId,
+          releaseScope: normalized.releaseScope,
+          userIds: normalized.userIds,
+          status: 'draft'
+        })
+      }
+    )
   }
 
   private parseStoredUserIds(value: unknown) {
@@ -618,7 +647,8 @@ export class ReleaseManagementService {
         audit_id: randomUUID(),
         operation_id: input.operationId,
         part_no: 1,
-        actor_type: 'admin',
+        actor_type:
+          input.context.actorAdminId === undefined ? 'system' : 'admin',
         actor_admin_id: input.context.actorAdminId,
         actor_name_snapshot: input.context.actorName,
         action: input.action,

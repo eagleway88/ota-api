@@ -216,8 +216,17 @@ describe('ReleaseManagementService enabled policy', () => {
       f.service.setEnabled('app', 'release-a', false, f.context)
     ).rejects.toThrow('database failed')
     expect(f.runner.rollbackTransaction).toHaveBeenCalledTimes(1)
-    expect(f.runner.commitTransaction).not.toHaveBeenCalled()
-    expect(f.runner.release).toHaveBeenCalledTimes(1)
+    expect(f.runner.commitTransaction).toHaveBeenCalledTimes(1) // independent failure audit
+    expect(f.runner.release).toHaveBeenCalledTimes(2)
+    const audits = f.writes.filter(write => write.table === f.tables.auditLog)
+    expect(audits).toHaveLength(1)
+    expect(audits[0].values).toMatchObject({
+      action: 'disable',
+      result: 'failed',
+      error_code: 'APPLICATION_OPERATION_FAILED',
+      task_id: null,
+      revision_after: null
+    })
     expect(f.catalog.invalidate).not.toHaveBeenCalled()
     expect(f.worker.execute).not.toHaveBeenCalled()
   })

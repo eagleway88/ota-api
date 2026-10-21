@@ -16,7 +16,7 @@ import { mapStoredReleaseRecord } from './release-record.mapper'
 import { ReleaseOperationContext } from '@/contracts/release-operation'
 import { ReleaseCatalogListQueryDto } from './release-management.dto'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
-import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
+import { withAuditedApplicationWrite } from '@/audit/application-write-audit'
 import { ReleaseWriteRepository } from './ports/release-write.repository'
 import {
   CreateReleaseDraftDto,
@@ -333,9 +333,17 @@ export class ReleaseDraftService {
     const application = await this.applications.prepare(appName, context)
     const operationId = randomUUID()
     const taskId = randomUUID()
-    const result = await withApplicationWrite(
+    const result = await withAuditedApplicationWrite(
       this.dataSource,
       application,
+      {
+        operationId,
+        context,
+        releaseId,
+        action: 'publish',
+        targetType: 'release',
+        changeSummary: { source: 'v2' }
+      },
       async queryRunner => {
         const draft = await this.lockDraft(queryRunner, application, releaseId)
         if (draft.status === 'published' && draft.published_sequence) {
@@ -589,7 +597,8 @@ export class ReleaseDraftService {
         audit_id: randomUUID(),
         operation_id: input.operationId,
         part_no: 1,
-        actor_type: 'admin',
+        actor_type:
+          input.context.actorAdminId === undefined ? 'system' : 'admin',
         actor_admin_id: input.context.actorAdminId,
         actor_name_snapshot: input.context.actorName,
         action: 'publish',
