@@ -38,7 +38,7 @@ export function legacySuccessReport(
   return {
     ...client(body, sourceIp),
     releaseSequence: body.verId,
-    reportId: body.reportId
+    reportId: body.reportId || undefined
   }
 }
 
@@ -48,7 +48,7 @@ export function legacyFailureReport(
 ): FailureReportInput {
   return {
     ...legacySuccessReport(body, sourceIp),
-    recordId: body.id,
+    recordId: body.id || undefined,
     message: body.message
   }
 }

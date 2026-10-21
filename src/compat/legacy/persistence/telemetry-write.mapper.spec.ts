@@ -132,6 +132,12 @@ describe('telemetry compatibility mapping', () => {
       legacySuccessReport({ ...body, extras: 'not JSON' } as never, 'localhost')
         .extras
     ).toBe('not JSON')
+    expect(
+      legacyFailureReport(
+        { ...body, id: 0, reportId: null, message: 'new' } as never,
+        'localhost'
+      )
+    ).toMatchObject({ recordId: undefined, reportId: undefined })
   })
 
   it('keeps historical normalized MD5 grouping and detects ambiguous delimiter tuples', () => {
