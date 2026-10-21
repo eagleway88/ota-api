@@ -67,7 +67,7 @@ mysql('publication transactions on isolated MySQL', () => {
   }
   const query = (sql: string, args: unknown[] = []) =>
     source.query<Record<string, unknown>[]>(sql, args)
-  const legacyPublish = (name = appName) =>
+  const legacyPublish = (name = appName, userIds: string[] = []) =>
     legacy.create(request, {
       name,
       ver: '1.1.0',
@@ -75,9 +75,13 @@ mysql('publication transactions on isolated MySQL', () => {
       baseVersions: '1.0.0',
       installUrl: 'https://example.test/app.exe',
       enable: 1,
-      mandatory: 0
+      mandatory: 0,
+      releaseScope: userIds.length
+        ? ReleaseScopeType.Allowlist
+        : ReleaseScopeType.Public,
+      userIds
     })
-  const draft = async () =>
+  const draft = async (userIds: string[] = []) =>
     (
       await drafts.createDraft(
         appName,
@@ -86,8 +90,10 @@ mysql('publication transactions on isolated MySQL', () => {
           compatibleBaseVersionCodes: [100],
           platforms: [PlatformType.Windows],
           updateType: UpdateType.Full,
-          releaseScope: ReleaseScopeType.Public,
-          userIds: [],
+          releaseScope: userIds.length
+            ? ReleaseScopeType.Allowlist
+            : ReleaseScopeType.Public,
+          userIds,
           installerSourceUrl: 'https://example.test/new.exe'
         },
         undefined,
@@ -649,6 +655,413 @@ mysql('publication transactions on isolated MySQL', () => {
     expect((await auditRows()).map(row => row.result)).toEqual([
       'succeeded',
       'succeeded'
+    ])
+  })
+
+  const audienceIds = (prefix: string, count: number) =>
+    Array.from(
+      { length: count },
+      (_, i) => `${appName}:windows:${prefix}-${i.toString().padStart(5, '0')}`
+    )
+  const partsFor = (requestId: string) =>
+    query(
+      `SELECT * FROM \`${application.tables.auditLog}\` WHERE request_id = ? ORDER BY part_no`,
+      [requestId]
+    )
+  const details = (rows: Record<string, unknown>[]) =>
+    rows.map(
+      row =>
+        row.change_detail as {
+          addedUserIds: string[]
+          removedUserIds: string[]
+        }
+    )
+  const storedUsers = (releaseId: string) =>
+    query(
+      `SELECT user_id FROM \`${application.tables.releaseUser}\` WHERE release_id = ? ORDER BY user_id`,
+      [releaseId]
+    )
+
+  it.each(['legacy', 'v2'] as const)(
+    'audits every initial audience member in a segmented %s publication',
+    async kind => {
+      const userIds = audienceIds('initial', 401)
+      const releaseId = kind === 'v2' ? await draft(userIds) : undefined
+      const publish = () =>
+        releaseId
+          ? drafts.publish(appName, releaseId, context)
+          : legacyPublish(appName, userIds)
+      await query(`CREATE TRIGGER publication_part_fail BEFORE INSERT ON \`${application.tables.auditLog}\`
+        FOR EACH ROW BEGIN IF NEW.part_no = 2 AND NEW.result = 'succeeded' THEN
+          SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'publication second part failed'; END IF; END`)
+      await expect(publish()).rejects.toThrow('publication second part failed')
+      expect(
+        await query(`SELECT id FROM \`${application.tables.version}\``)
+      ).toEqual([])
+      expect(
+        await query(`SELECT user_id FROM \`${application.tables.releaseUser}\``)
+      ).toEqual([])
+      expect(
+        await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
+      ).toEqual([])
+      expect(await auditRows()).toEqual([
+        expect.objectContaining({ result: 'failed', change_detail: null })
+      ])
+      await query('DROP TRIGGER publication_part_fail')
+      await publish()
+      const rows = (await auditRows())
+        .filter(row => row.result === 'succeeded')
+        .sort((a, b) => Number(a.part_no) - Number(b.part_no))
+      expect(rows.map(row => row.part_no)).toEqual([1, 2, 3])
+      expect(new Set(rows.map(row => row.operation_id)).size).toBe(1)
+      expect(new Set(rows.map(row => row.task_id)).size).toBe(1)
+      expect(rows[0].change_summary).toMatchObject({
+        audience: {
+          scopeBefore: null,
+          scopeAfter: 'allowlist',
+          addedCount: 401,
+          removedCount: 0,
+          partCount: 3
+        }
+      })
+      expect(details(rows).flatMap(part => part.addedUserIds)).toEqual(userIds)
+      expect(details(rows).flatMap(part => part.removedUserIds)).toEqual([])
+    }
+  )
+
+  it('audits all 10000 membership changes and allows paginated administrator reconstruction', async () => {
+    const before = audienceIds('old', 5000)
+    const after = audienceIds('new', 5000)
+    const releaseId = await draft(before)
+    await drafts.publish(appName, releaseId, context)
+    await policy.replaceUsers(
+      appName,
+      releaseId,
+      { userIds: after, expectedRevision: 1 },
+      { requestId: 'bulk-replace' }
+    )
+    const rows = await partsFor('bulk-replace')
+    expect(rows.map(row => row.part_no)).toEqual(
+      Array.from({ length: 50 }, (_, i) => i + 1)
+    )
+    expect(new Set(rows.map(row => row.operation_id)).size).toBe(1)
+    expect(new Set(rows.map(row => row.task_id)).size).toBe(1)
+    expect(
+      details(rows).every(
+        part => part.addedUserIds.length + part.removedUserIds.length <= 200
+      )
+    ).toBe(true)
+    expect(details(rows).flatMap(part => part.addedUserIds)).toEqual(after)
+    expect(details(rows).flatMap(part => part.removedUserIds)).toEqual(before)
+    expect((await storedUsers(releaseId)).map(row => row.user_id)).toEqual(
+      after
+    )
+    for (const row of rows) {
+      expect(row).toMatchObject({
+        result: 'succeeded',
+        revision_before: '1',
+        revision_after: '2'
+      })
+      expect(row.change_summary).toMatchObject({
+        audience: { addedCount: 5000, removedCount: 5000, partCount: 50 }
+      })
+    }
+    const read = new AuditQueryService(
+      new AdminReadRepository(source, applications)
+    )
+    const retrieved: Record<string, unknown>[] = []
+    for (let page = 1; page <= 8; page++) {
+      const result = await read.listApplication(appName, {
+        operationId: String(rows[0].operation_id),
+        page: String(page),
+        pageSize: '7',
+        from: new Date(Date.now() - 60_000).toISOString(),
+        to: new Date(Date.now() + 60_000).toISOString()
+      })
+      expect(result.data.total).toBe(50)
+      retrieved.push(...result.data.data)
+    }
+    expect(new Set(retrieved.map(row => row.audit_id)).size).toBe(50)
+    expect(
+      retrieved.map(row => Number(row.part_no)).sort((a, b) => a - b)
+    ).toEqual(rows.map(row => row.part_no))
+    expect(
+      details(retrieved)
+        .flatMap(part => part.addedUserIds)
+        .sort()
+    ).toEqual(after)
+    const other = await applications.prepare('other-app')
+    expect(
+      (
+        await read.listApplication(other.appName, {
+          operationId: String(rows[0].operation_id)
+        })
+      ).data.total
+    ).toBe(0)
+  })
+
+  it('records exact removals when switching to public and a complete empty part for unchanged membership', async () => {
+    const userIds = audienceIds('member', 201)
+    const releaseId = await draft(userIds)
+    await drafts.publish(appName, releaseId, context)
+    await policy.replaceUsers(
+      appName,
+      releaseId,
+      { userIds: [...userIds].reverse() },
+      { requestId: 'unchanged' }
+    )
+    const unchanged = await partsFor('unchanged')
+    expect(unchanged).toHaveLength(1)
+    expect(unchanged[0].change_detail).toEqual({
+      addedUserIds: [],
+      removedUserIds: []
+    })
+    await policy.changeScope(
+      appName,
+      releaseId,
+      { releaseScope: ReleaseScopeType.Public },
+      { requestId: 'public' }
+    )
+    const cleared = await partsFor('public')
+    expect(cleared).toHaveLength(2)
+    expect(cleared[0].change_summary).toMatchObject({
+      audience: {
+        scopeBefore: 'allowlist',
+        scopeAfter: 'public',
+        addedCount: 0,
+        removedCount: 201
+      }
+    })
+    expect(details(cleared).flatMap(part => part.removedUserIds)).toEqual(
+      userIds
+    )
+    expect(await storedUsers(releaseId)).toEqual([])
+  })
+
+  it('rolls back the whole audience, revision, task and earlier audit parts when part two fails', async () => {
+    const original = audienceIds('original', 1)
+    const releaseId = await draft(original)
+    await drafts.publish(appName, releaseId, context)
+    catalog.invalidate.mockClear()
+    await query(`CREATE TRIGGER fail_audit_part BEFORE INSERT ON \`${application.tables.auditLog}\`
+      FOR EACH ROW BEGIN IF NEW.part_no = 2 AND NEW.result = 'succeeded' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'second part failed'; END IF; END`)
+    const mutate = () =>
+      policy.replaceUsers(
+        appName,
+        releaseId,
+        { userIds: audienceIds('replacement', 401) },
+        { requestId: 'part-failure' }
+      )
+    await expect(mutate()).rejects.toThrow('second part failed')
+    expect((await storedUsers(releaseId)).map(row => row.user_id)).toEqual(
+      original
+    )
+    expect(
+      (
+        await query(
+          `SELECT policy_revision FROM \`${application.tables.version}\``
+        )
+      )[0].policy_revision
+    ).toBe(1)
+    expect(
+      Number(
+        (
+          await query(
+            'SELECT catalog_revision FROM ota_applications WHERE app_name = ?',
+            [appName]
+          )
+        )[0].catalog_revision
+      )
+    ).toBe(1)
+    expect(
+      await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
+    ).toHaveLength(1)
+    const failed = await partsFor('part-failure')
+    expect(failed).toHaveLength(1)
+    expect(failed[0]).toMatchObject({
+      result: 'failed',
+      part_no: 1,
+      change_detail: null,
+      task_id: null
+    })
+    expect(catalog.invalidate).not.toHaveBeenCalled()
+    expect(worker.execute).not.toHaveBeenCalled()
+    await query('DROP TRIGGER fail_audit_part')
+    await mutate()
+    expect(
+      (await partsFor('part-failure')).filter(row => row.result === 'succeeded')
+    ).toHaveLength(3)
+  })
+
+  it('audits draft audience replacement and public clearing without creating tasks', async () => {
+    const releaseId = await draft(audienceIds('old', 201))
+    const replacement = audienceIds('new', 201)
+    await policy.replaceUsers(
+      appName,
+      releaseId,
+      { userIds: replacement },
+      { requestId: 'draft-replace' }
+    )
+    const rows = await partsFor('draft-replace')
+    expect(rows).toHaveLength(3)
+    for (const row of rows)
+      expect(row).toMatchObject({
+        target_type: 'release_draft',
+        action: 'draft_audience_changed',
+        task_id: null
+      })
+    expect(details(rows).flatMap(part => part.addedUserIds)).toEqual(
+      replacement
+    )
+    expect(details(rows).flatMap(part => part.removedUserIds)).toEqual(
+      audienceIds('old', 201)
+    )
+    await policy.changeScope(
+      appName,
+      releaseId,
+      { releaseScope: ReleaseScopeType.Public },
+      { requestId: 'draft-public' }
+    )
+    expect(
+      details(await partsFor('draft-public')).flatMap(
+        part => part.removedUserIds
+      )
+    ).toEqual(replacement)
+    expect(
+      await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
+    ).toEqual([])
+  })
+
+  it('rolls back the draft payload and every earlier audit part when a later draft part fails', async () => {
+    const releaseId = await draft(audienceIds('old', 201))
+    const before = await query(
+      `SELECT * FROM \`${application.tables.releaseDraft}\``
+    )
+    await query(`CREATE TRIGGER draft_part_fail BEFORE INSERT ON \`${application.tables.auditLog}\`
+      FOR EACH ROW BEGIN IF NEW.part_no = 2 AND NEW.result = 'succeeded' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'draft second part failed'; END IF; END`)
+    await expect(
+      policy.replaceUsers(
+        appName,
+        releaseId,
+        { userIds: audienceIds('new', 201) },
+        { requestId: 'draft-part-failure' }
+      )
+    ).rejects.toThrow('draft second part failed')
+    expect(
+      await query(`SELECT * FROM \`${application.tables.releaseDraft}\``)
+    ).toEqual(before)
+    expect(await auditRows()).toEqual([
+      expect.objectContaining({
+        result: 'failed',
+        action: 'draft_audience_changed',
+        change_detail: null
+      })
+    ])
+    expect(
+      await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
+    ).toEqual([])
+    await query('DROP TRIGGER draft_part_fail')
+    await policy.replaceUsers(
+      appName,
+      releaseId,
+      { userIds: audienceIds('new', 201) },
+      { requestId: 'draft-part-retry' }
+    )
+    expect(await partsFor('draft-part-retry')).toHaveLength(3)
+  })
+
+  it('rejects oversized requests and historical lists without partially replacing or clearing them', async () => {
+    const releaseId = await draft()
+    await drafts.publish(appName, releaseId, context)
+    await expect(
+      policy.replaceUsers(
+        appName,
+        releaseId,
+        { userIds: audienceIds('new', 5001) },
+        { requestId: 'oversized-request' }
+      )
+    ).rejects.toThrow('audience is invalid')
+    expect(await storedUsers(releaseId)).toEqual([])
+    await source
+      .createQueryBuilder()
+      .insert()
+      .into(application.tables.releaseUser, [
+        'release_id',
+        'user_id',
+        'created_at'
+      ])
+      .values(
+        audienceIds('historical', 5001).map(userId => ({
+          release_id: releaseId,
+          user_id: userId,
+          created_at: new Date()
+        }))
+      )
+      .execute()
+    await expect(
+      policy.changeScope(
+        appName,
+        releaseId,
+        { releaseScope: ReleaseScopeType.Public },
+        { requestId: 'oversized-stored' }
+      )
+    ).rejects.toThrow('audit limit')
+    expect(await storedUsers(releaseId)).toHaveLength(5001)
+    expect((await partsFor('oversized-request'))[0]).toMatchObject({
+      result: 'failed',
+      error_code: 'INVALID_OPERATION',
+      change_detail: null
+    })
+    expect((await partsFor('oversized-stored'))[0]).toMatchObject({
+      result: 'failed',
+      error_code: 'OPERATION_CONFLICT',
+      change_detail: null
+    })
+    expect(
+      (
+        await query(
+          `SELECT policy_revision FROM \`${application.tables.version}\``
+        )
+      )[0].policy_revision
+    ).toBe(1)
+  })
+
+  it('uses the locked audience snapshot for concurrent revision-checked replacements', async () => {
+    const releaseId = await draft(audienceIds('original', 1))
+    await drafts.publish(appName, releaseId, context)
+    const results = await Promise.allSettled([
+      policy.replaceUsers(
+        appName,
+        releaseId,
+        { userIds: audienceIds('first', 201), expectedRevision: 1 },
+        { requestId: 'racing-first' }
+      ),
+      policy.replaceUsers(
+        appName,
+        releaseId,
+        { userIds: audienceIds('second', 201), expectedRevision: 1 },
+        { requestId: 'racing-second' }
+      )
+    ])
+    expect(
+      results.filter(result => result.status === 'fulfilled')
+    ).toHaveLength(1)
+    const winner = results[0].status === 'fulfilled' ? 'first' : 'second'
+    const loser = winner === 'first' ? 'second' : 'first'
+    const rows = await partsFor(`racing-${winner}`)
+    expect(details(rows).flatMap(part => part.addedUserIds)).toEqual(
+      audienceIds(winner, 201)
+    )
+    expect(details(rows).flatMap(part => part.removedUserIds)).toEqual(
+      audienceIds('original', 1)
+    )
+    expect(await partsFor(`racing-${loser}`)).toEqual([
+      expect.objectContaining({
+        result: 'failed',
+        error_code: 'OPERATION_CONFLICT'
+      })
     ])
   })
 

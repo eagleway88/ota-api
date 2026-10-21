@@ -28,6 +28,13 @@ import {
 } from './release-management.dto'
 
 import { ReleaseOperationContext } from '@/contracts/release-operation'
+import { MAX_RELEASE_USERS } from '@/contracts/release-limits'
+import {
+  AudienceChange,
+  AudienceSnapshot,
+  planAudienceChange
+} from '@/audit/audience-change'
+import { insertReleaseSuccessAudit } from '@/audit/release-success-audit'
 
 type PolicyMutation = {
   action: 'publish' | 'enable' | 'disable' | 'audience_changed' | 'redispatch'
@@ -37,7 +44,7 @@ type PolicyMutation = {
     queryRunner: QueryRunner,
     application: RegisteredApplication,
     release: Record<string, unknown>
-  ) => Promise<void>
+  ) => Promise<void | AudienceChange>
 }
 
 type AudienceDraftRecord = {
@@ -93,7 +100,12 @@ export class ReleaseManagementService {
       action: 'publish',
       revision: catalogRevision
     })
-    await this.insertAudit(queryRunner, application, {
+    const release = await this.lockRelease(queryRunner, application, releaseId)
+    const audience = planAudienceChange(
+      { scope: null, userIds: [] },
+      await this.readAudience(queryRunner, application, releaseId, release)
+    )
+    await insertReleaseSuccessAudit(queryRunner, application, {
       context,
       taskId,
       operationId,
@@ -101,7 +113,8 @@ export class ReleaseManagementService {
       action: 'publish',
       revisionBefore: 0,
       revisionAfter: 1,
-      changeSummary: { source: 'legacy-http' }
+      changeSummary: { source: 'legacy-http' },
+      audience
     })
     return { taskId, operationId }
   }
@@ -231,6 +244,16 @@ export class ReleaseManagementService {
           throw new BadRequestException('Release audience is invalid')
         }
         changeSummary.userCount = normalized.userIds.length
+        const before = await this.readAudience(
+          queryRunner,
+          application,
+          releaseId,
+          release
+        )
+        const audience = planAudienceChange(before, {
+          ...before,
+          userIds: normalized.userIds
+        })
         await queryRunner.manager
           .createQueryBuilder()
           .delete()
@@ -241,7 +264,11 @@ export class ReleaseManagementService {
           await queryRunner.manager
             .createQueryBuilder()
             .insert()
-            .into(application.tables.releaseUser)
+            .into(application.tables.releaseUser, [
+              'release_id',
+              'user_id',
+              'created_at'
+            ])
             .values(
               normalized.userIds.map(userId => ({
                 release_id: releaseId,
@@ -251,6 +278,7 @@ export class ReleaseManagementService {
             )
             .execute()
         }
+        return audience
       }
     })
   }
@@ -274,7 +302,18 @@ export class ReleaseManagementService {
       action: 'audience_changed',
       expectedRevision: body.expectedRevision,
       changeSummary: { releaseScope: body.releaseScope },
-      mutate: async (queryRunner, application) => {
+      mutate: async (queryRunner, application, release) => {
+        const before = await this.readAudience(
+          queryRunner,
+          application,
+          releaseId,
+          release
+        )
+        const audience = planAudienceChange(before, {
+          scope: body.releaseScope,
+          userIds:
+            body.releaseScope === ReleaseScopeType.Public ? [] : before.userIds
+        })
         await queryRunner.manager
           .createQueryBuilder()
           .update(application.tables.version)
@@ -289,6 +328,7 @@ export class ReleaseManagementService {
             .where('release_id = :releaseId', { releaseId })
             .execute()
         }
+        return audience
       }
     })
   }
@@ -359,7 +399,11 @@ export class ReleaseManagementService {
         ) {
           throw new ConflictException('Release policy revision has changed')
         }
-        await mutation.mutate(queryRunner, application, release)
+        const audience = await mutation.mutate(
+          queryRunner,
+          application,
+          release
+        )
         revisionAfter = revisionBefore + 1
         await queryRunner.manager
           .createQueryBuilder()
@@ -376,7 +420,7 @@ export class ReleaseManagementService {
           action: mutation.action,
           revision: catalogRevision
         })
-        await this.insertAudit(queryRunner, application, {
+        await insertReleaseSuccessAudit(queryRunner, application, {
           context,
           taskId,
           operationId,
@@ -384,7 +428,8 @@ export class ReleaseManagementService {
           action: mutation.action,
           revisionBefore,
           revisionAfter,
-          changeSummary: mutation.changeSummary
+          changeSummary: mutation.changeSummary,
+          audience: audience || undefined
         })
       }
     )
@@ -467,6 +512,13 @@ export class ReleaseManagementService {
         } catch {
           throw new BadRequestException('Release audience is invalid')
         }
+        const audience = planAudienceChange(
+          {
+            scope: draft.release_scope as ReleaseScope,
+            userIds: currentUserIds
+          },
+          { scope: normalized.releaseScope, userIds: normalized.userIds }
+        )
         const updatedAt = new Date()
         await queryRunner.manager
           .createQueryBuilder()
@@ -483,34 +535,19 @@ export class ReleaseManagementService {
           })
           .where('release_id = :releaseId', { releaseId })
           .execute()
-        await queryRunner.manager
-          .createQueryBuilder()
-          .insert()
-          .into(application.tables.auditLog)
-          .values({
-            audit_id: randomUUID(),
-            operation_id: audit.operationId,
-            part_no: 1,
-            actor_type: context.actorAdminId === undefined ? 'system' : 'admin',
-            actor_admin_id: context.actorAdminId,
-            actor_name_snapshot: context.actorName,
-            action: 'draft_audience_changed',
-            target_type: 'release_draft',
-            target_id: releaseId,
-            release_id: releaseId,
-            task_id: null,
-            revision_before: null,
-            revision_after: null,
-            change_summary: JSON.stringify({
-              releaseScope: normalized.releaseScope,
-              userCount: normalized.userIds.length
-            }),
-            result: 'succeeded',
-            request_id: context.requestId,
-            source_ip: context.sourceIp,
-            created_at: updatedAt
-          })
-          .execute()
+        await insertReleaseSuccessAudit(queryRunner, application, {
+          context,
+          operationId: audit.operationId,
+          releaseId,
+          action: 'draft_audience_changed',
+          targetType: 'release_draft',
+          changeSummary: {
+            releaseScope: normalized.releaseScope,
+            userCount: normalized.userIds.length
+          },
+          audience,
+          now: updatedAt
+        })
         return apiUtil.data({
           releaseId,
           releaseScope: normalized.releaseScope,
@@ -625,46 +662,24 @@ export class ReleaseManagementService {
       .execute()
   }
 
-  private async insertAudit(
-    queryRunner: QueryRunner,
+  private async readAudience(
+    runner: QueryRunner,
     application: RegisteredApplication,
-    input: {
-      context: ReleaseOperationContext
-      taskId: string
-      operationId: string
-      releaseId: string
-      action: PolicyMutation['action']
-      revisionBefore: number
-      revisionAfter: number
-      changeSummary: Record<string, unknown>
-    }
-  ) {
-    await queryRunner.manager
+    releaseId: string,
+    release: Record<string, unknown>
+  ): Promise<AudienceSnapshot> {
+    const rows = await runner.manager
       .createQueryBuilder()
-      .insert()
-      .into(application.tables.auditLog)
-      .values({
-        audit_id: randomUUID(),
-        operation_id: input.operationId,
-        part_no: 1,
-        actor_type:
-          input.context.actorAdminId === undefined ? 'system' : 'admin',
-        actor_admin_id: input.context.actorAdminId,
-        actor_name_snapshot: input.context.actorName,
-        action: input.action,
-        target_type: 'release',
-        target_id: input.releaseId,
-        release_id: input.releaseId,
-        task_id: input.taskId,
-        revision_before: input.revisionBefore,
-        revision_after: input.revisionAfter,
-        change_summary: JSON.stringify(input.changeSummary),
-        result: 'succeeded',
-        request_id: input.context.requestId,
-        source_ip: input.context.sourceIp,
-        created_at: new Date()
-      })
-      .execute()
+      .select('audience.user_id', 'userId')
+      .from(application.tables.releaseUser, 'audience')
+      .where('audience.release_id = :releaseId', { releaseId })
+      .setLock('pessimistic_write')
+      .limit(MAX_RELEASE_USERS + 1)
+      .getRawMany<{ userId: string }>()
+    return {
+      scope: (release.release_scope ?? 'public') as ReleaseScope,
+      userIds: rows.map(row => row.userId)
+    }
   }
 
   private toManagementRelease(record: Record<string, unknown>) {

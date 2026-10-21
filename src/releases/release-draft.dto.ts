@@ -11,6 +11,7 @@ import {
   Min
 } from 'class-validator'
 import { PartialType } from '@nestjs/swagger'
+import { MAX_RELEASE_USERS } from '@/contracts/release-limits'
 import {
   PlatformType,
   ReleaseScopeType,
@@ -46,7 +47,7 @@ export class CreateReleaseDraftDto {
   releaseScope: ReleaseScopeType
 
   @IsArray()
-  @ArrayMaxSize(5000)
+  @ArrayMaxSize(MAX_RELEASE_USERS)
   @IsString({ each: true })
   @MaxLength(191, { each: true })
   userIds: string[]

@@ -1,5 +1,7 @@
 import { ReleaseScope } from '@/contracts/releases'
 import { userIdMatchesContext } from '@/contracts/user-id'
+import { MAX_RELEASE_USERS } from '@/contracts/release-limits'
+import { BadRequestException } from '@nestjs/common'
 
 export type ReleaseAudienceInput = {
   appName: string
@@ -34,8 +36,14 @@ export function normalizeReleaseAudience(
   input: ReleaseAudienceInput
 ): NormalizedReleaseAudience {
   const releaseScope = input.releaseScope ?? 'public'
+  const parsedUserIds = parseUserIds(input.userIds)
+  if (parsedUserIds.length > MAX_RELEASE_USERS) {
+    throw new BadRequestException(
+      `userIds cannot exceed ${MAX_RELEASE_USERS} entries`
+    )
+  }
   const userIds = Array.from(
-    new Set(parseUserIds(input.userIds).map(userId => userId.trim()))
+    new Set(parsedUserIds.map(userId => userId.trim()))
   )
   if (userIds.some(userId => !userId || userId.length > 191)) {
     throw new Error('userIds contain an empty or overlong identifier')

@@ -11,6 +11,7 @@ import {
   Min
 } from 'class-validator'
 import { ReleaseScopeType } from '@/contracts/release-values'
+import { MAX_RELEASE_USERS } from '@/contracts/release-limits'
 
 export class ReleaseListQueryDto {
   @IsOptional()
@@ -30,7 +31,7 @@ export class ReleaseCatalogListQueryDto extends ReleaseListQueryDto {
 
 export class ReplaceReleaseUsersDto {
   @IsArray()
-  @ArrayMaxSize(5000)
+  @ArrayMaxSize(MAX_RELEASE_USERS)
   @IsString({ each: true })
   @MaxLength(191, { each: true })
   userIds: string[]

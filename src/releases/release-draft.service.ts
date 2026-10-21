@@ -18,6 +18,8 @@ import { ReleaseCatalogListQueryDto } from './release-management.dto'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
 import { withAuditedApplicationWrite } from '@/audit/application-write-audit'
 import { ReleaseWriteRepository } from './ports/release-write.repository'
+import { planAudienceChange } from '@/audit/audience-change'
+import { insertReleaseSuccessAudit } from '@/audit/release-success-audit'
 import {
   CreateReleaseDraftDto,
   UpdateReleaseDraftDto
@@ -358,6 +360,10 @@ export class ReleaseDraftService {
         }
 
         const payload = this.parseDraftPayload(draft.payload)
+        const audience = planAudienceChange(
+          { scope: null, userIds: [] },
+          { scope: payload.releaseScope, userIds: payload.userIds }
+        )
         const artifact = payload.artifactId
           ? await this.lockArtifact(
               queryRunner,
@@ -390,7 +396,11 @@ export class ReleaseDraftService {
           await queryRunner.manager
             .createQueryBuilder()
             .insert()
-            .into(application.tables.releaseUser)
+            .into(application.tables.releaseUser, [
+              'release_id',
+              'user_id',
+              'created_at'
+            ])
             .values(
               payload.userIds.map(userId => ({
                 release_id: releaseId,
@@ -435,11 +445,15 @@ export class ReleaseDraftService {
           catalogRevision,
           now
         )
-        await this.insertPublishAudit(queryRunner, application, {
+        await insertReleaseSuccessAudit(queryRunner, application, {
           taskId,
           operationId,
           releaseId,
-          releaseSequence,
+          action: 'publish',
+          revisionBefore: 0,
+          revisionAfter: 1,
+          changeSummary: { releaseSequence },
+          audience,
           context,
           now
         })
@@ -573,48 +587,6 @@ export class ReleaseDraftService {
         lease_token: 0,
         created_at: now,
         updated_at: now
-      })
-      .execute()
-  }
-
-  private async insertPublishAudit(
-    queryRunner: QueryRunner,
-    application: RegisteredApplication,
-    input: {
-      taskId: string
-      operationId: string
-      releaseId: string
-      releaseSequence: number
-      context: ReleaseOperationContext
-      now: Date
-    }
-  ) {
-    await queryRunner.manager
-      .createQueryBuilder()
-      .insert()
-      .into(application.tables.auditLog)
-      .values({
-        audit_id: randomUUID(),
-        operation_id: input.operationId,
-        part_no: 1,
-        actor_type:
-          input.context.actorAdminId === undefined ? 'system' : 'admin',
-        actor_admin_id: input.context.actorAdminId,
-        actor_name_snapshot: input.context.actorName,
-        action: 'publish',
-        target_type: 'release',
-        target_id: input.releaseId,
-        release_id: input.releaseId,
-        task_id: input.taskId,
-        revision_before: 0,
-        revision_after: 1,
-        change_summary: JSON.stringify({
-          releaseSequence: input.releaseSequence
-        }),
-        result: 'succeeded',
-        request_id: input.context.requestId,
-        source_ip: input.context.sourceIp,
-        created_at: input.now
       })
       .execute()
   }

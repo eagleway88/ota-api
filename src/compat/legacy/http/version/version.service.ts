@@ -398,7 +398,11 @@ export class VersionService {
           await queryRunner.manager
             .createQueryBuilder()
             .insert()
-            .into(application.tables.releaseUser)
+            .into(application.tables.releaseUser, [
+              'release_id',
+              'user_id',
+              'created_at'
+            ])
             .values(
               userIds.map(userId => ({
                 release_id: releaseId,
