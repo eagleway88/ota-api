@@ -1,22 +1,15 @@
-import { ConflictException, Injectable, Optional } from '@nestjs/common'
+import { Injectable, Optional } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource, QueryRunner, Table } from 'typeorm'
 import { Request } from 'express'
-import { createHash, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import { apiUtil } from '@/utils/api'
 import { ConfigService } from '@nestjs/config'
 import { OssArtifactStorage } from '@/artifacts/oss-artifact.storage'
 import { OtaVersionQueryService } from './ota-version-query.service'
-import { createAppErrorLogTable, createErrorTable } from '@/utils/version'
-import { createSuccessTable, createVersionTable } from '@/utils/version'
-import { calculateNextReleaseSequence } from '@/utils/version'
+import { createVersionTable } from '@/utils/version'
 import { normalizeVersionValue } from '@/utils/version'
-import {
-  fetchIP,
-  humpToUnderline,
-  isRequestIpAllowed,
-  underlineToHump
-} from '@/utils'
+import { fetchIP, isRequestIpAllowed, underlineToHump } from '@/utils'
 import { AppErrorLogDto, CheckDto, CreateDto } from './version.dto'
 import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
 import { VersionListItemDto, VersionListQueryDto } from './version.dto'
@@ -28,6 +21,14 @@ import { ApplicationRegistryService } from '@/applications/application-registry.
 import { ReleaseManagementService } from '@/releases/release-management.service'
 import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
 import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
+
+import { TelemetryWriteService } from '@/telemetry/telemetry-write.service'
+import {
+  legacySuccessReport,
+  legacyFailureReport,
+  legacyApplicationError,
+  serializeLegacyReport
+} from './telemetry.mapper'
 
 @Injectable()
 export class VersionService {
@@ -41,7 +42,8 @@ export class VersionService {
     @Optional()
     private readonly releaseManagement?: ReleaseManagementService,
     @Optional()
-    private readonly releaseWrites?: DualWriteReleaseRepository
+    private readonly releaseWrites?: DualWriteReleaseRepository,
+    @Optional() private readonly telemetryWrites?: TelemetryWriteService
   ) {
     this.updater = new OssArtifactStorage(this.configService)
   }
@@ -201,192 +203,30 @@ export class VersionService {
   }
 
   async success(req: Request, body: SuccessDto) {
-    await this.assertVersionExists(body.name, body.verId)
-
-    const createTime = new Date()
-    const created = await this.insertStatusReport(
-      createSuccessTable(await this.resolveTablePrefix(body.name)),
-      {
-        ...body,
-        releaseSequence: body.verId,
-        reportedUsername: body.username,
-        extras: this.normalizeExtras(body.extras),
-        ip: fetchIP(req),
-        createTime,
-        createdAt: createTime
-      },
-      body.reportId
+    const report = await this.requireTelemetry().success(
+      legacySuccessReport(body, fetchIP(req))
     )
-
-    return apiUtil.data(this.serializeLegacyStatusRecord(created))
+    return apiUtil.data(serializeLegacyReport(report))
   }
 
   async error(req: Request, body: ErrorDto) {
-    await this.assertVersionExists(body.name, body.verId)
-
-    const now = new Date()
-    if (body.id) {
-      const updated = await this.updateDynamicTable(
-        createErrorTable(await this.resolveTablePrefix(body.name)),
-        body.id,
-        {
-          ...body,
-          releaseSequence: body.verId,
-          reportedUsername: body.username,
-          extras: this.normalizeExtras(body.extras),
-          ip: fetchIP(req),
-          updateTime: now,
-          updatedAt: now
-        }
-      )
-
-      return apiUtil.data(this.serializeLegacyStatusRecord(updated))
-    }
-
-    const created = await this.insertStatusReport(
-      createErrorTable(await this.resolveTablePrefix(body.name)),
-      {
-        ...body,
-        releaseSequence: body.verId,
-        reportedUsername: body.username,
-        extras: this.normalizeExtras(body.extras),
-        ip: fetchIP(req),
-        updateTime: now,
-        createTime: now,
-        updatedAt: now,
-        createdAt: now
-      },
-      body.reportId
+    const report = await this.requireTelemetry().failure(
+      legacyFailureReport(body, fetchIP(req))
     )
-
-    return apiUtil.data(this.serializeLegacyStatusRecord(created))
+    return apiUtil.data(serializeLegacyReport(report))
   }
 
   async appError(req: Request, body: AppErrorLogDto) {
-    const table = createAppErrorLogTable(
-      await this.resolveTablePrefix(body.name)
+    const report = await this.requireTelemetry().applicationError(
+      legacyApplicationError(body, fetchIP(req))
     )
-    const queryRunner = this.dataSource.createQueryRunner()
-    let errorLockName: string | undefined
-    let errorLockAcquired = false
-
-    await queryRunner.connect()
-
-    try {
-      await this.assertPreparedTable(queryRunner, table.name)
-
-      const now = new Date()
-      const extras = this.normalizeExtras(body.extras)
-      const errorHash = this.buildAppErrorHash(body)
-      errorLockName = `ota_app_error_${errorHash}`
-      const lockRows = (await queryRunner.query(
-        'SELECT GET_LOCK(?, 10) AS acquired',
-        [errorLockName]
-      )) as Array<{ acquired: number | string }>
-      errorLockAcquired = Number(lockRows[0]?.acquired) === 1
-      if (!errorLockAcquired) {
-        throw new ConflictException('Error report aggregation is busy')
-      }
-      const existing = await queryRunner.manager
-        .createQueryBuilder()
-        .select('*')
-        .from(table.name, table.name)
-        .where('error_hash = :errorHash', { errorHash })
-        .getRawOne<Record<string, unknown>>()
-
-      if (existing) {
-        const existingId = Number(existing.id)
-        if (!Number.isSafeInteger(existingId)) {
-          throw new Error('Stored application error ID is invalid')
-        }
-        const updatePayload = this.prepareDynamicPayload(table, {
-          ip: fetchIP(req),
-          extras,
-          username: body.username,
-          reportedUsername: body.username,
-          updateTime: now,
-          updatedAt: now
-        })
-
-        await queryRunner.manager
-          .createQueryBuilder()
-          .update(table.name)
-          .set(updatePayload)
-          .where('id = :id', { id: existingId })
-          .execute()
-
-        await queryRunner.manager.increment(
-          table.name,
-          { id: existingId },
-          'report_count',
-          1
-        )
-
-        const updated = await queryRunner.manager
-          .createQueryBuilder()
-          .select('*')
-          .from(table.name, table.name)
-          .where('id = :id', { id: existingId })
-          .getRawOne<Record<string, unknown>>()
-
-        return apiUtil.data(
-          this.serializeLegacyStatusRecord(
-            this.normalizeDynamicResult(table, updated ?? existing)
-          )
-        )
-      }
-
-      const created = await this.insertIntoDynamicTableByQueryRunner(
-        queryRunner,
-        table,
-        {
-          ...body,
-          reportedUsername: body.username,
-          extras,
-          errorHash,
-          reportCount: 1,
-          ip: fetchIP(req),
-          updateTime: now,
-          createTime: now,
-          updatedAt: now,
-          createdAt: now
-        }
-      )
-
-      return apiUtil.data(this.serializeLegacyStatusRecord(created))
-    } finally {
-      if (errorLockAcquired && errorLockName) {
-        await queryRunner.query('SELECT RELEASE_LOCK(?)', [errorLockName])
-      }
-      await queryRunner.release()
-    }
+    return apiUtil.data(serializeLegacyReport(report))
   }
 
-  private async assertVersionExists(name: string, id: number) {
-    const table = createVersionTable(await this.resolveTablePrefix(name))
-    const queryRunner = this.dataSource.createQueryRunner()
-
-    await queryRunner.connect()
-
-    try {
-      const hasTable = await queryRunner.hasTable(table.name)
-      if (!hasTable) {
-        return apiUtil.error('Version does not exist')
-      }
-
-      const version = await queryRunner.manager
-        .createQueryBuilder()
-        .select('id')
-        .from(table.name, 'version')
-        .where('id = :id', { id })
-        .getRawOne<{ id: number | string }>()
-
-      if (!version) {
-        return apiUtil.error('Version does not exist')
-      }
-    } finally {
-      await queryRunner.release()
-    }
+  private requireTelemetry() {
+    if (!this.telemetryWrites)
+      throw new Error('Telemetry persistence is not configured')
+    return this.telemetryWrites
   }
 
   private async queryVersionTable(
@@ -518,61 +358,6 @@ export class VersionService {
     return Number.isNaN(timestamp) ? 0 : timestamp
   }
 
-  private async insertIntoDynamicTable(
-    table: Table,
-    payload: Record<string, unknown>
-  ): Promise<Record<string, unknown>> {
-    const queryRunner = this.dataSource.createQueryRunner()
-
-    await queryRunner.connect()
-
-    try {
-      await this.assertPreparedTable(queryRunner, table.name)
-      return await this.insertIntoDynamicTableByQueryRunner(
-        queryRunner,
-        table,
-        payload
-      )
-    } finally {
-      await queryRunner.release()
-    }
-  }
-
-  private async insertStatusReport(
-    table: Table,
-    payload: Record<string, unknown>,
-    reportId?: string
-  ): Promise<Record<string, unknown>> {
-    if (reportId) {
-      const queryRunner = this.dataSource.createQueryRunner()
-      await queryRunner.connect()
-      try {
-        await this.assertPreparedTable(queryRunner, table.name)
-        const insertPayload = this.prepareDynamicPayload(table, payload)
-        await queryRunner.manager
-          .createQueryBuilder()
-          .insert()
-          .into(table.name)
-          .values(insertPayload)
-          .orIgnore()
-          .execute()
-        const existing = await queryRunner.manager
-          .createQueryBuilder()
-          .select('*')
-          .from(table.name, 'report')
-          .where('report.report_id = :reportId', { reportId })
-          .getRawOne<Record<string, unknown>>()
-        if (existing) {
-          return this.normalizeDynamicResult(table, existing)
-        }
-        throw new Error('Idempotent status report was not persisted')
-      } finally {
-        await queryRunner.release()
-      }
-    }
-    return this.insertIntoDynamicTable(table, payload)
-  }
-
   private async insertPublishedVersion(
     payload: Record<string, unknown>,
     userIds: readonly string[]
@@ -625,298 +410,6 @@ export class VersionService {
     )
   }
 
-  private async insertIntoDynamicTableByQueryRunner(
-    queryRunner: QueryRunner,
-    table: Table,
-    payload: Record<string, unknown>
-  ): Promise<Record<string, unknown>> {
-    const insertPayload = this.prepareDynamicPayload(table, payload)
-    const insertRes = await queryRunner.manager
-      .createQueryBuilder()
-      .insert()
-      .into(table.name)
-      .values(insertPayload)
-      .execute()
-
-    const identifier = insertRes.identifiers[0] as
-      Record<string, unknown> | undefined
-    const rawResult: unknown = insertRes.raw
-    const rawInsertId =
-      rawResult && typeof rawResult === 'object' && 'insertId' in rawResult
-        ? (rawResult as { insertId?: unknown }).insertId
-        : undefined
-    const insertId = Number(identifier?.id ?? rawInsertId)
-    if (!Number.isSafeInteger(insertId) || insertId < 1) {
-      return apiUtil.error('Insert data failed')
-    }
-
-    const created = await queryRunner.manager
-      .createQueryBuilder()
-      .select('*')
-      .from(table.name, table.name)
-      .where('id = :id', { id: insertId })
-      .getRawOne<Record<string, unknown>>()
-
-    return this.normalizeDynamicResult(
-      table,
-      created ?? { id: insertId, ...insertPayload }
-    )
-  }
-
-  private async updateDynamicTable(
-    table: Table,
-    id: number,
-    payload: Record<string, unknown>
-  ): Promise<Record<string, unknown>> {
-    const queryRunner = this.dataSource.createQueryRunner()
-
-    await queryRunner.connect()
-
-    try {
-      const hasTable = await queryRunner.hasTable(table.name)
-      if (!hasTable) {
-        return apiUtil.error('Error record does not exist')
-      }
-
-      const updatePayload = this.prepareDynamicPayload(table, {
-        ...payload,
-        id: undefined
-      })
-      const updateRes = await queryRunner.manager
-        .createQueryBuilder()
-        .update(table.name)
-        .set(updatePayload)
-        .where('id = :id', { id })
-        .execute()
-
-      if (!updateRes.affected) {
-        return apiUtil.error('Error record does not exist')
-      }
-
-      const updated = await queryRunner.manager
-        .createQueryBuilder()
-        .select('*')
-        .from(table.name, table.name)
-        .where('id = :id', { id })
-        .getRawOne<Record<string, unknown>>()
-
-      return this.normalizeDynamicResult(
-        table,
-        updated ?? { id, ...updatePayload }
-      )
-    } finally {
-      await queryRunner.release()
-    }
-  }
-
-  private async ensureTable(queryRunner: QueryRunner, table: Table) {
-    const hasTable = await queryRunner.hasTable(table.name)
-    if (!hasTable) {
-      await queryRunner.createTable(table, true)
-
-      if (table.name.endsWith('_version')) {
-        await this.ensureVersionTableAutoIncrement(queryRunner, table.name)
-      }
-
-      return
-    }
-
-    await this.syncTableColumns(queryRunner, table)
-    if (table.name.endsWith('_version')) {
-      await this.ensureVersionTableAutoIncrement(queryRunner, table.name)
-    }
-  }
-
-  private async assertPreparedTable(
-    queryRunner: QueryRunner,
-    tableName: string
-  ) {
-    if (!(await queryRunner.hasTable(tableName))) {
-      throw new Error(`Application schema is not ready: ${tableName}`)
-    }
-  }
-
-  private async syncTableColumns(queryRunner: QueryRunner, table: Table) {
-    const currentTable = await queryRunner.getTable(table.name)
-    if (!currentTable) {
-      return
-    }
-
-    const missingColumns = table.columns.filter(column => {
-      return !currentTable.columns.find(current => current.name === column.name)
-    })
-
-    if (!missingColumns.length) {
-      return
-    }
-
-    await queryRunner.addColumns(table.name, missingColumns)
-
-    if (
-      table.name.endsWith('_version') &&
-      missingColumns.some(column => column.name === 'update_type')
-    ) {
-      await this.backfillVersionUpdateType(queryRunner, table.name)
-    }
-
-    if (
-      table.name.endsWith('_version') &&
-      missingColumns.some(column => column.name === 'show_dialog')
-    ) {
-      await this.backfillVersionShowDialog(queryRunner, table.name)
-    }
-
-    if (
-      table.name.endsWith('_version') &&
-      missingColumns.some(column =>
-        ['release_id', 'release_scope', 'policy_revision'].includes(column.name)
-      )
-    ) {
-      await this.backfillVersionReleaseMetadata(queryRunner, table.name)
-    }
-
-    if (
-      table.name.endsWith('_error_log') &&
-      missingColumns.some(column =>
-        ['error_hash', 'report_count', 'update_time'].includes(column.name)
-      )
-    ) {
-      await this.backfillAppErrorLogColumns(queryRunner, table.name)
-    }
-  }
-
-  private async backfillVersionUpdateType(
-    queryRunner: QueryRunner,
-    tableName: string
-  ) {
-    await queryRunner.query(
-      `UPDATE ${tableName}
-       SET update_type = CASE
-         WHEN install_url IS NOT NULL AND install_url <> '' THEN 'full'
-         WHEN package_url IS NOT NULL AND package_url <> '' THEN 'hot'
-         ELSE update_type
-       END
-       WHERE update_type IS NULL OR update_type = ''`
-    )
-  }
-
-  private async backfillVersionShowDialog(
-    queryRunner: QueryRunner,
-    tableName: string
-  ) {
-    await queryRunner.query(
-      `UPDATE ${tableName}
-       SET show_dialog = 1
-       WHERE show_dialog IS NULL`
-    )
-  }
-
-  private async backfillVersionReleaseMetadata(
-    queryRunner: QueryRunner,
-    tableName: string
-  ) {
-    await queryRunner.query(
-      `UPDATE \`${tableName}\`
-       SET release_id = UUID()
-       WHERE release_id IS NULL OR release_id = ''`
-    )
-    await queryRunner.query(
-      `UPDATE \`${tableName}\`
-       SET release_scope = 'public'
-       WHERE release_scope IS NULL OR release_scope = ''`
-    )
-    await queryRunner.query(
-      `UPDATE \`${tableName}\`
-       SET policy_revision = 1
-       WHERE policy_revision IS NULL OR policy_revision < 1`
-    )
-  }
-
-  private async backfillAppErrorLogColumns(
-    queryRunner: QueryRunner,
-    tableName: string
-  ) {
-    await queryRunner.query(
-      `UPDATE ${tableName}
-       SET error_hash = MD5(CONCAT_WS('|',
-         IFNULL(name, ''),
-         IFNULL(platform, ''),
-         IFNULL(CAST(ver AS CHAR), ''),
-         IFNULL(kind, ''),
-         IFNULL(message, ''),
-         IFNULL(stack, '')
-       ))
-       WHERE error_hash IS NULL OR error_hash = ''`
-    )
-
-    await queryRunner.query(
-      `UPDATE ${tableName}
-       SET report_count = 1
-       WHERE report_count IS NULL OR report_count <= 0`
-    )
-
-    await queryRunner.query(
-      `UPDATE ${tableName}
-       SET update_time = create_time
-       WHERE update_time IS NULL`
-    )
-  }
-
-  private async ensureVersionTableAutoIncrement(
-    queryRunner: QueryRunner,
-    tableName: string
-  ) {
-    const tableStatus = (await queryRunner.query(
-      `SELECT AUTO_INCREMENT AS autoIncrement
-       FROM information_schema.TABLES
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
-      [tableName]
-    )) as Array<{ autoIncrement?: number | string | null }>
-    const maximumRows = (await queryRunner.query(
-      `SELECT MAX(id) AS maximumId FROM \`${tableName}\``
-    )) as Array<{ maximumId?: number | string | null }>
-    const nextSequence = calculateNextReleaseSequence(
-      Number(tableStatus[0]?.autoIncrement),
-      Number(maximumRows[0]?.maximumId)
-    )
-    await queryRunner.query(
-      `ALTER TABLE \`${tableName}\` AUTO_INCREMENT = ${nextSequence}`
-    )
-  }
-
-  private compactObject(payload: Record<string, unknown>) {
-    return Object.fromEntries(
-      Object.entries(payload).filter(([, value]) => value !== undefined)
-    )
-  }
-
-  private prepareDynamicPayload(
-    table: Table,
-    payload: Record<string, unknown>
-  ) {
-    const compactedPayload = this.compactObject(
-      humpToUnderline(payload) as Record<string, unknown>
-    )
-    const columnNames = new Set(table.columns.map(column => column.name))
-    const jsonColumnNames = new Set(
-      table.columns
-        .filter(column => column.type === 'json')
-        .map(column => column.name)
-    )
-
-    return Object.fromEntries(
-      Object.entries(compactedPayload)
-        .filter(([key]) => columnNames.has(key))
-        .map(([key, value]) => {
-          if (!jsonColumnNames.has(key)) {
-            return [key, value]
-          }
-
-          return [key, this.stringifyJsonColumnValue(value)]
-        })
-    )
-  }
-
   private normalizeReleaseAudience(body: CreateDto | UploadDto) {
     try {
       return normalizeLegacyReleaseAudience({
@@ -937,109 +430,5 @@ export class VersionService {
       ? await this.applications.resolve(appName)
       : undefined
     return application ? { tablePrefix: application.tablePrefix } : appName
-  }
-
-  private normalizeDynamicResult(
-    table: Table,
-    record: Record<string, unknown>
-  ): Record<string, unknown> {
-    const jsonColumnNames = new Set(
-      table.columns
-        .filter(column => column.type === 'json')
-        .map(column => column.name)
-    )
-
-    const normalizedRecord = Object.fromEntries(
-      Object.entries(record).map(([key, value]) => {
-        if (!jsonColumnNames.has(key)) {
-          return [key, value]
-        }
-
-        return [key, this.parseJsonColumnValue(value)]
-      })
-    )
-
-    return underlineToHump(normalizedRecord) as Record<string, unknown>
-  }
-
-  private stringifyJsonColumnValue(value: unknown) {
-    if (value === undefined) return value
-    if (value === null) return null
-
-    if (typeof value === 'string') {
-      try {
-        return JSON.stringify(JSON.parse(value) as unknown)
-      } catch {
-        return JSON.stringify(value)
-      }
-    }
-
-    return JSON.stringify(value)
-  }
-
-  private parseJsonColumnValue(value: unknown): unknown {
-    if (typeof value !== 'string') {
-      return value
-    }
-
-    try {
-      return JSON.parse(value) as unknown
-    } catch {
-      return value
-    }
-  }
-
-  private normalizeExtras(extras?: string) {
-    if (!extras) return undefined
-
-    return extras
-  }
-
-  private serializeLegacyStatusRecord(record: Record<string, unknown>) {
-    const fields = [
-      'id',
-      'name',
-      'platform',
-      'ver',
-      'verId',
-      'ip',
-      'extras',
-      'username',
-      'message',
-      'kind',
-      'stack',
-      'errorHash',
-      'reportCount',
-      'updateTime',
-      'createTime'
-    ]
-    return Object.fromEntries(
-      fields
-        .filter(field => record[field] !== undefined)
-        .map(field => [field, record[field]])
-    )
-  }
-
-  private buildAppErrorHash(body: AppErrorLogDto) {
-    const segments = [
-      body.name,
-      body.platform,
-      String(body.ver),
-      body.kind,
-      body.message,
-      body.stack ?? ''
-    ]
-
-    return createHash('md5')
-      .update(
-        segments
-          .map(segment => this.normalizeErrorHashSegment(segment))
-          .join('|')
-      )
-      .digest('hex')
-  }
-
-  private normalizeErrorHashSegment(value: string) {
-    return value.replace(/\r\n/g, '\n').trim()
   }
 }

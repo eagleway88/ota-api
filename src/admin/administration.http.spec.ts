@@ -51,7 +51,7 @@ function resultRows(query: string) {
         ver_id: 2000,
         reported_username: 'tester',
         created_at: '2026-10-01T00:00:00.000Z',
-        extras: '{"business_key":"unchanged"}',
+        extras_json: '{"business_key":"unchanged"}',
         unexpected_secret: 'must-not-be-returned'
       }
     ]
@@ -64,7 +64,7 @@ function resultRows(query: string) {
         kind: 'crash',
         report_count: 17,
         updated_at: '2026-10-01T00:00:00.000Z',
-        extras: {}
+        extras_json: '{}'
       }
     ]
   if (query.includes('app_b_publish_task')) return []

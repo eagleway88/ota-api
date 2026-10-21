@@ -62,20 +62,24 @@ export async function queryAdminPage<T extends ObjectLiteral>(
   alias: string,
   orderColumn: string,
   idColumn: string,
-  window: AdminQueryWindow
+  window: AdminQueryWindow,
+  extraSelects: readonly { expression: string; alias: string }[] = []
 ) {
   const count = await filter
     .clone()
     .select('COUNT(*)', 'total')
     .getRawOne<{ total: string | number }>()
-  const rows = await filter
+  const page = filter
     .clone()
     .select(`${alias}.*`)
     .orderBy(orderColumn, 'DESC')
     .addOrderBy(idColumn, 'DESC')
     .offset(window.offset)
     .limit(window.pageSize)
-    .getRawMany<Record<string, unknown>>()
+  // SQL expressions are code constants supplied by query services, never request input.
+  for (const selection of extraSelects)
+    page.addSelect(selection.expression, selection.alias)
+  const rows = await page.getRawMany<Record<string, unknown>>()
   return { rows, total: Number(count?.total ?? 0) }
 }
 

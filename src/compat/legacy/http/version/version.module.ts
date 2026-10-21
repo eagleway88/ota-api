@@ -8,6 +8,7 @@ import { otaUploadMaxBytes } from '@/artifacts/upload-policy'
 import { ApplicationsModule } from '@/applications/applications.module'
 import { ReleasesModule } from '@/releases/releases.module'
 import { ReleasePersistenceModule } from '@/infrastructure/persistence/release-persistence.module'
+import { TelemetryWritesModule } from '@/telemetry/telemetry-writes.module'
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { ReleasePersistenceModule } from '@/infrastructure/persistence/release-p
     ApplicationsModule,
     ReleasesModule,
     ReleasePersistenceModule,
+    TelemetryWritesModule,
     ConfigModule,
     MulterModule.registerAsync({
       imports: [ConfigModule],

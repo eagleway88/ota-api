@@ -69,7 +69,8 @@ export class TelemetryQueryService {
         'report',
         storedColumn(table, 'report', 'created_at', 'create_time'),
         'report.id',
-        window
+        window,
+        [{ expression: 'CAST(report.extras AS CHAR)', alias: 'extras_json' }]
       )
       return adminPage(
         rows.map(row => this.reportRecord(row, kind)),
@@ -120,7 +121,8 @@ export class TelemetryQueryService {
         'report',
         lastSeen,
         'report.id',
-        window
+        window,
+        [{ expression: 'CAST(report.extras AS CHAR)', alias: 'extras_json' }]
       )
       return adminPage(
         rows.map(row => ({
@@ -135,7 +137,7 @@ export class TelemetryQueryService {
           reportCount: Number(row.report_count ?? 1),
           reportedUsername: row.reported_username ?? row.username,
           sourceIp: row.ip,
-          extras: this.json(row.extras),
+          extras: this.json(row.extras_json),
           firstSeenAt: row.created_at ?? row.create_time,
           lastSeenAt:
             row.updated_at ??
@@ -196,7 +198,7 @@ export class TelemetryQueryService {
       releaseSequence: Number(row.release_sequence ?? row.ver_id),
       reportedUsername: row.reported_username ?? row.username,
       sourceIp: row.ip,
-      extras: this.json(row.extras),
+      extras: this.json(row.extras_json),
       createdAt: row.created_at ?? row.create_time,
       ...(kind === 'error'
         ? {
