@@ -90,6 +90,8 @@ Authorization: Bearer <JWT>
 
 `successCount/errorCount` 保持上报记录次数的含义，不是去重用户数；旧失败记录按 ID 更新不会新增一条记录。发送尝试和普通消息 ACK 不属于安装成功上报。
 
+统计写入现在通过独立上报服务与双写存储端口处理；这些管理员查询路径和认证不变。可选 `reportId` 的同内容重试只产生一条记录，不同内容复用键返回 `409`；无键请求仍逐次计数，旧错误 ID 更新不改变总条数和原发布关联。完整规则见 [SDK 上报说明](SDK_INTEGRATION.md#上报重试与错误记录更新)。JSON 扩展字段保留业务键和标量字符串类型，不将 `"123"` 二次解析为数字。
+
 客户端错误表保存的是聚合记录。`telemetry/app-errors` 的 `total` 是符合条件的错误组数；每组的 `reportCount` 是该组累计次数，不能解读为查询窗口内发生次数。响应通过 `windowBasis: "lastSeenAt"` 和 `reportCountSemantics` 明确这一点。由于历史表没有逐次错误事件，当前无法精确还原每个时间段的错误次数。
 
 `delivery` 返回 `tasks` 分页列表及各任务的 `latestLog`。任务可能因统一重算向不同连接下发其他适用版本，所以执行计数属于应用分发尝试，不能全部归为触发版本的接收人数。`receiveConfirmationAvailable: false` 表示旧协议没有 OTA 接收确认。`metrics_complete: 0` 的执行记录必须展示为不完整统计。
@@ -153,3 +155,5 @@ curl --get 'https://ota.example.com/api/v2/apps/eagleway-network/statistics/summ
 当前 API 提供数据库中的客户端错误、发布任务执行日志、应用审计和全局审计。服务端标准输出/PM2 文件日志尚无持久化查询后端，因此不在这组接口中；也不提供读取任意服务器日志文件的接口。
 
 自动化测试通过本机真实 HTTP 请求验证认证、参数、响应、应用路由隔离和 TypeORM 生成的参数化 SQL，该 HTTP 套件的数据库返回使用测试替身。另有独立 MySQL 任务套件，验证管理查询能读到运行中进度、租约接管及失败回滚；Socket 发送使用内存替身。目标 MySQL 的时间精度、索引执行计划、查询负载、真实网络和现有数据结构仍需在目标测试环境验证。
+
+统计写入套件另以真实本地 HTTP + 隔离 MySQL 验证旧上报响应及成功/失败汇总，并验证管理员明细和错误聚合查询保留 JSON 标量类型。没有连接生产库、OSS 或真实外部 SDK。

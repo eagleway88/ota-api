@@ -10,7 +10,8 @@ src/
   artifacts/                 文件校验、OSS 存储、待发布引用
   releases/                  草稿、发布及策略修改
     ports/                   正式发布写入接口（读取/其他存储仍待拆分）
-  telemetry/                 成功/失败统计、上报明细、客户端错误查询
+  telemetry/                 正式上报服务、成功/失败统计和错误查询
+    ports/                   可替换的统计写入接口
   audit/                     应用/全局审计查询、全局审计写入 helper
   messaging/                 最后一条消息存储、精确 ACK、TTL 判断
   updates/
@@ -24,7 +25,7 @@ src/
     http/message/            旧普通消息 Controller/DTO/适配
     http/version/            旧版本 Controller/DTO/发布与上报适配
     mappers/                 旧响应序列化
-    persistence/             发布双写、旧输入映射、历史回填及冲突检测
+    persistence/             发布/统计双写、旧输入映射、历史回填及冲突检测
     legacy.module.ts         旧 HTTP 模块的集中入口
   contracts/                 共用类型、查询参数和消息契约
   infrastructure/
@@ -43,6 +44,10 @@ src/
 
 `ReleaseWriteRepository` 是正式发布/启停的写入端口，由 `ReleasePersistenceModule` 装配为 `DualWriteReleaseRepository`。旧发布通过兼容适配器的 `insertLegacy()` 归一化旧输入；v2 直接传正式字段。二者使用同一映射维护新旧列，端口不提交事务，版本、名单、任务、目录修订和审计仍由调用方原子提交。旧基础版本隐含并集和 v2 显式集合分别保留，旧响应的 CSV/NULL 表示不会被改成正式 JSON 表示。
 
+`TelemetryWritesModule` 与只读 `TelemetryModule` 分开装配，不启动 Worker 或 OSS。旧 `VersionService` 的三个上报入口仅将旧字段映射成正式输入并序列化响应；`TelemetryWriteService` 依赖 `TelemetryWriteRepository`，默认由 `TelemetryPersistenceModule` 绑定到 `DualWriteTelemetryRepository`，可替换存储实现而不加载旧 HTTP Controller。
+
+统计写入适配器自己管理短事务：在同一连接重新核对登记前缀/ready、锁定本应用发布关联、双写旧/新列；不执行 DDL。reportId 或错误指纹使用按键命名锁，事务采用 `READ COMMITTED`，避免不同新键共享索引间隙时的竞争死锁；旧错误 ID 更新使用行锁。聚合详情和次数以同一 UPDATE 提交，幂等重放核对业务内容而忽略 IP/接收时间。JSON 存储与管理员读取保留业务键和标量类型，旧响应的递归键名转换只留在 HTTP 兼容 mapper。旧服务无调用的建表/回填私有方法已删除，准备和迁移仍由专用组件负责。
+
 `withApplicationWrite()` 在碰触发布/草稿行和分配 ID 之前取得同应用锁，并持有到提交/回滚；与准备、迁移使用相同锁名。取得锁后重新核对登记前缀、schema version 和 ready 状态，避免使用已过期的 prepare 结果。旧发布、v2 发布、已发布策略修改采用此事务边界，不在其中执行 DDL 或网络推送；其他应用用不同锁，可以独立发布。
 
 `ReleaseCatalogService` 只负责加载目录；旧参数归一化和旧响应序列化由 `compat/legacy/http/version/OtaVersionQueryService` 承接。正式发布服务通过目录服务失效缓存，不直接依赖旧查询适配器。
@@ -55,4 +60,4 @@ src/
 
 `scripts/migrate-application.ts` 是独立运维入口，不启动业务模块。`infrastructure/migrations/` 管理同应用互斥、只读对账和数据/进度原子提交；历史字段解释位于 `compat/legacy/persistence/`。目录根据应用登记的 `read_model` 选择兼容或严格正式映射；正式字段仍沿用旧 wire payload 出口，尚不是完整的可替换 Repository。
 
-尚未完成的边界：旧版本服务仍编排旧发布、上传及上报，统计写入和读取 Repository 仍待拆分；Gateway 仍混合旧事件、普通消息和 OTA 分发；正式模型仍带 `legacyPayload`。目前只有发布/启停写入端口可替换，实际装配仍使用双写适配器，不能直接删除兼容目录或旧列。事务/并发行为由独立回归验证，不归功于目录移动。
+尚未完成的边界：旧版本服务仍编排发布、上传并直接查询版本列表；读取、草稿/名单存储端口仍待拆分；Gateway 仍混合旧事件、普通消息和 OTA 分发；发布正式模型仍带 `legacyPayload`。发布/启停和统计写入端口可替换，但实际装配仍使用双写适配器，不能直接删除兼容目录或旧列。事务/并发行为由独立回归验证，不归功于目录移动。

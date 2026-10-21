@@ -4,7 +4,7 @@
 
 最后修订：2026-10-21（Asia/Shanghai）
 
-状态：实施中。2026-10-20 复核发现服务端仍有功能、架构和验证缺口，撤回此前“仓库内重构完成”的结论。补充管理员接口、历史迁移、统一发布锁、集中发布双写与任务进度，并验证隔离 MySQL 发布/迁移/租约接管后，按 50 项等权交付条目计算为 65%（20 项已实现、25 项部分实现、5 项未实现或未验收）；这不是工时百分比或上线批准。
+状态：实施中。2026-10-20 复核发现服务端仍有功能、架构和验证缺口，撤回此前“仓库内重构完成”的结论。补充管理员接口、历史迁移、统一发布锁、集中发布/统计双写与任务进度，并验证隔离 MySQL 发布/迁移/租约接管/上报并发后，按 50 项等权交付条目计算为 66%（21 项已实现、24 项部分实现、5 项未实现或未验收）；这不是工时百分比或上线批准。
 
 逐项证据、已复现缺陷、目录调整和后续顺序见 [重构完成度核对报告](docs/REFACTOR_PROGRESS.md)。生产环境核对、外部 SDK/业务项目交付与服务端代码缺口均纳入报告，不将未完成的代码事项归为环境限制。
 
@@ -965,7 +965,8 @@ P2 的数据扩展要为后续白名单预留安全兼容读取能力。P3 的�
 
 - [当前 OTA 实时广播与订阅](/Users/zhuwenbo/Documents/GitHub/ota-api/src/ws/ws.service.ts)
 - [当前 OTA 版本查询](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/http/version/ota-version-query.service.ts)
-- [当前发布、上报和动态补列](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/http/version/version.service.ts)
+- [旧发布、查询及上报协议适配](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/http/version/version.service.ts)
+- [统计写入事务与集中双写](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/persistence/dual-write-telemetry.repository.ts)
 - [当前动态表与版本编码](/Users/zhuwenbo/Documents/GitHub/ota-api/src/utils/version.ts)
 - [当前普通消息与 TTL 入口](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/http/message/message.service.ts)
 - [当前最后一条消息与 ACK 存储](/Users/zhuwenbo/Documents/GitHub/ota-api/src/messaging/last-message.service.ts)
