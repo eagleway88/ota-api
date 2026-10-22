@@ -16,3 +16,5 @@ MySQL 仅接受 `/private/tmp/ota-migration-mysql.<随机字符>/mysql.sock` 或
 API Key 回归覆盖权限预设、显式多应用授权、撤销/过期、默认拒绝和真实 HTTP/SQL。application-messages.mysql 验证旧表非空拒绝、空表退役、消息隔离及历史管理员删除；ota-cli.mysql 使用真实子进程、临时 DB 专用账号，验证签发时准备应用、一次性凭证、撤销与审计失败回滚。CLI 测试不读取项目 .env，不启动业务 HTTP/OSS/Worker。
 
 生产 CLI 仅支持正常数据库 host/port。CLI MySQL 子进程测试显式预加载 test/fixtures/mysql-socket-preload.cjs，将驱动连接注入到已校验的临时 socket，并限制为自身生成的测试数据库；夹具不在生产源码中引用、不进入部署构建。Worker 装配测试用空应用列表隔离数据库，不依赖暂停开关；单元测试验证启动即轮询、仅读取轮询间隔并正确释放定时器。
+
+database-audit.mysql 使用仅 SELECT 权限的账号运行真实 audit:db 脚本，覆盖默认 SQL 模式、空模式、NO_BACKSLASH_ESCAPES 及 ANSI_QUOTES 组合，验证精确表名后缀、统计及缺列输出，并逐表核对数据不变。子进程在无 .env 的临时目录运行，不读取项目配置；SQL 模式只在测试连接的会话中设置，不修改全局或业务库配置。

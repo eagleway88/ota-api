@@ -13,9 +13,36 @@ if (
   )
 }
 const createPool = mysql.createPool
-mysql.createPool = options => {
+const withSocket = options => {
   if (!options || options.database !== process.env.ORM_DATABASE) {
     throw new Error('Refusing a connection outside the generated test database')
   }
-  return createPool({ ...options, socketPath })
+  return { ...options, socketPath }
+}
+mysql.createPool = options => createPool(withSocket(options))
+
+// The read-only audit CLI uses the promise driver rather than a TypeORM pool.
+const promiseDriver = require('mysql2/promise')
+const createConnection = promiseDriver.createConnection
+promiseDriver.createConnection = async options => {
+  const connection = await createConnection(withSocket(options))
+  try {
+    const mode = process.env.OTA_MIGRATION_TEST_SQL_MODE
+    if (mode !== undefined) {
+      if (
+        ![
+          '',
+          'NO_BACKSLASH_ESCAPES',
+          'ANSI_QUOTES,NO_BACKSLASH_ESCAPES'
+        ].includes(mode)
+      ) {
+        throw new Error('Unsupported test SQL mode')
+      }
+      await connection.execute('SET SESSION sql_mode = ?', [mode])
+    }
+    return connection
+  } catch (error) {
+    await connection.end()
+    throw error
+  }
 }

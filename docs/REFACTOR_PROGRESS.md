@@ -1,5 +1,11 @@
 # 重构完成度核对报告
 
+## audit:db 表名筛选 SQL 修复
+
+修复只读数据库核对脚本的反斜杠/SQL 字符串双层转义错误：以 RIGHT 精确匹配 _version/_success/_error/_error_log 后缀，移除 LIKE/ESCAPE，不要求修改数据库 SQL 模式或重新导入旧数据；dotenv 改为静默加载，输出只保留报告 JSON。新增真实子进程、SELECT-only 账号和多 SQL 模式回归，验证近似名称不误匹配、应用/ID/缺列统计正确、逐表数据不变。此修复不执行 DDL 或历史数据回填。
+
+本轮 49 套件 / 373 项全部通过，typecheck/lint/build 通过；真实 audit CLI 在默认、空 SQL 模式、NO_BACKSLASH_ESCAPES、ANSI_QUOTES 组合中全部成功。仅使用隔离临时 MySQL，未读取项目 .env，也未连接用户导入线上数据的本地库。
+
 ## 精简数据库连接与 Worker 配置（当前策略）
 
 按用户确认，移除运维 CLI 专用 socket 配置及 Worker 暂停开关和相关读取分支；CLI/服务统一使用数据库 host/port，Worker 随服务启动即轮询及恢复任务。部署、迁移、回滚改为明确停服务后离线处理，不能依赖旧暂停配置。普通消息补发查询中的过期检查/删除明确保留，ACK 及最后消息语义不变。隔离数据库子进程通过测试专用驱动夹具使用临时 socket，不把测试通道留作产品配置。

@@ -3,7 +3,7 @@ import * as dotenv from 'dotenv'
 import mysql from 'mysql2/promise'
 import type { RowDataPacket } from 'mysql2'
 
-dotenv.config({ path: '.env' })
+dotenv.config({ path: '.env', quiet: true })
 
 interface Row extends RowDataPacket {
   [column: string]: unknown
@@ -43,10 +43,9 @@ async function main() {
               TABLE_ROWS AS estimatedRows
        FROM information_schema.TABLES
        WHERE TABLE_SCHEMA = ?
-         AND (TABLE_NAME LIKE '%\\_version' ESCAPE '\\'
-           OR TABLE_NAME LIKE '%\\_success' ESCAPE '\\'
-           OR TABLE_NAME LIKE '%\\_error' ESCAPE '\\'
-           OR TABLE_NAME LIKE '%\\_error_log' ESCAPE '\\')
+         AND (RIGHT(TABLE_NAME, 8) IN ('_version', '_success')
+           OR RIGHT(TABLE_NAME, 6) = '_error'
+           OR RIGHT(TABLE_NAME, 10) = '_error_log')
        ORDER BY TABLE_NAME`,
       [database]
     )
