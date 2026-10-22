@@ -1,3 +1,4 @@
+import { releaseRow } from './fixtures/release'
 import { DataSource, QueryRunner } from 'typeorm'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
@@ -8,22 +9,13 @@ import { ConnectionSubscriptionStore } from '@/realtime/subscriptions/connection
 import { RealtimeGateway } from '@/realtime/gateway/realtime.gateway'
 import { mapStoredReleaseRecord } from '@/releases/release-record.mapper'
 import { ReleaseManagementService } from '@/releases/release-management.service'
-import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
+import { SqlReleaseRepository } from '@/infrastructure/persistence/sql-release.repository'
 
 function fixture() {
-  const row: Record<string, unknown> = {
-    id: 2000,
+  const row: Record<string, unknown> = releaseRow({
     release_id: 'release-a',
-    name: 'app',
-    ver: 110,
-    platform: 'windows',
-    update_type: 'full',
-    install_url: 'https://example.test/app.exe',
-    release_scope: 'public',
-    enable: 1,
-    is_enabled: 1,
-    policy_revision: 1
-  }
+    architectures: []
+  })
   const writes: Array<{ table: string; values: Record<string, unknown> }> = []
   const tables = new ApplicationTableResolver().resolve('app', 'app')
   const application = { appName: 'app', tablePrefix: 'app', tables }
@@ -118,10 +110,18 @@ function fixture() {
     applications as unknown as ApplicationRegistryService,
     catalog as unknown as ReleaseCatalogService,
     worker as unknown as PublishTaskWorkerService,
-    new DualWriteReleaseRepository()
+    new SqlReleaseRepository()
   )
-  const context = { requestId: 'request-a', actorAdminId: 1 }
-  const updateQuery = { name: 'app', platform: 'windows', ver: 100, id: 0 }
+  const context = {
+    requestId: 'request-a',
+    actorKeyId: '10000000-0000-4000-8000-000000000001'
+  }
+  const updateQuery = {
+    appName: 'app',
+    platform: 'windows',
+    nativeVersionCode: 100,
+    installedReleaseSequence: 0
+  }
   return {
     row,
     writes,
@@ -140,24 +140,24 @@ function fixture() {
 }
 
 describe('ReleaseManagementService enabled policy', () => {
-  it('dual-writes enabled state and uses it for checks, replay, revocation and re-enable', async () => {
+  it('writes enabled state and uses it for checks, replay, revocation and re-enable', async () => {
     const f = fixture()
-    await f.ws.handleOtaNameSubscribe(f.client as never, {
-      otaName: 'app',
+    await f.ws.handleApplicationSubscribe(f.client as never, {
+      appName: 'app',
       platform: 'windows',
-      ver: 100,
-      id: 0
+      nativeVersionCode: 100,
+      installedReleaseSequence: 0
     })
     expect(f.client.emit).toHaveBeenLastCalledWith(
-      'app',
-      expect.objectContaining({ id: 2000, enable: 1 })
+      'app:app:update',
+      expect.objectContaining({ releaseSequence: 2000, enabled: true })
     )
     f.client.emit.mockClear()
 
     await f.service.setEnabled('app', 'release-a', false, f.context)
     expect(f.writes).toContainEqual({
       table: f.tables.version,
-      values: { enable: 0, is_enabled: 0 }
+      values: { is_enabled: 0 }
     })
     expect(mapStoredReleaseRecord(f.row).enabled).toBe(false)
     await expect(
@@ -165,30 +165,32 @@ describe('ReleaseManagementService enabled policy', () => {
     ).resolves.toBeNull()
     expect(f.client.emit).toHaveBeenCalledTimes(1)
     expect(f.client.emit).toHaveBeenLastCalledWith(
-      'app',
-      expect.objectContaining({ id: 2000, enable: 0 })
+      'app:app:update',
+      expect.objectContaining({ releaseSequence: 2000, enabled: false })
     )
 
     const newcomer = { ...f.client, id: 'socket-b', emit: jest.fn() }
-    await f.ws.handleOtaNameSubscribe(newcomer as never, {
-      otaName: 'app',
+    await f.ws.handleApplicationSubscribe(newcomer as never, {
+      appName: 'app',
       platform: 'windows',
-      ver: 100,
-      id: 0
+      nativeVersionCode: 100,
+      installedReleaseSequence: 0
     })
     expect(newcomer.emit).not.toHaveBeenCalled()
 
     await f.service.setEnabled('app', 'release-a', true, f.context)
     expect(f.writes).toContainEqual({
       table: f.tables.version,
-      values: { enable: 1, is_enabled: 1 }
+      values: { is_enabled: 1 }
     })
     await expect(
       f.query.findLatestAvailableVersion(f.updateQuery)
-    ).resolves.toEqual(expect.objectContaining({ id: 2000, enable: 1 }))
+    ).resolves.toEqual(
+      expect.objectContaining({ releaseSequence: 2000, enabled: true })
+    )
     expect(f.client.emit).toHaveBeenLastCalledWith(
-      'app',
-      expect.objectContaining({ id: 2000, enable: 1 })
+      'app:app:update',
+      expect.objectContaining({ releaseSequence: 2000, enabled: true })
     )
     expect(f.runner.commitTransaction).toHaveBeenCalledTimes(2)
     expect(f.catalog.invalidate).toHaveBeenCalledTimes(2)

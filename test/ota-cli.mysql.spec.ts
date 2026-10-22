@@ -1,17 +1,10 @@
+import { InitialSchema1792713600000 } from '@/migrations/1792713600000-InitialSchema'
 import 'reflect-metadata'
 import { execFile } from 'child_process'
 import { randomUUID } from 'crypto'
 import { resolve } from 'path'
 import { DataSource } from 'typeorm'
 import { ApiKeyService } from '@/auth/api-key.service'
-import { RefactoringFoundation1792444800000 } from '@/migrations/1792444800000-RefactoringFoundation'
-import { AdminSecurity1792444900000 } from '@/migrations/1792444900000-AdminSecurity'
-import { GlobalAuditIndexes1792445000000 } from '@/migrations/1792445000000-GlobalAuditIndexes'
-import { ApplicationDataMigration1792445100000 } from '@/migrations/1792445100000-ApplicationDataMigration'
-import { AdministratorSessions1792445200000 } from '@/migrations/1792445200000-AdministratorSessions'
-import { ApiKeys1792445300000 } from '@/migrations/1792445300000-ApiKeys'
-import { ApplicationMessages1792445400000 } from '@/migrations/1792445400000-ApplicationMessages'
-import { RetireAdministratorAccounts1792445500000 } from '@/migrations/1792445500000-RetireAdministratorAccounts'
 
 const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
 const mysql = socketPath ? describe : describe.skip
@@ -28,7 +21,7 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
     synchronize: false,
     logging: false
   }
-  const run = (args: string[]) =>
+  const run = (args: string[], targetDatabase = database) =>
     new Promise<{ stdout: string; stderr: string; code: number }>(done => {
       execFile(
         process.execPath,
@@ -54,7 +47,7 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
             ORM_PORT: '3306',
             ORM_USERNAME: user,
             ORM_PASSWORD: password,
-            ORM_DATABASE: database
+            ORM_DATABASE: targetDatabase
           }
         },
         (error, stdout, stderr) => done({ stdout, stderr, code: error ? 1 : 0 })
@@ -76,26 +69,10 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
     source = new DataSource({
       ...connection,
       database,
-      migrations: [
-        RefactoringFoundation1792444800000,
-        AdminSecurity1792444900000,
-        GlobalAuditIndexes1792445000000,
-        ApplicationDataMigration1792445100000,
-        AdministratorSessions1792445200000,
-        ApiKeys1792445300000,
-        ApplicationMessages1792445400000,
-        RetireAdministratorAccounts1792445500000
-      ]
+      migrations: [InitialSchema1792713600000],
+      migrationsTableName: 'ota_schema_history'
     })
     await source.initialize()
-    // Historical baseline required by existing immutable migration history.
-    await source.query(`CREATE TABLE admins (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-      username VARCHAR(255) NOT NULL, password VARCHAR(255) NOT NULL,
-      create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB`)
-    await source.query(
-      "INSERT INTO admins (username, password) VALUES ('historical-admin', 'historical-password')"
-    )
-    await source.runMigrations({ transaction: 'each' })
     await control.query('CREATE USER ?@? IDENTIFIED BY ?', [
       user,
       'localhost',
@@ -105,6 +82,19 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
     await control.query(
       `GRANT ALL ON \`${database}\`.* TO '${user}'@'localhost'`
     )
+    const initialized = await run(['db', 'init', '--database', database])
+    expect(initialized.code === 0 ? null : initialized.stderr).toBeNull()
+    expect(JSON.parse(initialized.stdout)).toMatchObject({
+      database,
+      migrations: ['InitialSchema1792713600000']
+    })
+    expect(
+      (
+        JSON.parse(
+          (await run(['db', 'init', '--database', database])).stdout
+        ) as { migrations: string[] }
+      ).migrations
+    ).toEqual([])
   }, 30000)
   afterAll(async () => {
     if (source?.isInitialized) await source.destroy()
@@ -114,6 +104,42 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
       await control.destroy()
     }
   })
+  it('refuses a nonempty database before writing initialization history or touching its data', async () => {
+    const oldDatabase = 'ota_migration_test_' + randomUUID().replaceAll('-', '')
+    await control.query('CREATE DATABASE ' + oldDatabase)
+    try {
+      await control.query(
+        'CREATE TABLE ' +
+          oldDatabase +
+          '.old_versions (id INT PRIMARY KEY, payload TEXT)'
+      )
+      await control.query(
+        'INSERT INTO ' +
+          oldDatabase +
+          ".old_versions VALUES (1,'keep-old-data')"
+      )
+      await control.query(
+        'GRANT ALL ON ' + oldDatabase + ".* TO '" + user + "'@'localhost'"
+      )
+      const result = await run(
+        ['db', 'init', '--database', oldDatabase],
+        oldDatabase
+      )
+      expect(result.code).toBe(1)
+      expect(result.stderr).toContain('fresh empty database')
+      expect(
+        await control.query('SELECT * FROM ' + oldDatabase + '.old_versions')
+      ).toEqual([{ id: 1, payload: 'keep-old-data' }])
+      const tables: unknown = await control.query(
+        'SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA=?',
+        [oldDatabase]
+      )
+      expect(tables).toEqual([{ name: 'old_versions' }])
+    } finally {
+      await control.query('DROP DATABASE ' + oldDatabase)
+    }
+  })
+
   it('prepares multiple applications, issues a full key once, lists/inspects without secrets and revokes it', async () => {
     const created = await run([
       'key',
@@ -190,7 +216,7 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
     ).toEqual([])
   }, 30000)
   it('retains prepared application tables, without issuing a credential, when key audit creation fails', async () => {
-    await source.query(`CREATE TRIGGER reject_key_audit BEFORE INSERT ON ota_admin_audit_log FOR EACH ROW
+    await source.query(`CREATE TRIGGER reject_key_audit BEFORE INSERT ON ota_audit_log FOR EACH ROW
       BEGIN IF NEW.action = 'api_key_created' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected audit failure'; END IF; END`)
     try {
       const result = await run([

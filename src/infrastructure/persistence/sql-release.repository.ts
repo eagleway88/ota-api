@@ -5,15 +5,13 @@ import {
   ReleaseWriteInput,
   ReleaseWriteRepository
 } from '@/releases/ports/release-write.repository'
-import { underlineToHump } from '@/utils'
 import {
-  dualWriteReleaseValues,
-  enabledWriteValues,
-  legacyReleaseWriteValues
-} from '@/infrastructure/persistence/legacy/release-write.mapper'
+  releaseWriteValues,
+  enabledWriteValues
+} from '@/infrastructure/persistence/release-write.mapper'
 
 @Injectable()
-export class DualWriteReleaseRepository extends ReleaseWriteRepository {
+export class SqlReleaseRepository extends ReleaseWriteRepository {
   async insert(
     runner: QueryRunner,
     application: RegisteredApplication,
@@ -22,22 +20,9 @@ export class DualWriteReleaseRepository extends ReleaseWriteRepository {
     const stored = await this.insertRecord(
       runner,
       application,
-      dualWriteReleaseValues(input)
+      releaseWriteValues(input)
     )
     return { releaseId: input.releaseId, releaseSequence: Number(stored.id) }
-  }
-
-  async insertLegacy(
-    runner: QueryRunner,
-    application: RegisteredApplication,
-    payload: Record<string, unknown>
-  ) {
-    const stored = await this.insertRecord(
-      runner,
-      application,
-      legacyReleaseWriteValues(payload)
-    )
-    return underlineToHump(stored) as Record<string, unknown>
   }
 
   async setEnabled(
@@ -51,7 +36,7 @@ export class DualWriteReleaseRepository extends ReleaseWriteRepository {
       .createQueryBuilder()
       .update(application.tables.version)
       .set(enabledWriteValues(enabled))
-      .where('release_id = :releaseId AND name = :appName', {
+      .where('release_id = :releaseId AND app_name = :appName', {
         releaseId,
         appName: application.appName
       })
@@ -64,7 +49,7 @@ export class DualWriteReleaseRepository extends ReleaseWriteRepository {
     values: Record<string, unknown>
   ) {
     this.assertTransaction(runner)
-    if (values.name !== application.appName)
+    if (values.app_name !== application.appName)
       throw new Error(
         'Publication application does not match its registered table'
       )
@@ -78,10 +63,13 @@ export class DualWriteReleaseRepository extends ReleaseWriteRepository {
       .createQueryBuilder()
       .select('*')
       .from(application.tables.version, 'release')
-      .where('release.release_id = :releaseId AND release.name = :appName', {
-        releaseId: values.release_id,
-        appName: application.appName
-      })
+      .where(
+        'release.release_id = :releaseId AND release.app_name = :appName',
+        {
+          releaseId: values.release_id,
+          appName: application.appName
+        }
+      )
       .getRawOne<Record<string, unknown>>()
     if (
       !stored ||

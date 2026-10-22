@@ -36,7 +36,7 @@ export type ReportRecord = ClientReport & {
   updatedAt?: Date | string | null
 }
 
-/** Each operation owns its transaction; no HTTP, legacy columns or DDL in the port. */
+/** Each operation owns its transaction; no HTTP or DDL in the port. */
 export abstract class TelemetryWriteRepository {
   abstract success(
     input: StatusReportInput,

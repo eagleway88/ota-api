@@ -1,3 +1,4 @@
+import { InitialSchema1792713600000 } from '@/migrations/1792713600000-InitialSchema'
 import 'reflect-metadata'
 import { randomUUID } from 'crypto'
 import { DataSource } from 'typeorm'
@@ -5,13 +6,10 @@ import { ApiKeyManagementService } from '@/auth/api-key-management.service'
 import { ApiKeyService } from '@/auth/api-key.service'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
-import { RefactoringFoundation1792444800000 } from '@/migrations/1792444800000-RefactoringFoundation'
-import { ApplicationDataMigration1792445100000 } from '@/migrations/1792445100000-ApplicationDataMigration'
-import { ApiKeys1792445300000 } from '@/migrations/1792445300000-ApiKeys'
 
 const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
 const mysql = socketPath ? describe : describe.skip
-mysql('API key lifecycle and additive migration on isolated MySQL', () => {
+mysql('API key lifecycle on the fresh schema on isolated MySQL', () => {
   let control: DataSource, source: DataSource, database: string
   let keys: ApiKeyManagementService, auth: ApiKeyService
   const connection = {
@@ -55,8 +53,7 @@ mysql('API key lifecycle and additive migration on isolated MySQL', () => {
     await source.initialize()
     const runner = source.createQueryRunner()
     try {
-      await new RefactoringFoundation1792444800000().up(runner)
-      await new ApplicationDataMigration1792445100000().up(runner)
+      await new InitialSchema1792713600000().up(runner)
     } finally {
       await runner.release()
     }
@@ -66,12 +63,6 @@ mysql('API key lifecycle and additive migration on isolated MySQL', () => {
     )
     await applications.prepare('app-a')
     await applications.prepare('app-b')
-    const migration = source.createQueryRunner()
-    try {
-      await new ApiKeys1792445300000().up(migration)
-    } finally {
-      await migration.release()
-    }
     keys = new ApiKeyManagementService(source)
     auth = new ApiKeyService(source)
   })
@@ -121,7 +112,7 @@ mysql('API key lifecycle and additive migration on isolated MySQL', () => {
     )
     expect(
       await query(
-        "SELECT * FROM ota_admin_audit_log WHERE action = 'api_key_revoked'"
+        "SELECT * FROM ota_audit_log WHERE action = 'api_key_revoked'"
       )
     ).toHaveLength(1)
     const expiring = await keys.create(
@@ -186,7 +177,7 @@ mysql('API key lifecycle and additive migration on isolated MySQL', () => {
   })
   it('atomically rolls back creation and grants when the audit fails', async () => {
     await source.query(
-      "CREATE TRIGGER fail_audit BEFORE INSERT ON ota_admin_audit_log FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected'"
+      "CREATE TRIGGER fail_audit BEFORE INSERT ON ota_audit_log FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected'"
     )
     await expect(create()).rejects.toThrow()
     expect(await query('SELECT * FROM ota_api_keys')).toEqual([])
@@ -194,68 +185,12 @@ mysql('API key lifecycle and additive migration on isolated MySQL', () => {
   })
   it('rolls back revocation if its audit fails and never logs plaintext credentials', async () => {
     const key = await create()
-    const audits = JSON.stringify(
-      await query('SELECT * FROM ota_admin_audit_log')
-    )
+    const audits = JSON.stringify(await query('SELECT * FROM ota_audit_log'))
     expect(audits).not.toContain(key.accessKey.split('.')[1])
     await source.query(
-      "CREATE TRIGGER fail_audit BEFORE INSERT ON ota_admin_audit_log FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected'"
+      "CREATE TRIGGER fail_audit BEFORE INSERT ON ota_audit_log FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected'"
     )
     await expect(keys.revoke(key.keyId, context)).rejects.toThrow()
     await auth.authenticate(key.accessKey)
-  })
-  it('upgrades existing audit tables idempotently and preserves previous rows and app data', async () => {
-    const before = await query('SELECT * FROM ota_admin_audit_log')
-    await source.query(
-      'ALTER TABLE app_a_audit_log DROP INDEX app_a_audit_key_created_idx, DROP COLUMN actor_key_id'
-    )
-    const runner = source.createQueryRunner()
-    try {
-      await new ApiKeys1792445300000().up(runner)
-      expect(await runner.hasColumn('app_a_audit_log', 'actor_key_id')).toBe(
-        true
-      )
-      expect(
-        await runner.hasColumn('ota_admin_audit_log', 'actor_key_id')
-      ).toBe(true)
-    } finally {
-      await runner.release()
-    }
-    expect(await query('SELECT * FROM ota_admin_audit_log')).toEqual(before)
-    expect(await query('SELECT * FROM ota_applications')).toHaveLength(2)
-  })
-
-  it('prepares a late-registered historical app with an existing old audit schema', async () => {
-    await source.query('CREATE TABLE late_app_audit_log LIKE app_a_audit_log')
-    await source.query(
-      'ALTER TABLE late_app_audit_log DROP INDEX app_a_audit_key_created_idx, DROP COLUMN actor_key_id'
-    )
-    await source.query(
-      `INSERT INTO ota_applications (app_name, table_prefix, schema_version, status, created_at, updated_at) VALUES ('late-app', 'late_app', 0, 'preparing', NOW(), NOW())`
-    )
-    await new ApplicationRegistryService(
-      source,
-      new ApplicationTableResolver()
-    ).prepare('late-app')
-    const runner = source.createQueryRunner()
-    try {
-      expect(await runner.hasColumn('late_app_audit_log', 'actor_key_id')).toBe(
-        true
-      )
-    } finally {
-      await runner.release()
-    }
-    const key = await keys.create(
-      {
-        name: 'late-app CI',
-        applications: ['late-app'],
-        preset: 'full',
-        expiresAt: null
-      },
-      context
-    )
-    expect((await auth.authenticate(key.accessKey)).applications).toEqual([
-      'late-app'
-    ])
   })
 })

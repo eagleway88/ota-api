@@ -22,7 +22,7 @@ import {
   createAppErrorLogTable,
   createErrorTable,
   createSuccessTable
-} from '@/utils/version'
+} from '@/infrastructure/persistence/application-schema'
 import {
   applicationErrorHash,
   applicationErrorIdentity,
@@ -32,12 +32,12 @@ import {
   sameStatusContent,
   statusReportValues,
   storedReport
-} from '@/infrastructure/persistence/legacy/telemetry-write.mapper'
+} from '@/infrastructure/persistence/telemetry-write.mapper'
 
 type ReportKind = 'success' | 'error' | 'errorLog'
 
 @Injectable()
-export class DualWriteTelemetryRepository extends TelemetryWriteRepository {
+export class SqlTelemetryRepository extends TelemetryWriteRepository {
   constructor(
     @InjectDataSource() private readonly source: DataSource,
     private readonly applications: ApplicationRegistryService
@@ -58,7 +58,7 @@ export class DualWriteTelemetryRepository extends TelemetryWriteRepository {
     return this.write(
       input.appName,
       'errorLog',
-      () => `ota_app_error_${errorHash}`,
+      () => `ota_app_error_${errorHash.slice(0, 40)}`,
       async (runner, app, table) => {
         const rows = await runner.manager
           .createQueryBuilder()
@@ -70,9 +70,7 @@ export class DualWriteTelemetryRepository extends TelemetryWriteRepository {
           .limit(2)
           .getRawMany<Record<string, unknown>>()
         if (rows.length > 1)
-          throw new ConflictException(
-            'Duplicate historical error groups require reconciliation'
-          )
+          throw new ConflictException('Duplicate error groups')
         const existing = rows[0]
         if (!existing)
           return this.insert(
@@ -97,24 +95,20 @@ export class DualWriteTelemetryRepository extends TelemetryWriteRepository {
           !Number.isSafeInteger(record.reportCount) ||
           (record.reportCount ?? 0) < 1
         )
-          throw new ConflictException(
-            'Historical error count requires reconciliation'
-          )
+          throw new ConflictException('Invalid error count')
         // One update: details, timestamps and count cannot commit independently.
         const mutable = clientReportValues(input)
         await runner.manager
           .createQueryBuilder()
           .update(table)
           .set({
-            ip: mutable.ip,
+            source_ip: mutable.source_ip,
             extras: mutable.extras,
-            username: mutable.username,
             reported_username: mutable.reported_username,
-            update_time: context.receivedAt,
             updated_at: context.receivedAt,
             report_count: () => 'report_count + 1'
           })
-          .where('id = :id AND name = :appName', {
+          .where('id = :id AND app_name = :appName', {
             id: record.id,
             appName: app.appName
           })
@@ -147,7 +141,7 @@ export class DualWriteTelemetryRepository extends TelemetryWriteRepository {
             .addSelect('CAST(report.extras AS CHAR)', 'extras_json')
             .from(table, 'report')
             .setLock('pessimistic_write')
-            .where('report.id = :recordId AND report.name = :appName', {
+            .where('report.id = :recordId AND report.app_name = :appName', {
               recordId,
               appName: app.appName
             })
@@ -170,13 +164,13 @@ export class DualWriteTelemetryRepository extends TelemetryWriteRepository {
           }
           if (input.reportId)
             throw new ConflictException(
-              'Cannot attach reportId to an existing legacy report'
+              'Cannot attach reportId to an existing report'
             )
           await runner.manager
             .createQueryBuilder()
             .update(table)
             .set(failureUpdateValues({ ...input, message: message! }, context))
-            .where('id = :recordId AND name = :appName', {
+            .where('id = :recordId AND app_name = :appName', {
               recordId,
               appName: app.appName
             })
@@ -195,10 +189,7 @@ export class DualWriteTelemetryRepository extends TelemetryWriteRepository {
             })
             .limit(2)
             .getRawMany<Record<string, unknown>>()
-          if (rows.length > 1)
-            throw new ConflictException(
-              'Duplicate historical reportId requires reconciliation'
-            )
+          if (rows.length > 1) throw new ConflictException('Duplicate reportId')
           if (rows[0]) {
             this.requireReportRelease(rows[0], input.releaseSequence)
             const record = storedReport(rows[0])
@@ -219,13 +210,9 @@ export class DualWriteTelemetryRepository extends TelemetryWriteRepository {
   }
 
   private requireReportRelease(row: Record<string, unknown>, sequence: number) {
-    if (
-      Number(row.ver_id) !== sequence ||
-      (row.release_sequence != null &&
-        Number(row.release_sequence) !== sequence)
-    )
+    if (Number(row.release_sequence) !== sequence)
       throw new ConflictException(
-        'Report belongs to another release or has conflicting historical linkage'
+        'Report belongs to another release or has invalid linkage'
       )
   }
 
@@ -241,7 +228,7 @@ export class DualWriteTelemetryRepository extends TelemetryWriteRepository {
       .select('version.id', 'id')
       .from(app.tables.version, 'version')
       .setLock('pessimistic_read')
-      .where('version.id = :sequence AND version.name = :appName', {
+      .where('version.id = :sequence AND version.app_name = :appName', {
         sequence,
         appName: app.appName
       })
@@ -343,7 +330,7 @@ export class DualWriteTelemetryRepository extends TelemetryWriteRepository {
         expected.columns.some(column => !actual.findColumnByName(column.name))
       )
         throw new ConflictException(
-          'Application telemetry schema is incomplete; run preparation/migration first'
+          'Application telemetry schema is incomplete; prepare the application first'
         )
       const result = await operation(runner, app, table)
       await runner.commitTransaction()

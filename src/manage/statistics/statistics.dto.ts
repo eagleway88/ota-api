@@ -17,7 +17,7 @@ export class TelemetryQueryDto extends AdminTimeQueryDto {
   platform?: PlatformType
 
   @ApiPropertyOptional({
-    description: 'External release sequence (legacy version id)'
+    description: 'External release sequence'
   })
   @IsOptional()
   @Matches(/^[1-9]\d{0,9}$/)

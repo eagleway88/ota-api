@@ -84,13 +84,8 @@ export async function queryAdminPage<T extends ObjectLiteral>(
 }
 
 /** Column names and aliases passed here are code constants, never query input. */
-export function storedColumn(table: Table, alias: string, ...names: string[]) {
-  const available = names.filter(name => table.findColumnByName(name))
-  if (!available.length) {
-    throw new ConflictException(
-      `Required report columns are missing: ${names.join('/')}`
-    )
-  }
-  const columns = available.map(name => `${alias}.\`${name}\``)
-  return columns.length === 1 ? columns[0] : `COALESCE(${columns.join(', ')})`
+export function storedColumn(table: Table, alias: string, name: string) {
+  if (!table.findColumnByName(name))
+    throw new ConflictException('Required report column is missing: ' + name)
+  return alias + '.`' + name + '`'
 }

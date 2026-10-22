@@ -6,19 +6,14 @@ import {
   ApplicationTableResolver
 } from '@/infrastructure/persistence/application-table-resolver'
 import {
-  calculateNextReleaseSequence,
   createAppErrorLogTable,
   createErrorTable,
   createSuccessTable,
   createVersionTable
-} from '@/utils/version'
+} from '@/infrastructure/persistence/application-schema'
 import { randomUUID } from 'crypto'
 import { GlobalAuditContext, insertGlobalAudit } from '@/audit/global-audit'
-import { ensureApiKeyAuditSchema } from '@/infrastructure/persistence/api-key-audit-schema'
-import {
-  APPLICATION_MIGRATION_LEDGER,
-  applicationPreparationLock
-} from '@/infrastructure/migrations/application-migration-contract'
+import { applicationPreparationLock } from '@/infrastructure/persistence/application-lock'
 
 export type RegisteredApplication = {
   appName: string
@@ -26,7 +21,6 @@ export type RegisteredApplication = {
   schemaVersion: number
   status: 'preparing' | 'ready' | 'failed'
   tables: ApplicationTables
-  readModel?: 'compatible' | 'formal'
 }
 
 @Injectable()
@@ -74,26 +68,28 @@ export class ApplicationRegistryService {
           .where('application.app_name = :appName', { appName })
           .getRawOne<Record<string, unknown>>()
       : undefined
-    const tablePrefix = row
-      ? String(row.table_prefix)
-      : this.tableResolver.legacyPrefix(appName)
-    const catalogRevision = row ? Number(row.catalog_revision) : 0
+    if (!row)
+      throw new ConflictException(
+        'Application is not registered; prepare it using the CLI'
+      )
+    const tablePrefix = String(row.table_prefix)
+    const catalogRevision = Number(row.catalog_revision)
     if (!Number.isSafeInteger(catalogRevision) || catalogRevision < 0) {
       throw new ConflictException('Application catalog revision is invalid')
     }
-    const readModel = row?.read_model ?? 'compatible'
-    if (readModel !== 'compatible' && readModel !== 'formal')
-      throw new ConflictException('Unknown application read model')
+    if (
+      !Number.isSafeInteger(Number(row.schema_version)) ||
+      Number(row.schema_version) < 0 ||
+      !['ready', 'preparing', 'failed'].includes(String(row.status))
+    )
+      throw new ConflictException('Invalid application schema state')
     return {
       appName,
       tablePrefix,
-      schemaVersion: row ? Number(row.schema_version) : 0,
-      status: row
-        ? (String(row.status) as RegisteredApplication['status'])
-        : 'preparing',
+      schemaVersion: Number(row.schema_version),
+      status: String(row.status) as RegisteredApplication['status'],
       tables: this.tableResolver.resolve(appName, tablePrefix),
-      catalogRevision,
-      readModel
+      catalogRevision
     }
   }
 
@@ -120,22 +116,14 @@ export class ApplicationRegistryService {
       if (!prepareLockAcquired) {
         throw new ConflictException('Application preparation is busy')
       }
-      if (await queryRunner.hasTable(APPLICATION_MIGRATION_LEDGER)) {
-        const pending = (await queryRunner.query(
-          `SELECT migration_key FROM ${APPLICATION_MIGRATION_LEDGER} WHERE app_name = ? AND status <> 'completed' LIMIT 1`,
-          [appName]
-        )) as unknown[]
-        if (pending.length)
-          throw new ConflictException(
-            'Application data migration is unfinished; resume the migration tool first'
-          )
-      }
       shouldMarkFailure = true
       if (
         !(await queryRunner.hasTable('ota_applications')) ||
-        !(await queryRunner.hasTable('ota_admin_audit_log'))
+        !(await queryRunner.hasTable('ota_audit_log'))
       )
-        await this.ensureGlobalTables(queryRunner)
+        throw new ConflictException(
+          'Initialize a fresh database with the CLI first'
+        )
       await queryRunner.startTransaction()
       try {
         const existing = await queryRunner.manager
@@ -243,10 +231,7 @@ export class ApplicationRegistryService {
           .where('app_name = :appName', { appName })
           .execute()
       }
-      if (
-        shouldMarkFailure &&
-        (await queryRunner.hasTable('ota_admin_audit_log'))
-      ) {
+      if (shouldMarkFailure && (await queryRunner.hasTable('ota_audit_log'))) {
         try {
           await insertGlobalAudit(queryRunner, {
             context: auditContext,
@@ -362,48 +347,6 @@ export class ApplicationRegistryService {
     return row?.appName
   }
 
-  private async ensureGlobalTables(queryRunner: QueryRunner) {
-    await queryRunner.query(`
-      CREATE TABLE IF NOT EXISTS ota_applications (
-        app_name VARCHAR(128) NOT NULL,
-        table_prefix VARCHAR(40) NOT NULL,
-        schema_version INT NOT NULL DEFAULT 0,
-        status VARCHAR(16) NOT NULL,
-        catalog_revision BIGINT NOT NULL DEFAULT 0,
-        created_at DATETIME NOT NULL,
-        updated_at DATETIME NOT NULL,
-        PRIMARY KEY (app_name),
-        UNIQUE KEY ota_applications_table_prefix_uq (table_prefix)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
-    `)
-    await queryRunner.query(`
-      CREATE TABLE IF NOT EXISTS ota_admin_audit_log (
-        audit_id VARCHAR(36) NOT NULL,
-        operation_id VARCHAR(36) NOT NULL,
-        part_no INT NOT NULL DEFAULT 1,
-        actor_type VARCHAR(16) NOT NULL,
-        actor_admin_id INT NULL,
-        actor_key_id VARCHAR(36) NULL,
-        actor_name_snapshot VARCHAR(191) NULL,
-        action VARCHAR(64) NOT NULL,
-        target_type VARCHAR(64) NOT NULL,
-        target_id VARCHAR(191) NULL,
-        change_summary JSON NULL,
-        result VARCHAR(16) NOT NULL,
-        error_code VARCHAR(64) NULL,
-        request_id VARCHAR(64) NOT NULL,
-        source_ip VARCHAR(64) NULL,
-        created_at DATETIME NOT NULL,
-        PRIMARY KEY (audit_id),
-        UNIQUE KEY ota_admin_audit_operation_request_part_uq (operation_id, request_id, part_no),
-        KEY ota_admin_audit_actor_created_idx (actor_admin_id, created_at),
-        KEY ota_admin_audit_key_created_idx (actor_key_id, created_at),
-        KEY ota_admin_audit_action_created_idx (action, created_at),
-        KEY ota_admin_audit_created_idx (created_at)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
-    `)
-  }
-
   private async ensureApplicationTables(
     queryRunner: QueryRunner,
     tables: ApplicationTables
@@ -494,7 +437,6 @@ export class ApplicationRegistryService {
         operation_id VARCHAR(36) NOT NULL,
         part_no INT NOT NULL DEFAULT 1,
         actor_type VARCHAR(16) NOT NULL,
-        actor_admin_id INT NULL,
         actor_key_id VARCHAR(36) NULL,
         actor_name_snapshot VARCHAR(191) NULL,
         action VARCHAR(64) NOT NULL,
@@ -514,18 +456,11 @@ export class ApplicationRegistryService {
         PRIMARY KEY (audit_id),
         UNIQUE KEY \`${prefix}_audit_operation_request_part_uq\` (operation_id, request_id, part_no),
         KEY \`${prefix}_audit_release_created_idx\` (release_id, created_at),
-        KEY \`${prefix}_audit_actor_created_idx\` (actor_admin_id, created_at),
         KEY \`${prefix}_audit_key_created_idx\` (actor_key_id, created_at),
         KEY \`${prefix}_audit_action_created_idx\` (action, created_at),
         KEY \`${prefix}_audit_task_idx\` (task_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
     `)
-    // A historical mapping may be registered only after the global migration ran.
-    await ensureApiKeyAuditSchema(
-      queryRunner,
-      tables.auditLog,
-      `${prefix}_audit_key_created_idx`
-    )
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS \`${tables.releaseDraft}\` (
         release_id VARCHAR(36) NOT NULL,
@@ -557,81 +492,41 @@ export class ApplicationRegistryService {
   }
 
   private async ensureVersionTable(
-    queryRunner: QueryRunner,
+    runner: QueryRunner,
     tables: ApplicationTables
   ) {
     const desired = createVersionTable({ tablePrefix: tables.prefix })
-    const current = await queryRunner.getTable(tables.version)
-    if (!current) {
-      await queryRunner.createTable(desired, true)
-    } else {
-      const currentColumns = new Set(current.columns.map(column => column.name))
-      const missingColumns = desired.columns.filter(column => {
-        return !currentColumns.has(column.name)
-      })
-      if (missingColumns.length) {
-        await queryRunner.addColumns(tables.version, missingColumns)
-      }
-    }
-
-    const invalidPrivateIdentity = (await queryRunner.query(
-      `SELECT id FROM \`${tables.version}\`
-       WHERE release_scope = 'allowlist' AND (release_id IS NULL OR release_id = '') LIMIT 1`
-    )) as unknown[]
-    if (invalidPrivateIdentity.length)
-      throw new ConflictException(
-        'Private release is missing its stable identity; reconcile before preparation'
+    const existing = await runner.getTable(desired.name)
+    if (existing) {
+      this.assertSchema(
+        existing.columns.map(c => c.name),
+        desired.columns.map(c => c.name)
       )
-    await queryRunner.query(
-      `UPDATE \`${tables.version}\`
-       SET release_id = UUID()
-       WHERE release_id IS NULL OR release_id = ''`
-    )
-    await queryRunner.query(
-      `UPDATE \`${tables.version}\`
-       SET release_scope = 'public'
-       WHERE release_scope IS NULL OR release_scope = ''`
-    )
-    await queryRunner.query(
-      `UPDATE \`${tables.version}\`
-       SET policy_revision = 1
-       WHERE policy_revision IS NULL OR policy_revision < 1`
-    )
-    const tableStatus = (await queryRunner.query(
-      `SELECT AUTO_INCREMENT AS autoIncrement
-       FROM information_schema.TABLES
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
-      [tables.version]
-    )) as Array<{ autoIncrement?: number | string | null }>
-    const maximumRows = (await queryRunner.query(
-      `SELECT MAX(id) AS maximumId FROM \`${tables.version}\``
-    )) as Array<{ maximumId?: number | string | null }>
-    const nextSequence = calculateNextReleaseSequence(
-      Number(tableStatus[0]?.autoIncrement),
-      Number(maximumRows[0]?.maximumId)
-    )
-    await queryRunner.query(
-      `ALTER TABLE \`${tables.version}\` AUTO_INCREMENT = ${nextSequence}`
-    )
-  }
-
-  private async ensureReportingTable(
-    queryRunner: QueryRunner,
-    desired: ReturnType<typeof createSuccessTable>
-  ) {
-    const current = await queryRunner.getTable(desired.name)
-    if (!current) {
-      await queryRunner.createTable(desired, true)
       return
     }
-
-    const currentColumns = new Set(current.columns.map(column => column.name))
-    const missingColumns = desired.columns.filter(
-      column => !currentColumns.has(column.name)
+    await runner.createTable(desired)
+    await runner.query(
+      'ALTER TABLE ' +
+        runner.connection.driver.escape(tables.version) +
+        ' AUTO_INCREMENT = 2000'
     )
-    if (missingColumns.length) {
-      await queryRunner.addColumns(desired.name, missingColumns)
-    }
-    // Historical backfill belongs to the resumable migration tool, not preparation.
+  }
+  private assertSchema(actual: string[], expected: string[]) {
+    if (expected.some(n => !actual.includes(n)))
+      throw new ConflictException(
+        'Unsupported database schema; use a fresh database'
+      )
+  }
+  private async ensureReportingTable(
+    runner: QueryRunner,
+    desired: ReturnType<typeof createSuccessTable>
+  ) {
+    const existing = await runner.getTable(desired.name)
+    if (existing)
+      this.assertSchema(
+        existing.columns.map(c => c.name),
+        desired.columns.map(c => c.name)
+      )
+    else await runner.createTable(desired)
   }
 }

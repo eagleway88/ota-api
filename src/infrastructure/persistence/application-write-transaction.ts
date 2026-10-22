@@ -35,12 +35,11 @@ export async function withApplicationWrite<T>(
       lockName
     ])) as Array<{ acquired: number | string }>
     locked = Number(lock[0]?.acquired) === 1
-    if (!locked)
-      throw new ConflictException('Application write or migration is busy')
+    if (!locked) throw new ConflictException('Application write is busy')
     state.outcome = 'unknown'
     await runner.startTransaction()
     state.outcome = 'writing'
-    // prepare() can have returned before another process paused the application.
+    // prepare() can have returned before another process changed the application status.
     const records = (await runner.query(
       'SELECT table_prefix, status, schema_version FROM ota_applications WHERE app_name = ? FOR UPDATE',
       [application.appName]
@@ -57,7 +56,7 @@ export async function withApplicationWrite<T>(
       current.table_prefix !== application.tablePrefix
     )
       throw new ConflictException(
-        'Application is not ready or its mapping changed; prepare/resume migration first'
+        'Application is not ready or its mapping changed; prepare the application first'
       )
     result = await write(runner)
     commitAttempted = true

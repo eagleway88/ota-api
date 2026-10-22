@@ -1,22 +1,22 @@
-import { normalizeLegacyReleaseAudience } from './fixtures/legacy-release-audience.mapper'
+import { normalizeReleaseAudience } from '@/releases/release-audience'
 
-describe('normalizeLegacyReleaseAudience', () => {
-  it('keeps omitted legacy fields as a public release', () => {
+describe('normalizeReleaseAudience', () => {
+  it('keeps omitted optional fields as a public release', () => {
     expect(
-      normalizeLegacyReleaseAudience({
+      normalizeReleaseAudience({
         appName: 'app',
-        platforms: 'windows'
+        platforms: ['windows']
       })
     ).toEqual({ releaseScope: 'public', userIds: [] })
   })
 
-  it('parses multipart JSON and deduplicates exact userIds', () => {
+  it('accepts arrays and deduplicates exact userIds', () => {
     expect(
-      normalizeLegacyReleaseAudience({
+      normalizeReleaseAudience({
         appName: 'app',
-        platforms: 'windows, ios',
+        platforms: ['windows', 'ios'],
         releaseScope: 'allowlist',
-        userIds: '["app:windows:1","app:windows:1","app:ios:2"]'
+        userIds: ['app:windows:1', 'app:windows:1', 'app:ios:2']
       })
     ).toEqual({
       releaseScope: 'allowlist',
@@ -26,9 +26,9 @@ describe('normalizeLegacyReleaseAudience', () => {
 
   it('keeps an empty allowlist private', () => {
     expect(
-      normalizeLegacyReleaseAudience({
+      normalizeReleaseAudience({
         appName: 'app',
-        platforms: 'windows',
+        platforms: ['windows'],
         releaseScope: 'allowlist',
         userIds: []
       })
@@ -37,16 +37,16 @@ describe('normalizeLegacyReleaseAudience', () => {
 
   it('rejects public lists and cross-platform identifiers', () => {
     expect(() =>
-      normalizeLegacyReleaseAudience({
+      normalizeReleaseAudience({
         appName: 'app',
-        platforms: 'windows',
+        platforms: ['windows'],
         userIds: ['app:windows:1']
       })
     ).toThrow('public releases cannot contain userIds')
     expect(() =>
-      normalizeLegacyReleaseAudience({
+      normalizeReleaseAudience({
         appName: 'app',
-        platforms: 'windows',
+        platforms: ['windows'],
         releaseScope: 'allowlist',
         userIds: ['app:ios:1']
       })

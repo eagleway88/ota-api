@@ -8,6 +8,7 @@ import { keyIdPattern } from '@/auth/api-key.service'
 
 export type OtaCommand = {
   command:
+    | 'db:init'
     | 'key:create'
     | 'key:list'
     | 'key:inspect'
@@ -27,6 +28,7 @@ export type OtaCommand = {
 export function parseOtaArguments(args: string[]): OtaCommand {
   const command = `${args[0]}:${args[1]}` as OtaCommand['command']
   const allowed: Record<OtaCommand['command'], string[]> = {
+    'db:init': [],
     'key:create': [
       'apps',
       'name',
@@ -65,7 +67,7 @@ export function parseOtaArguments(args: string[]): OtaCommand {
     return v
   }
   const database = get('database')
-  if (['key:create', 'key:revoke', 'app:prepare'].includes(command))
+  if (['db:init', 'key:create', 'key:revoke', 'app:prepare'].includes(command))
     required('database')
   const result: OtaCommand = {
     command,
@@ -114,6 +116,7 @@ export function parseOtaArguments(args: string[]): OtaCommand {
   return result
 }
 export const otaHelp = `Usage: yarn ota <command> [options]
+db init --database CONFIRMED_EMPTY_DATABASE
 key create --apps app-a,app-b --name LABEL --preset publisher|observer|messenger|full [--prepare-apps]
            (--no-expiry | --expires-at UTC_ISO_DATE) --database CONFIRMED_DATABASE
 key list [--app APP]
@@ -124,4 +127,4 @@ audit list
 All commands accept --env-file PATH (default .env). Mutations require a matching --database.
 Only key create displays accessKey, once. Never place it in arguments or logs.
 full covers explicitly granted applications, not wildcard access or platform administration.
-Run global migrations first. No HTTP, OSS or background workers are started.`
+Initialize a fresh database first. No HTTP, OSS or background workers are started.`

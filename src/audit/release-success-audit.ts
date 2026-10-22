@@ -38,10 +38,7 @@ export async function insertReleaseSuccessAudit(
         audit_id: randomUUID(),
         operation_id: input.operationId,
         part_no: index + 1,
-        actor_type:
-          input.context.actorType ??
-          (input.context.actorAdminId === undefined ? 'system' : 'admin'),
-        actor_admin_id: input.context.actorAdminId,
+        actor_type: input.context.actorType ?? 'system',
         ...(input.context.actorKeyId
           ? { actor_key_id: input.context.actorKeyId }
           : {}),

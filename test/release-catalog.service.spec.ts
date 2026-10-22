@@ -1,3 +1,4 @@
+import { releaseRow } from './fixtures/release'
 import { DataSource } from 'typeorm'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
@@ -13,21 +14,15 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-const release = {
-  id: 2000,
-  name: 'app',
+const release = releaseRow({
   release_id: 'release-a',
   release_scope: 'allowlist',
-  platform: 'windows',
-  ver: 110,
-  enable: 1,
   policy_revision: 999
-}
+})
 
 function reader(
   revision: number,
-  pending?: ReturnType<typeof deferred<Record<string, unknown>[]>>,
-  readModel = 'compatible'
+  pending?: ReturnType<typeof deferred<Record<string, unknown>[]>>
 ) {
   const started = deferred<void>()
   const queries: string[] = []
@@ -62,7 +57,6 @@ function reader(
               table_prefix: 'app_123a',
               schema_version: 1,
               status: 'ready',
-              read_model: readModel,
               catalog_revision: revision
             })
           },
@@ -100,30 +94,13 @@ function serviceFor(...readers: ReturnType<typeof reader>[]) {
 }
 
 describe('ReleaseCatalogService snapshots', () => {
-  it('fails closed after formal cutover instead of silently using unmigrated legacy values', async () => {
-    const read = reader(42, undefined, 'formal')
-    const { service } = serviceFor(read)
-    await expect(service.loadCatalog('app')).rejects.toThrow(
-      'Formal release field is missing'
-    )
-    expect(read.runner.rollbackTransaction).toHaveBeenCalledTimes(1)
-  })
-
-  it('rejects an unknown read model before loading version records', async () => {
-    const read = reader(42, undefined, 'unknown')
-    const { service } = serviceFor(read)
-    await expect(service.loadCatalog('app')).rejects.toThrow(
-      'Unknown application read model'
-    )
-    expect(read.queries).toEqual(['ota_applications'])
-  })
   it('reads mapping, application revision, versions and audience in one repeatable-read transaction', async () => {
     const read = reader(42)
     const { service, createQueryRunner } = serviceFor(read)
     const catalog = await service.loadCatalog('app')
     expect(catalog.available.revision).toBe(42)
     expect(catalog.audience.revision).toBe(42)
-    expect(catalog.available.releases[0].legacyPayload.policyRevision).toBe(999)
+    expect(catalog.available.releases[0].policyRevision).toBe(999)
     expect(catalog.audience.userIdsByReleaseId.get('release-a')).toEqual(
       new Set(['app:windows:1'])
     )
@@ -208,16 +185,16 @@ describe('ReleaseCatalogService snapshots', () => {
     expect((await service.loadCatalog('app')).available.revision).toBe(11)
   })
 
-  it('keeps the registered revision even for an empty version table', async () => {
+  it('rejects missing release tables instead of serving a compatibility fallback', async () => {
     const read = reader(42)
     read.runner.hasTable.mockImplementation((name: string) =>
       Promise.resolve(!name.endsWith('_version'))
     )
     const { service } = serviceFor(read)
-    const result = await service.loadCatalog('app')
-    expect(result.available).toEqual({ revision: 42, releases: [] })
-    expect(result.audience.revision).toBe(42)
-    expect(read.runner.commitTransaction).toHaveBeenCalledTimes(1)
+    await expect(service.loadCatalog('app')).rejects.toThrow(
+      'schema is incomplete'
+    )
+    expect(read.runner.rollbackTransaction).toHaveBeenCalledTimes(1)
   })
 
   it('fails closed when the registered revision is invalid', async () => {

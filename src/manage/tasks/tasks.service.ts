@@ -73,10 +73,13 @@ export class TaskQueryService {
         .createQueryBuilder()
         .select('version.release_id', 'releaseId')
         .from(app.tables.version, 'version')
-        .where('version.name = :appName AND version.release_id = :releaseId', {
-          appName,
-          releaseId
-        })
+        .where(
+          'version.app_name = :appName AND version.release_id = :releaseId',
+          {
+            appName,
+            releaseId
+          }
+        )
         .getRawOne<{ releaseId: string }>()
       if (!release)
         throw new NotFoundException(
@@ -176,7 +179,7 @@ export class TaskQueryService {
   private history() {
     return {
       historyNotice:
-        'Records are retained indefinitely by this service. Older records may be unavailable if never collected or removed before this policy.'
+        'Records are retained indefinitely by this service. Query time windows and pagination limit each response, not retention.'
     }
   }
 }

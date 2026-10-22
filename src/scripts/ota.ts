@@ -1,3 +1,9 @@
+import { createHash } from 'crypto'
+import {
+  assertInitializableDatabase,
+  assertInstalledDatabase
+} from '@/infrastructure/persistence/installation-guard'
+import { InitialSchema1792713600000 } from '@/migrations/1792713600000-InitialSchema'
 import 'reflect-metadata'
 import * as dotenv from 'dotenv'
 import { randomUUID } from 'crypto'
@@ -35,16 +41,55 @@ async function main() {
     database,
     logging: false,
     synchronize: false,
-    dateStrings: true
+    dateStrings: true,
+    migrations: [InitialSchema1792713600000],
+    migrationsTableName: 'ota_schema_history'
   })
   try {
     await source.initialize()
-    // Never start application DDL before the key infrastructure migration is present.
+    if (options.command === 'db:init') {
+      const runner = source.createQueryRunner()
+      await runner.connect()
+      let acquired = false
+      const lock =
+        'ota_init_' +
+        createHash('sha256').update(database).digest('hex').slice(0, 40)
+      try {
+        const rows = (await runner.query('SELECT GET_LOCK(?, 30) AS acquired', [
+          lock
+        ])) as Array<{ acquired: number | string }>
+        acquired = Number(rows[0]?.acquired) === 1
+        if (!acquired) throw new Error('Database initialization is busy')
+        await assertInitializableDatabase(runner, true)
+        const migrations = await source.runMigrations({ transaction: 'each' })
+        process.stdout.write(
+          JSON.stringify({
+            database,
+            migrations: migrations.map(m => m.name)
+          }) + '\n'
+        )
+      } finally {
+        try {
+          if (acquired) await runner.query('SELECT RELEASE_LOCK(?)', [lock])
+        } finally {
+          await runner.release()
+        }
+      }
+      return
+    }
+    const installation = source.createQueryRunner()
+    try {
+      await installation.connect()
+      await assertInstalledDatabase(installation)
+    } finally {
+      await installation.release()
+    }
+    // Never start application DDL before initialization is complete.
     await source.query('SELECT key_id FROM ota_api_keys LIMIT 0')
     await source.query(
       'SELECT key_id, app_name FROM ota_api_key_applications LIMIT 0'
     )
-    await source.query('SELECT actor_key_id FROM ota_admin_audit_log LIMIT 0')
+    await source.query('SELECT actor_key_id FROM ota_audit_log LIMIT 0')
     const keys = new ApiKeyManagementService(source)
     const context = {
       requestId: 'cli:' + randomUUID(),

@@ -14,10 +14,6 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,test}/**/*.ts\"",
-    "typeorm:gen": "node -r ts-node/register -r tsconfig-paths/register node_modules/typeorm/cli.js migration:generate ./src/migrations/migration -d ./src/config/typeorm.ts",
-    "typeorm:run": "node -r ts-node/register -r tsconfig-paths/register node_modules/typeorm/cli.js migration:run -d ./src/config/typeorm.ts",
-    "audit:db": "ts-node -r tsconfig-paths/register src/scripts/audit-database.ts",
-    "migrate:app": "ts-node -r tsconfig-paths/register src/scripts/migrate-application.ts",
     "ota": "ts-node -r tsconfig-paths/register src/scripts/ota.ts",
     "pm2": "yarn build && pm2 startOrReload ecosystem.config.js --update-env",
     "typecheck": "tsc --noEmit --incremental false",
@@ -25,7 +21,8 @@
     "test:unit": "jest --runInBand --watchman=false --testPathIgnorePatterns=\"[.](mysql|http)[.]spec[.]ts$\"",
     "test:http": "jest --runInBand --watchman=false --testPathPatterns=\"[.]http[.]spec[.]ts$\"",
     "test:mysql": "node test/run-mysql.cjs",
-    "test:verify": "yarn typecheck && yarn lint && yarn build && yarn test --runInBand --watchman=false"
+    "test:verify": "yarn typecheck && yarn lint && yarn build && yarn test --runInBand --watchman=false",
+    "db:init": "ts-node -r tsconfig-paths/register src/scripts/ota.ts db init"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

@@ -156,16 +156,16 @@ describe('bounded complete audience audit', () => {
     ).toEqual([id])
   })
 
-  it.each(['array', 'legacy-json'] as const)(
+  it.each(['array'] as const)(
     'applies the request cap before deduplication to %s inputs',
-    mode => {
+    () => {
       const list = Array<string>(5001).fill('app:windows:1')
       expect(() =>
         normalizeReleaseAudience({
           appName: 'app',
-          platforms: 'windows',
+          platforms: ['windows'],
           releaseScope: 'allowlist',
-          userIds: mode === 'array' ? list : JSON.stringify(list)
+          userIds: list
         })
       ).toThrow('5000')
     }
@@ -202,7 +202,10 @@ describe('bounded complete audience audit', () => {
     } as RegisteredApplication
     await expect(
       insertReleaseSuccessAudit(runner, application, {
-        context: { requestId: 'request', actorAdminId: 1 },
+        context: {
+          requestId: 'request',
+          actorKeyId: '10000000-0000-4000-8000-000000000001'
+        },
         operationId: 'operation',
         releaseId: 'release',
         taskId: 'task',

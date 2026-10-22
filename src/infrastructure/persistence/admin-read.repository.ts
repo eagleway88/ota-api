@@ -43,7 +43,7 @@ export class AdminReadRepository {
     const table = await runner.getTable(tableName)
     if (!table) {
       throw new ConflictException(
-        'Administration schema is not ready; complete the application/global migration first'
+        'Administration schema is not ready; initialize the database and prepare the application with the CLI'
       )
     }
     return table

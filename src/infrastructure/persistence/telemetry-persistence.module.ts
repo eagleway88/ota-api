@@ -1,15 +1,15 @@
 import { Module } from '@nestjs/common'
 import { ApplicationsModule } from '@/applications/applications.module'
 import { TelemetryWriteRepository } from '@/telemetry/ports/telemetry-write.repository'
-import { DualWriteTelemetryRepository } from '@/infrastructure/persistence/legacy/dual-write-telemetry.repository'
+import { SqlTelemetryRepository } from '@/infrastructure/persistence/sql-telemetry.repository'
 
 @Module({
   imports: [ApplicationsModule],
   providers: [
-    DualWriteTelemetryRepository,
+    SqlTelemetryRepository,
     {
       provide: TelemetryWriteRepository,
-      useExisting: DualWriteTelemetryRepository
+      useExisting: SqlTelemetryRepository
     }
   ],
   exports: [TelemetryWriteRepository]

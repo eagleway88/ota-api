@@ -4,9 +4,8 @@ import { QueryRunner } from 'typeorm'
 export type GlobalAuditContext = {
   requestId: string
   sourceIp?: string
-  actorAdminId?: number
   actorKeyId?: string
-  actorType?: 'admin' | 'system' | 'api_key' | 'operator'
+  actorType?: 'system' | 'api_key' | 'operator'
   actorName?: string
 }
 
@@ -35,11 +34,7 @@ export async function insertAudit(
       audit_id: randomUUID(),
       operation_id: input.operationId ?? randomUUID(),
       part_no: 1,
-      actor_type:
-        input.actorType ??
-        input.context.actorType ??
-        (input.context.actorAdminId !== undefined ? 'admin' : 'system'),
-      actor_admin_id: input.context.actorAdminId,
+      actor_type: input.actorType ?? input.context.actorType ?? 'system',
       ...(input.context.actorKeyId
         ? { actor_key_id: input.context.actorKeyId }
         : {}),
@@ -63,5 +58,5 @@ export function insertGlobalAudit(
   runner: QueryRunner,
   input: GlobalAuditInput
 ) {
-  return insertAudit(runner, input, 'ota_admin_audit_log')
+  return insertAudit(runner, input, 'ota_audit_log')
 }

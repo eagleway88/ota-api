@@ -20,8 +20,7 @@ describe('resolveUpdate load baseline', () => {
       scope: 'public',
       enabled: true,
       mandatory: false,
-      showUpdateDialog: true,
-      legacyPayload: {}
+      showUpdateDialog: true
     }))
     const available = { revision: 1, releases }
     const audience = { revision: 1, userIdsByReleaseId: new Map() }

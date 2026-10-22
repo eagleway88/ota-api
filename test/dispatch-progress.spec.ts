@@ -6,8 +6,7 @@ describe('DispatchMetrics', () => {
     for (let index = 0; index < 102; index++) {
       const release = {
         releaseId: `release-${index}`,
-        releaseSequence: 2000 + index,
-        legacyPayload: { secret: 'private' }
+        releaseSequence: 2000 + index
       }
       metrics.scan()
       metrics.count('eligible', release)

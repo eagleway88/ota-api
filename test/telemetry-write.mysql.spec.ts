@@ -1,3 +1,4 @@
+import { InitialSchema1792713600000 } from '@/migrations/1792713600000-InitialSchema'
 import 'reflect-metadata'
 import { randomUUID } from 'crypto'
 import { DataSource } from 'typeorm'
@@ -11,15 +12,13 @@ import {
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
 import { AdminReadRepository } from '@/infrastructure/persistence/admin-read.repository'
 import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
-import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
-import { DualWriteTelemetryRepository } from '@/infrastructure/persistence/legacy/dual-write-telemetry.repository'
-import { LegacyUpdateCheckController } from '@/compat/legacy/update-check.controller'
-import { LegacyUpdateCheckService } from '@/compat/legacy/update-check.service'
+import { SqlReleaseRepository } from '@/infrastructure/persistence/sql-release.repository'
+import { SqlTelemetryRepository } from '@/infrastructure/persistence/sql-telemetry.repository'
+import { UpdateCheckController } from '@/app/updates/update-check.controller'
+import { UpdateCheckService } from '@/app/updates/update-check.service'
 import { UpdateQueryService } from '@/updates/update-query.service'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
 import { TelemetryWriteController } from '@/app/telemetry/telemetry.controller'
-import { RefactoringFoundation1792444800000 } from '@/migrations/1792444800000-RefactoringFoundation'
-import { ApplicationDataMigration1792445100000 } from '@/migrations/1792445100000-ApplicationDataMigration'
 import { configureHttp } from '@/config/http'
 import { TelemetryWriteService } from '@/telemetry/telemetry-write.service'
 import { TelemetryQueryService } from '@/manage/statistics/statistics.service'
@@ -62,7 +61,7 @@ mysql('telemetry writes on isolated MySQL', () => {
     query(`SELECT * FROM \`${app.tables[kind]}\` ORDER BY id`)
   const publish = (application = app) =>
     withApplicationWrite(source, application, runner =>
-      new DualWriteReleaseRepository().insert(runner, application, {
+      new SqlReleaseRepository().insert(runner, application, {
         appName: application.appName,
         releaseId: randomUUID(),
         targetVersionCode: 110,
@@ -96,8 +95,7 @@ mysql('telemetry writes on isolated MySQL', () => {
     await source.initialize()
     const runner = source.createQueryRunner()
     try {
-      await new RefactoringFoundation1792444800000().up(runner)
-      await new ApplicationDataMigration1792445100000().up(runner)
+      await new InitialSchema1792713600000().up(runner)
     } finally {
       await runner.release()
     }
@@ -112,7 +110,7 @@ mysql('telemetry writes on isolated MySQL', () => {
     app = await applications.prepare(appName)
     await publish()
     writes = new TelemetryWriteService(
-      new DualWriteTelemetryRepository(source, applications)
+      new SqlTelemetryRepository(source, applications)
     )
   })
   afterEach(async () => {
@@ -124,11 +122,11 @@ mysql('telemetry writes on isolated MySQL', () => {
     if (control?.isInitialized) await control.destroy()
   })
 
-  it('keeps the old check contract while serving formal v2 reports and rejecting retired version routes', async () => {
+  it('serves canonical update checks and reports while rejecting all retired routes', async () => {
     const module = await Test.createTestingModule({
-      controllers: [LegacyUpdateCheckController, TelemetryWriteController],
+      controllers: [UpdateCheckController, TelemetryWriteController],
       providers: [
-        LegacyUpdateCheckService,
+        UpdateCheckService,
         {
           provide: UpdateQueryService,
           useValue: new UpdateQueryService(
@@ -144,35 +142,50 @@ mysql('telemetry writes on isolated MySQL', () => {
     configureHttp(http)
     await http.listen(0, '127.0.0.1')
     try {
-      for (const ver of [100, '1.0.0']) {
-        const check = await request(http.getHttpServer())
-          .post('/api/version/check')
-          .send({ name: appName, platform: 'windows', ver, id: 0 })
-          .expect(201)
-        expect(check.body).toMatchObject({
-          code: 0,
-          data: {
-            id: 2000,
-            ver: 110,
-            name: appName,
-            enable: 1,
-            type: 1,
-            downloadUrl: 'https://example.test/installer.exe',
-            installUrl: 'https://example.test/installer.exe',
-            mandatory: 0,
-            isMandatory: 0,
-            showDialog: 1
-          }
-        })
-        expect((check.body as { data: unknown }).data).not.toHaveProperty(
-          'releaseSequence'
-        )
-      }
+      const checkPath = '/api/v1/app/apps/' + appName + '/updates/check'
+      const check = await request(http.getHttpServer())
+        .post(checkPath)
+        .send({ platform: 'windows', nativeVersionCode: 100 })
+        .expect(201)
+      expect(check.body).toMatchObject({
+        code: 0,
+        data: {
+          releaseSequence: 2000,
+          appName,
+          targetVersionCode: 110,
+          enabled: true,
+          mandatory: false,
+          installerSourceUrl: 'https://example.test/installer.exe'
+        }
+      })
+      for (const key of ['id', 'name', 'ver', 'enable', 'type', 'downloadUrl'])
+        expect((check.body as { data: unknown }).data).not.toHaveProperty(key)
+      for (const bad of [
+        { platform: 'windows', ver: 100 },
+        { platform: 'windows', nativeVersionCode: '100' },
+        {
+          platform: 'windows',
+          nativeVersionCode: 100,
+          userId: 'other:windows:1'
+        }
+      ])
+        await request(http.getHttpServer())
+          .post(checkPath)
+          .send(bad)
+          .expect(400)
       const noUpdate = await request(http.getHttpServer())
-        .post('/api/version/check')
-        .send({ name: appName, platform: 'windows', ver: 110, id: 2000 })
+        .post(checkPath)
+        .send({
+          platform: 'windows',
+          nativeVersionCode: 110,
+          installedReleaseSequence: 2000
+        })
         .expect(201)
       expect(noUpdate.body).toEqual({ code: 0, data: null })
+      await request(http.getHttpServer())
+        .post('/api/version/check')
+        .send({ name: appName, platform: 'windows', ver: 100 })
+        .expect(404)
       for (const path of [
         'create',
         'upload',
@@ -281,7 +294,7 @@ mysql('telemetry writes on isolated MySQL', () => {
       })
       expect(summary.data).toMatchObject({ successCount: 1, errorCount: 1 })
       expect((await rows('success'))[0]).toMatchObject({
-        name: appName,
+        app_name: appName,
         release_sequence: 2000,
         extras: report().extras
       })
@@ -334,10 +347,10 @@ mysql('telemetry writes on isolated MySQL', () => {
     }
   )
 
-  it('updates legacy failure details in place, preserves history, and refuses release reassignment', async () => {
+  it('updates unkeyed failure details without changing creation time or release association', async () => {
     await publish()
     await query(
-      `INSERT INTO \`${app.tables.error}\` (id, name, platform, ver, ver_id, message, username, create_time) VALUES (41, ?, 'windows', 110, 2000, 'old', 'old-user', '2020-01-01 00:00:00')`,
+      `INSERT INTO \`${app.tables.error}\` (id, app_name, platform, version_code, release_sequence, message, reported_username, created_at, updated_at) VALUES (41, ?, 'windows', 110, 2000, 'old', 'old-user', '2020-01-01 00:00:00', '2020-01-01 00:00:00')`,
       [appName]
     )
     const updated = await writes.failure({
@@ -349,16 +362,13 @@ mysql('telemetry writes on isolated MySQL', () => {
       id: 41,
       releaseSequence: 2000,
       message: 'new details',
-      createdAt: '2020-01-01 00:00:00'
+      createdAt: '2020-01-01 00:00:00.000'
     })
     const [stored] = await rows('error')
     expect(stored).toMatchObject({
-      ver_id: 2000,
       release_sequence: 2000,
-      username: 'reporter',
       reported_username: 'reporter'
     })
-    expect(stored.update_time).toBe(stored.updated_at)
     await expect(
       writes.failure({
         ...report({ releaseSequence: 2001 }),
@@ -406,7 +416,7 @@ mysql('telemetry writes on isolated MySQL', () => {
     expect(a.id).toBe(b.id)
     expect(a.appName).not.toBe(b.appName)
     await query(
-      `UPDATE \`${app.tables.version}\` SET name = 'other-app' WHERE id = 2000`
+      `UPDATE \`${app.tables.version}\` SET app_name = 'other-app' WHERE id = 2000`
     )
     await expect(writes.success(report())).rejects.toThrow(
       'Version does not exist'
@@ -427,7 +437,7 @@ mysql('telemetry writes on isolated MySQL', () => {
       )
     )
     expect(new Set(emitted.map(row => row.id)).size).toBe(1)
-    expect((await rows('errorLog'))[0].report_count).toBe(12)
+    expect(Number((await rows('errorLog'))[0].report_count)).toBe(12)
     const next = await writes.applicationError({
       ...input,
       message: 'error\nline',
@@ -453,10 +463,9 @@ mysql('telemetry writes on isolated MySQL', () => {
   it('does not merge different tuples sharing the old delimiter-based fingerprint', async () => {
     const input = { ...report(), kind: 'crash', message: 'a|b', stack: 'c' }
     await writes.applicationError(input)
-    await expect(
-      writes.applicationError({ ...input, message: 'a', stack: 'b|c' })
-    ).rejects.toThrow('fingerprint conflicts')
-    expect((await rows('errorLog'))[0].report_count).toBe(1)
+    await writes.applicationError({ ...input, message: 'a', stack: 'b|c' })
+    expect(await rows('errorLog')).toHaveLength(2)
+    expect(Number((await rows('errorLog'))[0].report_count)).toBe(1)
   })
 
   it('does not ignore insert failures and releases the retry lock after rollback', async () => {
@@ -490,7 +499,7 @@ mysql('telemetry writes on isolated MySQL', () => {
     expect(await rows('success')).toHaveLength(0)
     await expect(
       writes.success(report({ appName: 'unknown' }))
-    ).rejects.toThrow('schema is not ready')
+    ).rejects.toThrow('not registered')
     expect(await query("SHOW TABLES LIKE 'unknown_success'")).toHaveLength(0)
   })
 

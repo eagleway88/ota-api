@@ -4,7 +4,7 @@ import { ApplicationTableResolver } from '@/infrastructure/persistence/applicati
 describe('ApplicationTableResolver', () => {
   const resolver = new ApplicationTableResolver()
 
-  it('preserves confirmed legacy table names', () => {
+  it('normalizes application names without discarding digits', () => {
     expect(resolver.resolve('eagleway-network').version).toBe(
       'eagleway_network_version'
     )

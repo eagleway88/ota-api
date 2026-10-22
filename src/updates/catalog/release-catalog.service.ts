@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { ConflictException, Injectable } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
@@ -7,7 +7,6 @@ import {
   AvailableReleaseSnapshot
 } from '@/contracts/releases'
 import { mapStoredReleaseRecord } from '@/releases/release-record.mapper'
-import { mapFormalReleaseRecord } from '@/releases/formal-release.mapper'
 
 export type ReleaseCatalog = {
   available: AvailableReleaseSnapshot
@@ -77,26 +76,26 @@ export class ReleaseCatalogService {
         appName,
         queryRunner
       )
+      if (application.status !== 'ready' || application.schemaVersion < 1)
+        throw new ConflictException(
+          'Application is not ready; prepare it using the CLI'
+        )
       const { version, releaseUser } = application.tables
       const revision = application.catalogRevision
-      const hasTable = await queryRunner.hasTable(version)
-      if (!hasTable) {
-        await queryRunner.commitTransaction()
-        return this.emptyCatalog(revision)
-      }
+      if (
+        !(await queryRunner.hasTable(version)) ||
+        !(await queryRunner.hasTable(releaseUser))
+      )
+        throw new ConflictException('Application release schema is incomplete')
 
       const records = await queryRunner.manager
         .createQueryBuilder()
         .select('*')
         .from(version, 'version')
-        .where('version.name = :name', { name: appName })
+        .where('version.app_name = :name', { name: appName })
         .getRawMany<Record<string, unknown>>()
 
-      const releases = records.map(
-        application.readModel === 'formal'
-          ? mapFormalReleaseRecord
-          : mapStoredReleaseRecord
-      )
+      const releases = records.map(mapStoredReleaseRecord)
       const userIdsByReleaseId = new Map<string, Set<string>>()
       if (await queryRunner.hasTable(releaseUser)) {
         const audienceRecords = await queryRunner.manager
@@ -123,13 +122,6 @@ export class ReleaseCatalogService {
       throw error
     } finally {
       await queryRunner.release()
-    }
-  }
-
-  private emptyCatalog(revision: number): ReleaseCatalog {
-    return {
-      available: { revision, releases: [] },
-      audience: { revision, userIdsByReleaseId: new Map() }
     }
   }
 }

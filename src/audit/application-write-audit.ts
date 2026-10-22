@@ -29,7 +29,7 @@ export type ApplicationWriteAudit = {
     redispatch?: boolean
     releaseScope?: ReleaseScope
     userCount?: number
-    source?: 'legacy-http' | 'v2'
+    source?: 'v1'
   }
 }
 
@@ -51,7 +51,7 @@ function safeSummary(summary: ApplicationWriteAudit['changeSummary']) {
     summary.userCount >= 0
       ? { userCount: summary.userCount }
       : {}),
-    ...(['legacy-http', 'v2'].includes(summary?.source ?? '')
+    ...(['v1'].includes(summary?.source ?? '')
       ? { source: summary?.source }
       : {})
   }
@@ -111,10 +111,7 @@ export async function withAuditedApplicationWrite<T>(
             audit_id: randomUUID(),
             operation_id: audit.operationId,
             part_no: 1,
-            actor_type:
-              audit.context.actorType ??
-              (audit.context.actorAdminId === undefined ? 'system' : 'admin'),
-            actor_admin_id: audit.context.actorAdminId,
+            actor_type: audit.context.actorType ?? 'system',
             ...(audit.context.actorKeyId
               ? { actor_key_id: audit.context.actorKeyId }
               : {}),

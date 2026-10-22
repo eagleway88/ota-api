@@ -1,100 +1,85 @@
-import { Release, ReleaseScope, ReleaseUpdateType } from '@/contracts/releases'
-import { underlineToHump } from '@/utils'
-import { normalizeVersionValue } from '@/utils/version'
-
-function csv(value: unknown) {
-  if (Array.isArray(value)) {
-    return (value as unknown[])
-      .filter(
-        (item): item is string | number =>
-          typeof item === 'string' || typeof item === 'number'
-      )
-      .map(item => String(item).trim())
-      .filter(Boolean)
-  }
-  if (typeof value !== 'string') return []
-  if (value.trim().startsWith('[')) {
-    try {
-      const parsed: unknown = JSON.parse(value)
-      if (Array.isArray(parsed)) return csv(parsed)
-    } catch {
-      return []
-    }
-  }
-  return Array.from(
-    new Set(
-      value
-        .split(',')
-        .map(item => item.trim())
-        .filter(Boolean)
-    )
+import { Release } from '@/contracts/releases'
+function list(row: Record<string, unknown>, key: string): unknown[] {
+  const value: unknown =
+    typeof row[key] === 'string' ? JSON.parse(row[key]) : row[key]
+  if (!Array.isArray(value)) throw new Error('Invalid release list: ' + key)
+  return value
+}
+export function mapStoredReleaseRecord(row: Record<string, unknown>): Release {
+  const sequence = Number(row.id),
+    revision = Number(row.policy_revision),
+    target = Number(row.target_version_code)
+  if (
+    !Number.isSafeInteger(sequence) ||
+    sequence < 1 ||
+    !Number.isSafeInteger(revision) ||
+    revision < 1 ||
+    !Number.isSafeInteger(target) ||
+    target < 0 ||
+    typeof row.app_name !== 'string' ||
+    typeof row.release_id !== 'string'
   )
-}
-
-function numberList(value: unknown) {
-  return csv(value)
-    .map(item => normalizeVersionValue(item))
-    .filter((item): item is number => item !== undefined)
-}
-
-function booleanValue(value: unknown, defaultValue: boolean) {
-  if (value === undefined || value === null) return defaultValue
-  return value === true || value === 1 || value === '1'
-}
-
-function releaseUpdateType(record: Record<string, unknown>): ReleaseUpdateType {
-  if (record.updateType === 'full' || record.updateType === 'hot') {
-    return record.updateType
+    throw new Error('Invalid release identity or version')
+  if (
+    !['public', 'allowlist'].includes(String(row.release_scope)) ||
+    !['full', 'hot'].includes(String(row.update_type))
+  )
+    throw new Error('Invalid release policy')
+  const bases = list(row, 'compatible_base_version_codes'),
+    platforms = list(row, 'platforms'),
+    architectures = list(row, 'architectures')
+  if (
+    !bases.every(v => Number.isSafeInteger(v) && Number(v) >= 0) ||
+    !platforms.length ||
+    !platforms.every(v => typeof v === 'string') ||
+    !architectures.every(v => typeof v === 'string')
+  )
+    throw new Error('Invalid release context')
+  const flag = (key: string) => {
+    const value = row[key]
+    if (
+      value !== 0 &&
+      value !== 1 &&
+      value !== '0' &&
+      value !== '1' &&
+      value !== true &&
+      value !== false
+    )
+      throw new Error('Invalid release flag: ' + key)
+    return value === 1 || value === '1' || value === true
   }
-  return record.installUrl ? 'full' : 'hot'
-}
-
-export function mapStoredReleaseRecord(
-  record: Record<string, unknown>
-): Release {
-  const stored = underlineToHump(record) as Record<string, unknown>
-  const rawVersion = stored.targetVersionCode ?? stored.ver
-  const targetVersionCode =
-    typeof rawVersion === 'string' || typeof rawVersion === 'number'
-      ? (normalizeVersionValue(rawVersion) ?? 0)
-      : 0
-  const hasFormalBaseVersions =
-    stored.compatibleBaseVersionCodes !== undefined &&
-    stored.compatibleBaseVersionCodes !== null
-  const compatibleBaseVersionCodes = hasFormalBaseVersions
-    ? numberList(stored.compatibleBaseVersionCodes)
-    : Array.from(
-        new Set([targetVersionCode, ...numberList(stored.baseVersions)])
-      )
-  const releaseSequence = Number(stored.releaseSequence ?? stored.id)
-  const releaseId =
-    typeof stored.releaseId === 'string'
-      ? stored.releaseId
-      : `${String(stored.appName ?? stored.name)}:${String(releaseSequence)}`
-  const scope: ReleaseScope =
-    stored.releaseScope === 'allowlist' ? 'allowlist' : 'public'
-
   return {
-    releaseId,
-    releaseSequence,
-    appName: String(stored.appName ?? stored.name),
-    targetVersionCode,
-    compatibleBaseVersionCodes,
-    platforms: csv(stored.platforms ?? stored.platform),
-    architectures: csv(stored.architectures ?? stored.architecture),
+    releaseId: row.release_id,
+    releaseSequence: sequence,
+    appName: row.app_name,
+    targetVersionCode: target,
+    compatibleBaseVersionCodes: bases as number[],
+    platforms: platforms,
+    architectures: architectures,
     distributionChannel:
-      typeof (stored.distributionChannel ?? stored.channel) === 'string' &&
-      (stored.distributionChannel ?? stored.channel)
-        ? String(stored.distributionChannel ?? stored.channel)
-        : undefined,
-    updateType: releaseUpdateType(stored),
-    scope,
-    enabled: booleanValue(stored.isEnabled ?? stored.enable, true),
-    mandatory: booleanValue(stored.isMandatory ?? stored.mandatory, true),
-    showUpdateDialog: booleanValue(
-      stored.showUpdateDialog ?? stored.showDialog,
-      true
-    ),
-    legacyPayload: stored
+      row.distribution_channel == null
+        ? undefined
+        : (row.distribution_channel as string),
+    updateType: row.update_type as Release['updateType'],
+    scope: row.release_scope as Release['scope'],
+    enabled: flag('is_enabled'),
+    mandatory: flag('is_mandatory'),
+    showUpdateDialog: flag('show_update_dialog'),
+    policyRevision: revision,
+    releaseNotes: row.release_notes as string | null,
+    artifactSizeBytes:
+      row.artifact_size_bytes == null ? null : Number(row.artifact_size_bytes),
+    installerSourceUrl: row.installer_source_url as string | null,
+    bundleUrl: row.bundle_url as string | null,
+    createdAt: row.created_at as Date | string,
+    updatedAt: row.updated_at as Date | string
   }
+}
+export function serializeRelease(
+  release: Release,
+  mandatory = release.mandatory,
+  showUpdateDialog = release.showUpdateDialog
+) {
+  const { scope, ...fields } = release
+  return { ...fields, releaseScope: scope, mandatory, showUpdateDialog }
 }

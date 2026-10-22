@@ -2,15 +2,15 @@ import { Global, Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { Test } from '@nestjs/testing'
 import { DataSource } from 'typeorm'
-import { LegacyCompatibilityModule } from '@/compat/legacy'
+import { AppApiModule } from '@/app/index'
 import { JobsModule } from '@/jobs'
 import { PublishTaskWorkerService } from '@/jobs/publish/publish-task-worker.service'
 import { ReleaseManagementController } from '@/manage/releases/releases.controller'
 import { ReleasesModule } from '@/releases/releases.module'
 import { ManageReleasesModule } from '@/manage/releases/releases.module'
 import { ReleaseWriteRepository } from '@/releases/ports/release-write.repository'
-import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
-import { LegacyUpdateCheckController } from '@/compat/legacy/update-check.controller'
+import { SqlReleaseRepository } from '@/infrastructure/persistence/sql-release.repository'
+import { UpdateCheckController } from '@/app/updates/update-check.controller'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 
 const database = {
@@ -34,7 +34,7 @@ describe('release module wiring', () => {
     ])
   })
 
-  it('can replace the publication write port without loading legacy HTTP routes', async () => {
+  it('can replace the publication write port without loading App HTTP routes', async () => {
     const repository = { insert: jest.fn(), setEnabled: jest.fn() }
     const module = await Test.createTestingModule({
       imports: [
@@ -61,12 +61,12 @@ describe('release module wiring', () => {
       await module.init()
       expect(module.get(ReleaseWriteRepository)).toBe(repository)
       expect(() => module.get(ReleaseManagementController)).toThrow()
-      expect(() => module.get(LegacyUpdateCheckController)).toThrow()
+      expect(() => module.get(UpdateCheckController)).toThrow()
     } finally {
       await module.close()
     }
   })
-  it('assembles legacy and manage endpoints with one active task worker', async () => {
+  it('assembles app and manage endpoints with one active task worker', async () => {
     const module = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -75,7 +75,7 @@ describe('release module wiring', () => {
           ignoreEnvVars: true
         }),
         TestPersistenceModule,
-        LegacyCompatibilityModule,
+        AppApiModule,
         ManageReleasesModule
       ]
     })
@@ -92,7 +92,7 @@ describe('release module wiring', () => {
       await module.init()
       expect(module.get(ReleaseManagementController)).toBeDefined()
       expect(module.get(ReleaseWriteRepository)).toBe(
-        module.get(DualWriteReleaseRepository)
+        module.get(SqlReleaseRepository)
       )
       expect(
         module

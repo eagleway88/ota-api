@@ -26,7 +26,13 @@ export type Release = {
   enabled: boolean
   mandatory: boolean
   showUpdateDialog: boolean
-  legacyPayload: Record<string, unknown>
+  policyRevision?: number
+  releaseNotes?: string | null
+  artifactSizeBytes?: number | null
+  installerSourceUrl?: string | null
+  bundleUrl?: string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
 }
 
 export type AvailableReleaseSnapshot = {
@@ -40,7 +46,7 @@ export type AudienceSnapshot = {
 }
 
 export type ApplicationUpdatePolicy = {
-  legacyEmptyChannelMatchesAny: boolean
+  emptyChannelMatchesAny: boolean
   macosUniversalArchitectures: ReadonlySet<string>
 }
 
@@ -67,6 +73,6 @@ export type UpdateDecision = {
 }
 
 export const defaultApplicationUpdatePolicy: ApplicationUpdatePolicy = {
-  legacyEmptyChannelMatchesAny: true,
+  emptyChannelMatchesAny: true,
   macosUniversalArchitectures: new Set(['arm64', 'x64'])
 }

@@ -19,15 +19,12 @@ const table = (name: string) =>
     name,
     columns: [
       'id',
-      'name',
+      'app_name',
       'platform',
-      'ver',
-      'ver_id',
+      'version_code',
       'release_sequence',
       'created_at',
-      'create_time',
-      'updated_at',
-      'update_time'
+      'updated_at'
     ].map(column => ({ name: column, type: 'varchar' }))
   })
 
@@ -38,10 +35,10 @@ function resultRows(query: string) {
     return [
       {
         id: 7,
-        name: 'app-a',
+        app_name: 'app-a',
         platform: 'windows',
-        ver: 110,
-        ver_id: 2000,
+        version_code: 110,
+        release_sequence: 2000,
         reported_username: 'tester',
         created_at: '2026-10-01T00:00:00.000Z',
         extras_json: '{"business_key":"unchanged"}',
@@ -53,7 +50,7 @@ function resultRows(query: string) {
     return [
       {
         id: 8,
-        name: 'app-a',
+        app_name: 'app-a',
         kind: 'crash',
         report_count: 17,
         updated_at: '2026-10-01T00:00:00.000Z',
@@ -193,7 +190,7 @@ describe('external application APIs with access keys', () => {
     '/v1/manage/apps/app-a/audit-logs',
     '/v1/manage/apps/app-b/audit-logs'
   ])(
-    'requires authentication independently of legacy modules: %s',
+    'requires authentication independently of other API modules: %s',
     async path => {
       await request(app.getHttpServer()).get(`/api${path}`).expect(401)
       expect(sql).toHaveLength(0)
@@ -221,7 +218,12 @@ describe('external application APIs with access keys', () => {
     await request(app.getHttpServer())
       .get('/api/v1/manage/apps/app-a/audit-logs')
       .set('Authorization', `Bearer ${token}`)
-      .query({ ...range, action, result: 'failed', actorAdminId: '1' })
+      .query({
+        ...range,
+        action,
+        result: 'failed',
+        actorKeyId: credential.keyId
+      })
       .expect(200)
     expect(sql.some(call => call.parameters.includes(action))).toBe(true)
     expect(sql.every(call => !call.query.includes(action))).toBe(true)
@@ -247,7 +249,7 @@ describe('external application APIs with access keys', () => {
       expect(call.parameters).toEqual(
         expect.arrayContaining(['app-a', 'windows', 2000])
       )
-      expect(call.query).toContain('COALESCE(')
+      expect(call.query).not.toContain('COALESCE(')
     }
   })
 

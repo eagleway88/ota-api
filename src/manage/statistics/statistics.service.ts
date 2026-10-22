@@ -67,7 +67,7 @@ export class TelemetryQueryService {
       const { rows, total } = await queryAdminPage(
         filter,
         'report',
-        storedColumn(table, 'report', 'created_at', 'create_time'),
+        storedColumn(table, 'report', 'created_at'),
         'report.id',
         window,
         [{ expression: 'CAST(report.extras AS CHAR)', alias: 'extras_json' }]
@@ -90,18 +90,11 @@ export class TelemetryQueryService {
         runner,
         application.tables.errorLog
       )
-      const lastSeen = storedColumn(
-        table,
-        'report',
-        'updated_at',
-        'update_time',
-        'created_at',
-        'create_time'
-      )
+      const lastSeen = storedColumn(table, 'report', 'updated_at')
       const filter = runner.manager
         .createQueryBuilder()
         .from(table.name, 'report')
-        .where('report.name = :appName', { appName })
+        .where('report.app_name = :appName', { appName })
         .andWhere(`${lastSeen} >= :from AND ${lastSeen} < :to`, {
           from: window.from,
           to: window.to
@@ -127,23 +120,19 @@ export class TelemetryQueryService {
       return adminPage(
         rows.map(row => ({
           id: Number(row.id),
-          appName: row.name,
+          appName: row.app_name,
           platform: row.platform,
-          versionCode: Number(row.ver),
+          versionCode: Number(row.version_code),
           errorHash: row.error_hash,
           kind: row.kind,
           message: row.message,
           stack: row.stack,
           reportCount: Number(row.report_count ?? 1),
-          reportedUsername: row.reported_username ?? row.username,
-          sourceIp: row.ip,
+          reportedUsername: row.reported_username,
+          sourceIp: row.source_ip,
           extras: this.json(row.extras_json),
-          firstSeenAt: row.created_at ?? row.create_time,
-          lastSeenAt:
-            row.updated_at ??
-            row.update_time ??
-            row.created_at ??
-            row.create_time
+          firstSeenAt: row.created_at,
+          lastSeenAt: row.updated_at
         })),
         total,
         window,
@@ -164,11 +153,11 @@ export class TelemetryQueryService {
     query: TelemetryQueryDto,
     window: AdminQueryWindow
   ) {
-    const createdAt = storedColumn(table, 'report', 'created_at', 'create_time')
+    const createdAt = storedColumn(table, 'report', 'created_at')
     const filter = runner.manager
       .createQueryBuilder()
       .from(table.name, 'report')
-      .where('report.name = :appName', { appName })
+      .where('report.app_name = :appName', { appName })
       .andWhere(`${createdAt} >= :from AND ${createdAt} < :to`, {
         from: window.from,
         to: window.to
@@ -179,7 +168,7 @@ export class TelemetryQueryService {
       })
     if (query.releaseSequence)
       filter.andWhere(
-        `${storedColumn(table, 'report', 'release_sequence', 'ver_id')} = :releaseSequence`,
+        `${storedColumn(table, 'report', 'release_sequence')} = :releaseSequence`,
         { releaseSequence: Number(query.releaseSequence) }
       )
     return filter
@@ -192,22 +181,18 @@ export class TelemetryQueryService {
     return {
       id: Number(row.id),
       reportId: row.report_id ?? null,
-      appName: row.name,
+      appName: row.app_name,
       platform: row.platform,
-      versionCode: Number(row.ver),
-      releaseSequence: Number(row.release_sequence ?? row.ver_id),
-      reportedUsername: row.reported_username ?? row.username,
-      sourceIp: row.ip,
+      versionCode: Number(row.version_code),
+      releaseSequence: Number(row.release_sequence),
+      reportedUsername: row.reported_username,
+      sourceIp: row.source_ip,
       extras: this.json(row.extras_json),
-      createdAt: row.created_at ?? row.create_time,
+      createdAt: row.created_at,
       ...(kind === 'error'
         ? {
             message: row.message,
-            updatedAt:
-              row.updated_at ??
-              row.update_time ??
-              row.created_at ??
-              row.create_time
+            updatedAt: row.updated_at
           }
         : {})
     }

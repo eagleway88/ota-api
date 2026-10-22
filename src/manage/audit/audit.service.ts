@@ -19,7 +19,7 @@ export class AuditQueryService {
   listGlobal(query: AuditQueryDto) {
     const window = normalizeAdminQuery(query)
     return this.read.withConnection(runner =>
-      this.query(runner, 'ota_admin_audit_log', query, window)
+      this.query(runner, 'ota_audit_log', query, window)
     )
   }
 
@@ -48,7 +48,6 @@ export class AuditQueryService {
     const fields: Record<string, unknown> = {
       action: query.action,
       result: query.result,
-      actor_admin_id: query.actorAdminId,
       actor_key_id: query.actorKeyId,
       request_id: query.requestId,
       operation_id: query.operationId,
@@ -69,7 +68,7 @@ export class AuditQueryService {
     )
     return adminPage(rows, total, window, {
       historyNotice:
-        'Records are retained indefinitely by this service. Older records may be unavailable if never collected or removed before this policy.'
+        'Records are retained indefinitely by this service. Query time windows and pagination limit each response, not retention.'
     })
   }
 }

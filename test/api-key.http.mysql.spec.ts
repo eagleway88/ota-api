@@ -1,3 +1,4 @@
+import { InitialSchema1792713600000 } from '@/migrations/1792713600000-InitialSchema'
 import 'reflect-metadata'
 import { randomUUID } from 'crypto'
 import { Controller, Get, INestApplication, Module } from '@nestjs/common'
@@ -10,10 +11,6 @@ import { AuthModule } from '@/auth/auth.module'
 import { ApiKeyManagementService } from '@/auth/api-key-management.service'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
-import { RefactoringFoundation1792444800000 } from '@/migrations/1792444800000-RefactoringFoundation'
-import { ApplicationDataMigration1792445100000 } from '@/migrations/1792445100000-ApplicationDataMigration'
-import { ApiKeys1792445300000 } from '@/migrations/1792445300000-ApiKeys'
-import { ApplicationMessages1792445400000 } from '@/migrations/1792445400000-ApplicationMessages'
 import { ReleaseManagementController } from '@/manage/releases/releases.controller'
 import { ArtifactsController } from '@/manage/artifacts/artifacts.controller'
 import { TelemetryController } from '@/manage/statistics/statistics.controller'
@@ -30,8 +27,8 @@ import { MessageService } from '@/manage/messages/messages.service'
 import { LastMessageService } from '@/messaging/last-message.service'
 import { RealtimeGateway } from '@/realtime/gateway/realtime.gateway'
 import { ApplicationMessage } from '@/entities/application-message.entity'
-import { LegacyUpdateCheckController } from '@/compat/legacy/update-check.controller'
-import { LegacyUpdateCheckService } from '@/compat/legacy/update-check.service'
+import { UpdateCheckController } from '@/app/updates/update-check.controller'
+import { UpdateCheckService } from '@/app/updates/update-check.service'
 import { configureHttp } from '@/config/http'
 import type { ApiKeyPreset } from '@/auth/api-key.policy'
 
@@ -117,10 +114,7 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
     await source.initialize()
     const runner = source.createQueryRunner()
     try {
-      await new RefactoringFoundation1792444800000().up(runner)
-      await new ApplicationDataMigration1792445100000().up(runner)
-      await new ApiKeys1792445300000().up(runner)
-      await new ApplicationMessages1792445400000().up(runner)
+      await new InitialSchema1792713600000().up(runner)
     } finally {
       await runner.release()
     }
@@ -168,7 +162,7 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
         TaskQueryController,
         AuditController,
         MessageController,
-        LegacyUpdateCheckController,
+        UpdateCheckController,
         UnconfiguredController
       ],
       providers: [
@@ -187,8 +181,8 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
           )
         },
         {
-          provide: LegacyUpdateCheckService,
-          useValue: { check: () => ({ code: 0, data: null }) }
+          provide: UpdateCheckService,
+          useValue: { check: () => null }
         }
       ]
     }).compile()
@@ -386,16 +380,14 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
       expect.any(Object)
     )
   })
-  it('leaves the legacy update check public regardless of obsolete credentials', async () => {
+  it('leaves the modern update check public and rejects retired contracts', async () => {
     await request(http.getHttpServer())
-      .post('/api/version/check')
+      .post('/api/v1/app/apps/app-a/updates/check')
       .set('Authorization', 'Bearer old.jwt.token')
       .send({
-        name: 'app-a',
         platform: 'windows',
-        ver: '1.0.0',
-        id: 0,
-        oldExtra: true
+        nativeVersionCode: 100,
+        installedReleaseSequence: 0
       })
       .expect(201, { code: 0, data: null })
   })

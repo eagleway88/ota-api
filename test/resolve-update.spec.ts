@@ -21,7 +21,7 @@ function release(overrides: Partial<Release> = {}): Release {
     enabled: true,
     mandatory: false,
     showUpdateDialog: true,
-    legacyPayload: {},
+
     ...overrides
   }
 }

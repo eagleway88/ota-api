@@ -1,6 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { createHash } from 'crypto'
-import { createTableName } from '@/utils/version'
 
 export type ApplicationTables = {
   prefix: string
@@ -26,32 +25,32 @@ export class ApplicationTableResolver {
     }
   }
 
-  legacyPrefix(appName: string) {
+  normalizedPrefix(appName: string) {
     this.validateAppName(appName)
-    return createTableName(appName)
+    return appName.replace(/[^A-Za-z0-9_]/g, '_')
   }
 
   collisionSafePrefix(appName: string) {
-    const legacyPrefix = this.legacyPrefix(appName)
-    if (legacyPrefix.length <= MAX_TABLE_PREFIX_LENGTH) {
-      return legacyPrefix
+    const normalizedPrefix = this.normalizedPrefix(appName)
+    if (normalizedPrefix.length <= MAX_TABLE_PREFIX_LENGTH) {
+      return normalizedPrefix
     }
 
     return this.hashedPrefix(appName)
   }
 
   hashedPrefix(appName: string) {
-    const legacyPrefix = this.legacyPrefix(appName)
+    const normalizedPrefix = this.normalizedPrefix(appName)
     const digest = createHash('sha256')
       .update(appName)
       .digest('hex')
       .slice(0, 8)
-    return `${legacyPrefix.slice(0, MAX_TABLE_PREFIX_LENGTH - 9)}_${digest}`
+    return `${normalizedPrefix.slice(0, MAX_TABLE_PREFIX_LENGTH - 9)}_${digest}`
   }
 
   resolve(appName: string, registeredPrefix?: string): ApplicationTables {
     this.validateAppName(appName)
-    const prefix = registeredPrefix ?? this.legacyPrefix(appName)
+    const prefix = registeredPrefix ?? this.normalizedPrefix(appName)
     if (!/^[A-Za-z0-9_]{1,40}$/.test(prefix)) {
       throw new BadRequestException('Invalid registered table prefix')
     }

@@ -11,10 +11,9 @@ import {
 
 export function clientReportValues(input: ClientReport) {
   return compact({
-    name: input.appName,
+    app_name: input.appName,
     platform: input.platform,
-    ver: input.versionCode,
-    username: input.reportedUsername,
+    version_code: input.versionCode,
     reported_username: input.reportedUsername,
     extras:
       input.extras === undefined
@@ -22,7 +21,7 @@ export function clientReportValues(input: ClientReport) {
         : input.extras === null
           ? null
           : JSON.stringify(input.extras),
-    ip: input.sourceIp
+    source_ip: input.sourceIp
   })
 }
 
@@ -33,16 +32,13 @@ export function statusReportValues(
 ) {
   return compact({
     ...clientReportValues(input),
-    ver_id: input.releaseSequence,
     release_sequence: input.releaseSequence,
     report_id: input.reportId?.toLowerCase(),
-    create_time: context.receivedAt,
     created_at: context.receivedAt,
     ...(message === undefined
       ? {}
       : {
           message,
-          update_time: context.receivedAt,
           updated_at: context.receivedAt
         })
   })
@@ -54,10 +50,8 @@ export function failureUpdateValues(
 ) {
   return {
     ...clientReportValues(input),
-    ver_id: input.releaseSequence,
     release_sequence: input.releaseSequence,
     message: input.message,
-    update_time: context.receivedAt,
     updated_at: context.receivedAt
   }
 }
@@ -73,9 +67,7 @@ export function applicationErrorValues(
     stack: input.stack,
     error_hash: applicationErrorHash(input),
     report_count: 1,
-    create_time: context.receivedAt,
     created_at: context.receivedAt,
-    update_time: context.receivedAt,
     updated_at: context.receivedAt
   })
 }
@@ -91,10 +83,10 @@ export function applicationErrorIdentity(input: ApplicationErrorInput) {
   ].map(value => value.replace(/\r\n/g, '\n').trim())
 }
 
-/** Keep existing grouping keys; do not silently split/re-key historical aggregates. */
+/** Canonical tuple encoding prevents ambiguous delimiter collisions. */
 export function applicationErrorHash(input: ApplicationErrorInput) {
-  return createHash('md5')
-    .update(applicationErrorIdentity(input).join('|'))
+  return createHash('sha256')
+    .update(JSON.stringify(applicationErrorIdentity(input)))
     .digest('hex')
 }
 
@@ -116,30 +108,28 @@ function json(value: unknown): JsonValue | undefined {
 export function storedReport(row: Record<string, unknown>): ReportRecord {
   return {
     id: Number(row.id),
-    appName: String(row.name),
+    appName: String(row.app_name),
     platform: String(row.platform),
-    versionCode: Number(row.ver),
+    versionCode: Number(row.version_code),
     releaseSequence:
-      row.ver_id === undefined
+      row.release_sequence === undefined
         ? undefined
-        : Number(row.release_sequence ?? row.ver_id),
+        : Number(row.release_sequence),
     reportId: row.report_id as string | null | undefined,
-    reportedUsername: (row.reported_username ?? row.username) as
-      string | null | undefined,
+    reportedUsername: row.reported_username as string | null | undefined,
     // Raw JSON selected as text avoids double-decoding MySQL's JSON scalar strings.
     extras: Object.hasOwn(row, 'extras_json')
       ? json(row.extras_json)
       : (row.extras as JsonValue | undefined),
-    sourceIp: row.ip as string | null | undefined,
+    sourceIp: row.source_ip as string | null | undefined,
     message: row.message as string | null | undefined,
     kind: row.kind as string | undefined,
     stack: row.stack as string | null | undefined,
     errorHash: row.error_hash as string | undefined,
     reportCount:
       row.report_count === undefined ? undefined : Number(row.report_count),
-    createdAt: (row.created_at ?? row.create_time) as Date | string | null,
-    updatedAt: (row.updated_at ?? row.update_time) as
-      Date | string | null | undefined
+    createdAt: row.created_at as Date | string | null,
+    updatedAt: row.updated_at as Date | string | null | undefined
   }
 }
 

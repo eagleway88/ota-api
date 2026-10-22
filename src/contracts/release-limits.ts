@@ -1,2 +1,2 @@
-/** Applies before deduplication, including legacy multipart JSON inputs. */
+/** Applies before deduplication, for array requests. */
 export const MAX_RELEASE_USERS = 5000

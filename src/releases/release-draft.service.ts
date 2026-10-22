@@ -167,13 +167,13 @@ export class ReleaseDraftService {
           .createQueryBuilder()
           .select('COUNT(*)', 'total')
           .from(application.tables.version, 'version')
-          .where('version.name = :appName', { appName })
+          .where('version.app_name = :appName', { appName })
           .getRawOne<{ total: string | number }>()
         total += Number(count?.total ?? 0)
         keyQueries.push(
           `SELECT 'published' AS record_kind, release_id AS record_key, ` +
-            `COALESCE(updated_at, created_at, create_time) AS sort_time ` +
-            `FROM \`${application.tables.version}\` WHERE name = ?`
+            `updated_at AS sort_time ` +
+            `FROM \`${application.tables.version}\` WHERE app_name = ?`
         )
         keyParameters.push(appName)
       }
@@ -373,7 +373,7 @@ export class ReleaseDraftService {
         releaseId,
         action: 'publish',
         targetType: 'release',
-        changeSummary: { source: 'v2' }
+        changeSummary: { source: 'v1' }
       },
       async queryRunner => {
         const draft = await this.lockDraft(queryRunner, application, releaseId)
@@ -512,7 +512,7 @@ export class ReleaseDraftService {
     try {
       audience = normalizeReleaseAudience({
         appName,
-        platforms: platforms.join(','),
+        platforms,
         releaseScope: body.releaseScope,
         userIds: body.userIds
       })
@@ -684,20 +684,13 @@ export class ReleaseDraftService {
       enabled: release.enabled,
       mandatory: release.mandatory,
       showUpdateDialog: release.showUpdateDialog,
-      releaseNotes:
-        release.legacyPayload.releaseNotes ?? release.legacyPayload.desc,
-      artifactSizeBytes:
-        release.legacyPayload.artifactSizeBytes ??
-        release.legacyPayload.fileSize,
-      installerSourceUrl:
-        release.legacyPayload.installerSourceUrl ??
-        release.legacyPayload.installUrl,
-      bundleUrl:
-        release.legacyPayload.bundleUrl ?? release.legacyPayload.packageUrl,
-      policyRevision: Number(release.legacyPayload.policyRevision) || 1,
+      releaseNotes: release.releaseNotes,
+      artifactSizeBytes: release.artifactSizeBytes,
+      installerSourceUrl: release.installerSourceUrl,
+      bundleUrl: release.bundleUrl,
+      policyRevision: Number(release.policyRevision) || 1,
       status: release.enabled ? 'published' : 'disabled',
-      createdAt:
-        release.legacyPayload.createdAt ?? release.legacyPayload.createTime
+      createdAt: release.createdAt
     }
   }
 }

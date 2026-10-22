@@ -6,7 +6,8 @@ const output = path.resolve(__dirname, '../dist')
 for (const file of [
   'main.js',
   'app.js',
-  'config/typeorm.js',
+  'app/updates/update-check.controller.js',
+  'infrastructure/persistence/installation-guard.js',
   'auth/api-key.service.js'
 ]) {
   assert.ok(

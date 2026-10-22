@@ -1,20 +1,31 @@
 # 测试入口
 
-所有测试集中在 `test/`；历史输入和旧写入模拟保存在 `test/fixtures/`，不会编译到部署目录。生产代码不允许导入测试夹具。
+全部测试集中在 test/，fixtures/ 只保留规范发布数据与隔离 MySQL socket 注入；无旧接口或历史迁移夹具，不编译进 dist。
 
-- `yarn test:unit`：纯逻辑、服务与模块装配，不连接数据库或监听 HTTP。
-- `yarn test:http`：回环 HTTP 验证，不使用项目 `.env` 或业务数据库。
-- `OTA_MIGRATION_TEST_SOCKET=... yarn test:mysql`：真实 MySQL 事务与迁移回归，必须显式提供隔离临时 socket；缺少参数会失败，不会以全部跳过冒充通过。
-- `yarn test --runInBand --watchman=false`：所有套件；没有隔离 socket 时 MySQL 套件明确跳过。
-- `yarn test:verify`：类型检查、只读 lint、构建和全部测试。要覆盖数据库套件，仍需设置隔离 socket。
-- `yarn build` 构建后调用 `test/verify-build.cjs`，核对生产入口存在、测试/夹具/运维 CLI 未混入部署目录。生产构建禁用增量缓存，避免清空 dist 后被旧缓存跳过输出。
+- yarn test:unit：纯逻辑、服务、模块装配，不连接业务数据库。
+- yarn test:http：本机回环 HTTP 测试，使用数据库替身。
+- OTA_MIGRATION_TEST_SOCKET=... yarn test:mysql：真实 MySQL/HTTP/CLI 测试，必须显式提供独立临时 socket。
+- yarn test --runInBand --watchman=false：全部套件；无隔离 socket 时数据库套件明确跳过，不能当作完整通过。
+- yarn test:verify：类型、lint、构建和全部测试；数据库覆盖仍需传入测试 socket。
 
-单独运行可加过滤条件，例如 `yarn test --runInBand --watchman=false release-draft.mysql`。
+集成测试覆盖空库初始化/重复初始化/拒绝旧库且保留原数据、规范列、Key 多应用/预设/过期撤销、CLI 真实子进程、HTTP 认证、发布提交顺序和幂等、审计回滚、任务接管/checkpoint、错误聚合、JSON 类型、消息隔离/ACK/TTL。不存在旧数据迁移的验收要求。
 
-MySQL 仅接受 `/private/tmp/ota-migration-mysql.<随机字符>/mysql.sock` 或 `/tmp/` 下同名路径。按 [迁移手册](../docs/MIGRATION.md#6-隔离-mysql-回归) 创建新的临时数据目录，以 `--no-defaults --skip-networking --mysqlx=0 --skip-log-bin` 启动；测试结束后停止该实例。测试只创建/删除自身随机命名的数据库，不可传入业务数据库 socket。
+## 隔离 MySQL
 
-API Key 回归覆盖权限预设、显式多应用授权、撤销/过期、默认拒绝和真实 HTTP/SQL。application-messages.mysql 验证旧表非空拒绝、空表退役、消息隔离及历史管理员删除；ota-cli.mysql 使用真实子进程、临时 DB 专用账号，验证签发时准备应用、一次性凭证、撤销与审计失败回滚。CLI 测试不读取项目 .env，不启动业务 HTTP/OSS/Worker。
+仅接受 /private/tmp/ota-migration-mysql.<随机字符>/mysql.sock 或 /tmp/ 下同名路径。变量名字仅供测试，生产不提供 ORM_SOCKET。
 
-生产 CLI 仅支持正常数据库 host/port。CLI MySQL 子进程测试显式预加载 test/fixtures/mysql-socket-preload.cjs，将驱动连接注入到已校验的临时 socket，并限制为自身生成的测试数据库；夹具不在生产源码中引用、不进入部署构建。Worker 装配测试用空应用列表隔离数据库，不依赖暂停开关；单元测试验证启动即轮询、仅读取轮询间隔并正确释放定时器。
+在 shell 中可为测试创建全新目录：
 
-database-audit.mysql 使用仅 SELECT 权限的账号运行真实 audit:db 脚本，覆盖默认 SQL 模式、空模式、NO_BACKSLASH_ESCAPES 及 ANSI_QUOTES 组合，验证精确表名后缀、统计及缺列输出，并逐表核对数据不变。子进程在无 .env 的临时目录运行，不读取项目配置；SQL 模式只在测试连接的会话中设置，不修改全局或业务库配置。
+~~~bash
+ota_test_dir=$(mktemp -d /private/tmp/ota-migration-mysql.XXXXXX)
+mysqld --no-defaults --initialize-insecure --datadir="$ota_test_dir/data"
+mysqld --no-defaults --datadir="$ota_test_dir/data" \
+  --socket="$ota_test_dir/mysql.sock" --pid-file="$ota_test_dir/mysql.pid" \
+  --log-error="$ota_test_dir/server.log" --skip-networking --mysqlx=0 --skip-log-bin
+~~~
+
+在另一终端传入上一步实际生成的绝对 socket 路径运行测试。实例必须是专用临时服务，不能传业务 socket；测试只创建/删除自身随机命名的 ota_migration_test_<UUID> 数据库与专用 CLI 账号。运行结束用 mysqladmin --no-defaults --protocol=SOCKET --socket=<实际临时路径> --user=root shutdown 停止该实例。
+
+MySQL CLI 子进程显式预加载 fixtures/mysql-socket-preload.cjs，禁止使用项目 .env 和任何非测试数据库；不启动业务 HTTP/OSS/Worker。真实 HTTP 测试可能需要本机监听权限。
+
+yarn build 调用 verify-build.cjs，检查部署入口且排除 test/fixtures/scripts；lint 只检查，lint:fix 才修改文件。单独筛选示例：yarn test --runInBand --watchman=false release-draft.mysql。

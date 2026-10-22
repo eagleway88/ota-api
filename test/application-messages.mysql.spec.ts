@@ -1,14 +1,16 @@
+import { ApplicationRegistryService } from '@/applications/application-registry.service'
+import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
+import { assertInstalledDatabase } from '@/infrastructure/persistence/installation-guard'
+import { InitialSchema1792713600000 } from '@/migrations/1792713600000-InitialSchema'
 import 'reflect-metadata'
 import { randomUUID } from 'crypto'
 import { DataSource } from 'typeorm'
 import { ApplicationMessage } from '@/entities/application-message.entity'
 import { LastMessageService } from '@/messaging/last-message.service'
-import { ApplicationMessages1792445400000 } from '@/migrations/1792445400000-ApplicationMessages'
-import { RetireAdministratorAccounts1792445500000 } from '@/migrations/1792445500000-RetireAdministratorAccounts'
 
 const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
 const mysql = socketPath ? describe : describe.skip
-mysql('unified application messages and legacy credential retirement', () => {
+mysql('application messages on the fresh schema', () => {
   let control: DataSource, source: DataSource, database: string
   const connection = {
     type: 'mysql' as const,
@@ -33,13 +35,11 @@ mysql('unified application messages and legacy credential retirement', () => {
     source = new DataSource({
       ...connection,
       database,
-      entities: [ApplicationMessage]
+      entities: [ApplicationMessage],
+      migrations: [InitialSchema1792713600000],
+      migrationsTableName: 'ota_schema_history'
     })
     await source.initialize()
-    for (const table of ['unique_id_message', 'user_id_message'])
-      await source.query(
-        `CREATE TABLE \`${table}\` (id INT PRIMARY KEY, content TEXT)`
-      )
   })
   afterEach(async () => {
     if (source?.isInitialized) await source.destroy()
@@ -49,34 +49,92 @@ mysql('unified application messages and legacy credential retirement', () => {
     if (control?.isInitialized) await control.destroy()
   })
 
-  it.each(['unique_id_message', 'user_id_message'])(
-    'refuses any DDL/drop when %s unexpectedly contains data',
+  it.each(['admins', 'unique_id_message', 'app_version', 'business_sentinel'])(
+    'refuses pre-existing %s without changing any data or creating tables',
     async table => {
-      await source.query(`INSERT INTO \`${table}\` VALUES (1, 'preserve-me')`)
+      await source.query(
+        'CREATE TABLE ' + table + ' (id INT PRIMARY KEY, content TEXT)'
+      )
+      await source.query('INSERT INTO ' + table + " VALUES (1,'preserve-me')")
       const runner = source.createQueryRunner()
       try {
         await expect(
-          new ApplicationMessages1792445400000().up(runner)
-        ).rejects.toThrow('non-empty legacy table')
-        expect(await runner.hasTable('ota_messages')).toBe(false)
-        for (const legacy of ['unique_id_message', 'user_id_message'])
-          expect(await runner.hasTable(legacy)).toBe(true)
-        expect(await source.query(`SELECT content FROM \`${table}\``)).toEqual([
-          { content: 'preserve-me' }
+          new InitialSchema1792713600000().up(runner)
+        ).rejects.toThrow('fresh empty database')
+        expect(await source.query('SELECT * FROM ' + table)).toEqual([
+          { id: 1, content: 'preserve-me' }
         ])
+        expect(await runner.hasTable('ota_installation')).toBe(false)
+        expect(await runner.hasTable('ota_messages')).toBe(false)
       } finally {
         await runner.release()
       }
     }
   )
-
-  it('removes only empty legacy message tables, is retryable and isolates application/target identities', async () => {
+  it('rejects an unknown installation marker without repairing or overwriting it', async () => {
+    await source.query('CREATE TABLE ota_installation (schema_id VARCHAR(32))')
+    await source.query("INSERT INTO ota_installation VALUES ('unknown')")
     const runner = source.createQueryRunner()
     try {
-      await new ApplicationMessages1792445400000().up(runner)
-      await new ApplicationMessages1792445400000().up(runner)
-      for (const legacy of ['unique_id_message', 'user_id_message'])
-        expect(await runner.hasTable(legacy)).toBe(false)
+      await expect(new InitialSchema1792713600000().up(runner)).rejects.toThrow(
+        'Unknown database installation'
+      )
+      expect(await runner.hasTable('ota_messages')).toBe(false)
+    } finally {
+      await runner.release()
+    }
+  })
+  it('validates initialized storage and creates only canonical app columns', async () => {
+    const runner = source.createQueryRunner()
+    try {
+      await expect(assertInstalledDatabase(runner)).rejects.toThrow(
+        'not initialized'
+      )
+      await source.runMigrations({ transaction: 'each' })
+      await assertInstalledDatabase(runner)
+      const registry = new ApplicationRegistryService(
+        source,
+        new ApplicationTableResolver()
+      )
+      const app = await registry.prepare('fresh-app-123')
+      expect(app.tablePrefix).toContain('123')
+      const schema = await runner.getTable(app.tables.version)
+      expect(schema?.columns.map(c => c.name)).toEqual(
+        expect.arrayContaining([
+          'app_name',
+          'target_version_code',
+          'is_enabled'
+        ])
+      )
+      for (const old of ['name', 'ver', 'enable', 'create_time'])
+        expect(schema?.findColumnByName(old)).toBeUndefined()
+      const audit = await runner.getTable(app.tables.auditLog)
+      expect(audit?.findColumnByName('actor_admin_id')).toBeUndefined()
+      expect(await source.runMigrations({ transaction: 'each' })).toEqual([])
+      await source.query(
+        "INSERT INTO ota_messages VALUES ('fresh-app-123','device','expired','{}',?,UTC_TIMESTAMP(6),DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND))",
+        [randomUUID()]
+      )
+      const messages = new LastMessageService(
+        source.getRepository(ApplicationMessage)
+      )
+      expect(
+        await messages.queryUniqueId({
+          appName: 'fresh-app-123',
+          uniqueId: 'expired'
+        })
+      ).toBeNull()
+      expect(await source.query('SELECT * FROM ota_messages')).toEqual([])
+    } finally {
+      await runner.release()
+    }
+  })
+
+  it('initializes idempotently and isolates application/target identities', async () => {
+    const runner = source.createQueryRunner()
+    try {
+      await new InitialSchema1792713600000().up(runner)
+      await new InitialSchema1792713600000().up(runner)
     } finally {
       await runner.release()
     }
@@ -145,30 +203,5 @@ mysql('unified application messages and legacy credential retirement', () => {
       (await messages.queryUniqueId({ appName: 'app-b', uniqueId: targetId }))
         ?.messageId
     ).toBe(deviceB.messageId)
-  })
-
-  it('deletes approved historical accounts/sessions but keeps audit and business data', async () => {
-    for (const table of [
-      'admins',
-      'ota_admin_sessions',
-      'ota_admin_audit_log',
-      'business_sentinel'
-    ]) {
-      await source.query(`CREATE TABLE \`${table}\` (id INT PRIMARY KEY)`)
-      await source.query(`INSERT INTO \`${table}\` VALUES (1)`)
-    }
-    const runner = source.createQueryRunner()
-    try {
-      await new RetireAdministratorAccounts1792445500000().up(runner)
-      await new RetireAdministratorAccounts1792445500000().up(runner)
-      expect(await runner.hasTable('admins')).toBe(false)
-      expect(await runner.hasTable('ota_admin_sessions')).toBe(false)
-      for (const table of ['ota_admin_audit_log', 'business_sentinel'])
-        expect(await source.query(`SELECT * FROM \`${table}\``)).toEqual([
-          { id: 1 }
-        ])
-    } finally {
-      await runner.release()
-    }
   })
 })

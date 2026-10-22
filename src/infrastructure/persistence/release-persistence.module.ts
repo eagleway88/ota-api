@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common'
 import { ReleaseWriteRepository } from '@/releases/ports/release-write.repository'
-import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
+import { SqlReleaseRepository } from '@/infrastructure/persistence/sql-release.repository'
 
-/** Composition boundary: formal services depend on the port, not legacy columns. */
+/** Composition boundary: formal services depend on the port, only formal storage. */
 @Module({
   providers: [
-    DualWriteReleaseRepository,
-    { provide: ReleaseWriteRepository, useExisting: DualWriteReleaseRepository }
+    SqlReleaseRepository,
+    { provide: ReleaseWriteRepository, useExisting: SqlReleaseRepository }
   ],
-  exports: [ReleaseWriteRepository, DualWriteReleaseRepository]
+  exports: [ReleaseWriteRepository, SqlReleaseRepository]
 })
 export class ReleasePersistenceModule {}

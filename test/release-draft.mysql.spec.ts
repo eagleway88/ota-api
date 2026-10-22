@@ -1,3 +1,4 @@
+import { InitialSchema1792713600000 } from '@/migrations/1792713600000-InitialSchema'
 import 'reflect-metadata'
 import { Logger } from '@nestjs/common'
 import { randomUUID } from 'crypto'
@@ -9,9 +10,7 @@ import {
 import { AuditQueryService } from '@/manage/audit/audit.service'
 import { AdminReadRepository } from '@/infrastructure/persistence/admin-read.repository'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
-import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
-import { RefactoringFoundation1792444800000 } from '@/migrations/1792444800000-RefactoringFoundation'
-import { ApplicationDataMigration1792445100000 } from '@/migrations/1792445100000-ApplicationDataMigration'
+import { SqlReleaseRepository } from '@/infrastructure/persistence/sql-release.repository'
 import {
   PlatformType,
   ReleaseScopeType,
@@ -34,14 +33,13 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
       actorName: 'project CI'
     })
     const rows = await query(
-      `SELECT actor_type, actor_key_id, actor_admin_id, actor_name_snapshot FROM \`${application.tables.auditLog}\` WHERE request_id = ?`,
+      `SELECT actor_type, actor_key_id, actor_name_snapshot FROM \`${application.tables.auditLog}\` WHERE request_id = ?`,
       ['key-draft']
     )
     expect(rows).toEqual([
       {
         actor_type: 'api_key',
         actor_key_id: keyId,
-        actor_admin_id: null,
         actor_name_snapshot: 'project CI'
       }
     ])
@@ -63,7 +61,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
   const catalog = { invalidate: jest.fn() }
   const context = (requestId: string) => ({
     requestId,
-    actorAdminId: 7,
+    actorKeyId: '10000000-0000-4000-8000-000000000007',
     actorName: 'operator',
     sourceIp: '127.0.0.1'
   })
@@ -127,8 +125,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
     await source.initialize()
     const runner = source.createQueryRunner()
     try {
-      await new RefactoringFoundation1792444800000().up(runner)
-      await new ApplicationDataMigration1792445100000().up(runner)
+      await new InitialSchema1792713600000().up(runner)
     } finally {
       await runner.release()
     }
@@ -141,7 +138,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
       source,
       applications,
       catalog as unknown as ReleaseCatalogService,
-      new DualWriteReleaseRepository()
+      new SqlReleaseRepository()
     )
     catalog.invalidate.mockClear()
   })
@@ -175,7 +172,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
         target_type: 'release_draft',
         release_id: result.data.releaseId,
         result: 'succeeded',
-        actor_admin_id: 7,
+        actor_key_id: '10000000-0000-4000-8000-000000000007',
         task_id: null,
         revision_before: null,
         revision_after: null

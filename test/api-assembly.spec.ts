@@ -5,7 +5,6 @@ import { SwaggerModule, OpenAPIObject } from '@nestjs/swagger'
 import { DataSource } from 'typeorm'
 import { AppApiModule } from '@/app/index'
 import { ManageApiModule } from '@/manage'
-import { LegacyCompatibilityModule } from '@/compat/legacy'
 import { configureHttp } from '@/config/http'
 import { configureSwagger } from '@/config/swagger'
 
@@ -23,7 +22,7 @@ const database = {
 class PersistenceFixture {}
 
 describe('App/Manage API assembly and documentation', () => {
-  it('includes every registered API in exactly one public/manage/legacy document', async () => {
+  it('includes every registered API in exactly one public/manage document', async () => {
     const module = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -33,8 +32,7 @@ describe('App/Manage API assembly and documentation', () => {
         }),
         PersistenceFixture,
         AppApiModule,
-        ManageApiModule,
-        LegacyCompatibilityModule
+        ManageApiModule
       ]
     })
       .overrideProvider(ConfigService)
@@ -58,14 +56,14 @@ describe('App/Manage API assembly and documentation', () => {
       const paths = (group: string) =>
         Object.keys(documents.get('api/docs' + group)!.paths).sort()
       const manage = paths('/manage'),
-        client = paths('/app'),
-        legacy = paths('/legacy')
+        client = paths('/app')
       expect(manage.length).toBeGreaterThan(15)
       expect(manage.every(path => path.startsWith('/api/v1/manage/'))).toBe(
         true
       )
       expect(client.every(path => path.startsWith('/api/v1/app/'))).toBe(true)
-      expect(legacy).toEqual(['/api/version/check'])
+      expect(client).toContain('/api/v1/app/apps/{appName}/updates/check')
+      expect(documents.has('api/docs/legacy')).toBe(false)
       for (const path of [
         '/api/v1/manage/apps/{appName}/audit-logs',
         '/api/v1/manage/apps/{appName}/statistics/summary',
@@ -76,7 +74,7 @@ describe('App/Manage API assembly and documentation', () => {
       ]) {
         expect(manage).toContain(path)
       }
-      expect(paths('')).toEqual([...manage, ...client, ...legacy].sort())
+      expect(paths('')).toEqual([...manage, ...client].sort())
       expect(
         paths('').some(path => /\/v2\/|\/admin\/|\/message\//.test(path))
       ).toBe(false)

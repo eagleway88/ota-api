@@ -5,9 +5,9 @@ import { BadRequestException } from '@nestjs/common'
 
 export type ReleaseAudienceInput = {
   appName: string
-  platforms: string
+  platforms: readonly string[]
   releaseScope?: ReleaseScope
-  userIds?: string | readonly string[]
+  userIds?: readonly string[]
 }
 
 export type NormalizedReleaseAudience = {
@@ -15,28 +15,17 @@ export type NormalizedReleaseAudience = {
   userIds: string[]
 }
 
-function parseUserIds(value?: string | readonly string[]) {
-  if (value === undefined) return []
-  if (typeof value !== 'string') return [...value]
-  try {
-    const parsed: unknown = JSON.parse(value)
-    if (
-      !Array.isArray(parsed) ||
-      !parsed.every(item => typeof item === 'string')
-    ) {
-      throw new Error()
-    }
-    return parsed.filter((item): item is string => typeof item === 'string')
-  } catch {
-    throw new Error('userIds must be a JSON string array')
-  }
-}
-
 export function normalizeReleaseAudience(
   input: ReleaseAudienceInput
 ): NormalizedReleaseAudience {
   const releaseScope = input.releaseScope ?? 'public'
-  const parsedUserIds = parseUserIds(input.userIds)
+  if (
+    input.userIds !== undefined &&
+    (!Array.isArray(input.userIds) ||
+      !input.userIds.every(v => typeof v === 'string'))
+  )
+    throw new BadRequestException('userIds must be an array of strings')
+  const parsedUserIds = input.userIds ?? []
   if (parsedUserIds.length > MAX_RELEASE_USERS) {
     throw new BadRequestException(
       `userIds cannot exceed ${MAX_RELEASE_USERS} entries`
@@ -52,12 +41,7 @@ export function normalizeReleaseAudience(
     throw new Error('public releases cannot contain userIds')
   }
 
-  const platforms = new Set(
-    input.platforms
-      .split(',')
-      .map(platform => platform.trim())
-      .filter(Boolean)
-  )
+  const platforms = new Set(input.platforms)
   for (const userId of userIds) {
     const matches = Array.from(platforms).some(platform =>
       userIdMatchesContext(userId, input.appName, platform)

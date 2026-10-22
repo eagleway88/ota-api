@@ -8,16 +8,16 @@ import {
   ReleaseCatalog,
   ReleaseCatalogService
 } from '@/updates/catalog/release-catalog.service'
-import { serializeLegacyRelease } from '@/compat/legacy/release.mapper'
+import { serializeRelease } from '@/releases/release-record.mapper'
 export type { ReleaseCatalog } from '@/updates/catalog/release-catalog.service'
 
-export type OtaVersionQuery = {
-  name: string
+export type UpdateQuery = {
+  appName: string
   platform: string
   architecture?: string
-  channel?: string
-  ver: number
-  id?: number
+  distributionChannel?: string
+  nativeVersionCode: number
+  installedReleaseSequence?: number
   userIds?: readonly string[]
 }
 
@@ -25,12 +25,12 @@ export type OtaVersionQuery = {
 export class UpdateQueryService {
   constructor(private readonly catalog: ReleaseCatalogService) {}
 
-  async findLatestAvailableVersion(query: OtaVersionQuery) {
-    if (!query.name || !query.platform || query.ver == null) {
+  async findLatestAvailableVersion(query: UpdateQuery) {
+    if (!query.appName || !query.platform || query.nativeVersionCode == null) {
       return null
     }
 
-    const catalog = await this.loadCatalog(query.name)
+    const catalog = await this.loadCatalog(query.appName)
     return this.resolveAvailableVersion(query, catalog)
   }
 
@@ -43,20 +43,20 @@ export class UpdateQueryService {
   }
 
   resolveAvailableVersion(
-    query: OtaVersionQuery,
+    query: UpdateQuery,
     catalog: ReleaseCatalog
   ): Record<string, unknown> | null {
     return this.resolveAvailableDecision(query, catalog).payload
   }
 
-  resolveAvailableDecision(query: OtaVersionQuery, catalog: ReleaseCatalog) {
+  resolveAvailableDecision(query: UpdateQuery, catalog: ReleaseCatalog) {
     const context: ClientUpdateContext = {
-      appName: query.name,
+      appName: query.appName,
       platform: query.platform,
       architecture: query.architecture,
-      distributionChannel: query.channel,
-      nativeVersionCode: query.ver,
-      installedReleaseSequence: query.id ?? 0,
+      distributionChannel: query.distributionChannel,
+      nativeVersionCode: query.nativeVersionCode,
+      installedReleaseSequence: query.installedReleaseSequence ?? 0,
       userIds: new Set(query.userIds ?? [])
     }
     const decision = resolveUpdate(
@@ -67,7 +67,7 @@ export class UpdateQueryService {
     )
 
     const payload = decision.release
-      ? serializeLegacyRelease(
+      ? serializeRelease(
           decision.release,
           decision.mandatory,
           decision.showUpdateDialog

@@ -1,3 +1,5 @@
+import { PlatformType } from '@/contracts/release-values'
+import { parseUserId } from '@/contracts/user-id'
 import { validDeviceTarget } from '@/realtime/protocol.dto'
 import { Logger } from '@nestjs/common'
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets'
@@ -22,17 +24,17 @@ import {
 
 type DeliveredRelease = DispatchRelease & { payload: Record<string, unknown> }
 
-type OtaNameMessage = {
-  otaName: string
-  platform?: string
+type ApplicationSubscription = {
+  appName: string
+  platform: string
   architecture?: string
-  channel?: string
-  ver?: number
-  id?: number
+  distributionChannel?: string
+  nativeVersionCode: number
+  installedReleaseSequence?: number
 }
 
 type UserIdMessage = {
-  /** 使用 `otaName:platform:userId` 形式区分应用和平台。 */
+  /** 使用 `appName:platform:userId` 形式区分应用和平台。 */
   userId: string
 }
 
@@ -53,8 +55,8 @@ type UniqueIdSubscriptionAckResponse = {
   uniqueId: string
 }
 
-type OtaNameSubscriptionAckResponse = {
-  ota: string
+type ApplicationSubscriptionAckResponse = {
+  appName: string
 }
 
 type UserIdAckResponse = {
@@ -105,8 +107,8 @@ export class RealtimeGateway {
     this.logger.log(`client disconnected: ${client.id}`)
   }
 
-  private getOtaNameRoom(otaName: string) {
-    return `otaName:${otaName}`
+  private getApplicationRoom(appName: string) {
+    return `appName:${appName}`
   }
 
   private getUserIdRoom(userId: string) {
@@ -117,18 +119,20 @@ export class RealtimeGateway {
     return 'uniqueId:' + JSON.stringify([appName, uniqueId])
   }
 
-  sendApplicationMessage(otaName: string, data: unknown) {
+  sendApplicationMessage(appName: string, data: unknown) {
     return Promise.resolve(
-      this.server.to(this.getOtaNameRoom(otaName)).emit(otaName, data)
+      this.server
+        .to(this.getApplicationRoom(appName))
+        .emit('app:' + appName + ':message', data)
     )
   }
 
   async dispatchApplicationUpdate(
-    otaName: string,
+    appName: string,
     isLeaseValid?: (progress: DispatchProgress) => Promise<boolean>,
     expectedRevision?: number
   ) {
-    const catalog = await this.otaVersionQueryService.loadCatalog(otaName, true)
+    const catalog = await this.otaVersionQueryService.loadCatalog(appName, true)
     if (
       expectedRevision !== undefined &&
       (catalog.available.revision !== expectedRevision ||
@@ -140,7 +144,7 @@ export class RealtimeGateway {
     if (isLeaseValid && !(await isLeaseValid(metrics.snapshot()))) {
       throw new Error('Publish task lease was lost')
     }
-    const subscribers = this.subscriptions.getApplicationSubscribers(otaName)
+    const subscribers = this.subscriptions.getApplicationSubscribers(appName)
     for (let index = 0; index < subscribers.length; index += 1) {
       if (
         index > 0 &&
@@ -195,7 +199,7 @@ export class RealtimeGateway {
     client: Socket,
     data: UserIdMessage
   ): Promise<UserIdSubscriptionAckResponse | ErrorAckResponse> {
-    if (!data?.userId) {
+    if (!parseUserId(data?.userId)) {
       return { error: 'UserId is required' }
     }
 
@@ -284,59 +288,74 @@ export class RealtimeGateway {
     return { uniqueId: data.uniqueId }
   }
 
-  @SubscribeMessage('otaName:subscribe')
-  async handleOtaNameSubscribe(
+  @SubscribeMessage('app:subscribe')
+  async handleApplicationSubscribe(
     client: Socket,
-    data: OtaNameMessage
-  ): Promise<OtaNameSubscriptionAckResponse | ErrorAckResponse> {
-    if (!data?.otaName) {
-      return { error: 'OtaName is required' }
-    }
-
-    await client.join(this.getOtaNameRoom(data.otaName))
-    const nativeVersionCode = Number(data.ver)
-    if (!data.platform || !Number.isFinite(nativeVersionCode)) {
-      this.subscriptions.unsubscribeApplication(client.id, data.otaName)
-      this.deliveredReleases.get(client.id)?.delete(data.otaName)
-      return { ota: data.otaName }
-    }
+    data: ApplicationSubscription
+  ): Promise<ApplicationSubscriptionAckResponse | ErrorAckResponse> {
+    const fields = [
+      'appName',
+      'platform',
+      'architecture',
+      'distributionChannel',
+      'nativeVersionCode',
+      'installedReleaseSequence'
+    ]
+    const integer = (v: unknown) =>
+      Number.isSafeInteger(v) && Number(v) >= 0 && Number(v) <= 2147483647
+    if (
+      !data ||
+      Object.keys(data).some(k => !fields.includes(k)) ||
+      typeof data.appName !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(data.appName) ||
+      !Object.values(PlatformType).includes(data.platform as PlatformType) ||
+      !integer(data.nativeVersionCode) ||
+      (data.installedReleaseSequence !== undefined &&
+        !integer(data.installedReleaseSequence)) ||
+      [data.architecture, data.distributionChannel].some(
+        v => v !== undefined && (typeof v !== 'string' || v.length > 128)
+      )
+    )
+      return { error: 'Invalid application subscription' }
+    await client.join(this.getApplicationRoom(data.appName))
+    const nativeVersionCode = data.nativeVersionCode
     const subscriber = this.subscriptions.subscribeApplication(client.id, {
-      appName: data.otaName,
+      appName: data.appName,
       platform: data.platform,
       architecture: data.architecture,
-      distributionChannel: data.channel,
+      distributionChannel: data.distributionChannel,
       nativeVersionCode,
-      installedReleaseSequence: Number(data.id) || 0
+      installedReleaseSequence: Number(data.installedReleaseSequence) || 0
     })
 
     try {
       const catalog = await this.otaVersionQueryService.loadCatalog(
-        data.otaName
+        data.appName
       )
       this.emitCurrentDecision(subscriber, catalog, true, client)
     } catch (error) {
       this.logger.error(
-        `otaName replay failed: ${data.otaName}`,
+        `appName replay failed: ${data.appName}`,
         error instanceof Error ? error.stack : undefined
       )
     }
 
-    return { ota: data.otaName }
+    return { appName: data.appName }
   }
 
-  @SubscribeMessage('otaName:unsubscribe')
-  async handleOtaNameUnsubscribe(
+  @SubscribeMessage('app:unsubscribe')
+  async handleApplicationUnsubscribe(
     client: Socket,
-    data: OtaNameMessage
-  ): Promise<OtaNameSubscriptionAckResponse | ErrorAckResponse> {
-    if (!data?.otaName) {
-      return { error: 'OtaName is required' }
+    data: Pick<ApplicationSubscription, 'appName'>
+  ): Promise<ApplicationSubscriptionAckResponse | ErrorAckResponse> {
+    if (!data?.appName) {
+      return { error: 'Application is required' }
     }
 
-    await client.leave(this.getOtaNameRoom(data.otaName))
-    this.subscriptions.unsubscribeApplication(client.id, data.otaName)
-    this.deliveredReleases.get(client.id)?.delete(data.otaName)
-    return { ota: data.otaName }
+    await client.leave(this.getApplicationRoom(data.appName))
+    this.subscriptions.unsubscribeApplication(client.id, data.appName)
+    this.deliveredReleases.get(client.id)?.delete(data.appName)
+    return { appName: data.appName }
   }
 
   @SubscribeMessage('userId:ack')
@@ -426,12 +445,12 @@ export class RealtimeGateway {
     const { payload, decision } =
       this.otaVersionQueryService.resolveAvailableDecision(
         {
-          name: application.appName,
+          appName: application.appName,
           platform: application.platform,
           architecture: application.architecture,
-          channel: application.distributionChannel,
-          ver: application.nativeVersionCode,
-          id: application.installedReleaseSequence,
+          distributionChannel: application.distributionChannel,
+          nativeVersionCode: application.nativeVersionCode,
+          installedReleaseSequence: application.installedReleaseSequence,
           userIds: Array.from(subscriber.userIds)
         },
         catalog
@@ -457,7 +476,9 @@ export class RealtimeGateway {
     ) => {
       metrics.count(kind, release) // Attempts, not delivery acknowledgements.
       try {
-        if (client.emit(application.appName, data) === false) {
+        if (
+          client.emit('app:' + application.appName + ':update', data) === false
+        ) {
           metrics.count('emitErrors', release)
           return false
         }
@@ -469,7 +490,7 @@ export class RealtimeGateway {
     }
 
     if (previous && (!payload || previousId !== nextId)) {
-      if (!emit(previous, { ...previous.payload, enable: 0 }, 'revoked')) {
+      if (!emit(previous, { ...previous.payload, enabled: false }, 'revoked')) {
         if (payload) metrics.skip('revoke_emit_failed')
         return
       }

@@ -40,13 +40,13 @@ describe('administrator query bounds', () => {
     })
   })
 
-  it('reads legacy and dual-written report timestamps without runtime DDL', () => {
+  it('requires canonical report timestamps without fallback or runtime DDL', () => {
     const table = new Table({
       name: 'app_success',
-      columns: [{ name: 'create_time', type: 'datetime' }]
+      columns: [{ name: 'created_at', type: 'datetime' }]
     })
-    expect(storedColumn(table, 'report', 'created_at', 'create_time')).toBe(
-      'report.`create_time`'
+    expect(storedColumn(table, 'report', 'created_at')).toBe(
+      'report.`created_at`'
     )
     expect(() => storedColumn(table, 'report', 'missing')).toThrow()
   })

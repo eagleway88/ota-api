@@ -1,3 +1,4 @@
+import { InitialSchema1792713600000 } from '@/migrations/1792713600000-InitialSchema'
 import 'reflect-metadata'
 import { randomUUID } from 'crypto'
 import { ConfigService } from '@nestjs/config'
@@ -6,8 +7,6 @@ import {
   ApplicationRegistryService,
   RegisteredApplication
 } from '@/applications/application-registry.service'
-import { RefactoringFoundation1792444800000 } from '@/migrations/1792444800000-RefactoringFoundation'
-import { ApplicationDataMigration1792445100000 } from '@/migrations/1792445100000-ApplicationDataMigration'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
 import { AdminReadRepository } from '@/infrastructure/persistence/admin-read.repository'
 import { ConnectionSubscriptionStore } from '@/realtime/subscriptions/connection-subscription.store'
@@ -73,8 +72,7 @@ mysql('publish task checkpoints on isolated MySQL', () => {
     platforms: ['windows'],
     architectures: [],
     updateType: 'hot',
-    scope: 'public',
-    legacyPayload: { id: 2000, name: 'task-app', enable: 1 }
+    scope: 'public'
   }
 
   function worker(
@@ -157,8 +155,7 @@ mysql('publish task checkpoints on isolated MySQL', () => {
     await source.initialize()
     const runner = source.createQueryRunner()
     try {
-      await new RefactoringFoundation1792444800000().up(runner)
-      await new ApplicationDataMigration1792445100000().up(runner)
+      await new InitialSchema1792713600000().up(runner)
     } finally {
       await runner.release()
     }

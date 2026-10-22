@@ -1,3 +1,4 @@
+import { releaseRow } from './fixtures/release'
 import { DataSource, QueryRunner } from 'typeorm'
 import { UpdateQueryService } from '@/updates/update-query.service'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
@@ -20,21 +21,12 @@ function queryBuilder(rows: Record<string, unknown>[]) {
 describe('UpdateQueryService', () => {
   it('loads release and audience snapshots once and applies exact allowlists', async () => {
     const releases = queryBuilder([
-      {
-        id: 2000,
+      releaseRow({
         release_id: 'release-private',
         release_scope: 'allowlist',
-        name: 'app',
-        ver: 110,
-        base_versions: '100',
-        platform: 'windows',
-        architecture: 'x64',
         update_type: 'hot',
-        enable: 1,
-        mandatory: 0,
-        show_dialog: 1,
-        package_url: 'https://example.test/update.zip'
-      }
+        bundle_url: 'https://example.test/update.zip'
+      })
     ])
     const audience = queryBuilder([
       { release_id: 'release-private', user_id: 'app:windows:1' }
@@ -45,12 +37,22 @@ describe('UpdateQueryService', () => {
       startTransaction: jest.fn(),
       commitTransaction: jest.fn(),
       release: releaseQueryRunner,
-      hasTable: jest.fn((name: string) =>
-        Promise.resolve(name !== 'ota_applications')
-      ),
+      hasTable: jest.fn().mockResolvedValue(true),
       manager: {
         createQueryBuilder: jest
           .fn()
+          .mockReturnValueOnce({
+            select: jest.fn().mockReturnThis(),
+            from: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            getRawOne: jest.fn().mockResolvedValue({
+              app_name: 'app',
+              table_prefix: 'app',
+              schema_version: 1,
+              status: 'ready',
+              catalog_revision: 1
+            })
+          })
           .mockReturnValueOnce(releases)
           .mockReturnValueOnce(audience)
       }
@@ -69,11 +71,11 @@ describe('UpdateQueryService', () => {
       )
     )
     const baseQuery = {
-      name: 'app',
+      appName: 'app',
       platform: 'windows',
       architecture: 'x64',
-      ver: 100,
-      id: 0
+      nativeVersionCode: 100,
+      installedReleaseSequence: 0
     }
 
     await expect(
@@ -86,9 +88,9 @@ describe('UpdateQueryService', () => {
       })
     ).resolves.toEqual(
       expect.objectContaining({
-        id: 2000,
-        name: 'app',
-        packageUrl: 'https://example.test/update.zip'
+        releaseSequence: 2000,
+        appName: 'app',
+        bundleUrl: 'https://example.test/update.zip'
       })
     )
 

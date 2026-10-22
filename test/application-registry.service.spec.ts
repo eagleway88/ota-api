@@ -2,7 +2,7 @@ import { DataSource } from 'typeorm'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
 
-function setup({ acquired = 1, pending = false } = {}) {
+function setup({ acquired = 1 } = {}) {
   const builder = {
     select: jest.fn().mockReturnThis(),
     from: jest.fn().mockReturnThis(),
@@ -13,7 +13,6 @@ function setup({ acquired = 1, pending = false } = {}) {
       table_prefix: 'app_123a',
       status: 'ready',
       schema_version: 2,
-      read_model: 'formal',
       catalog_revision: 1
     })
   }
@@ -26,15 +25,7 @@ function setup({ acquired = 1, pending = false } = {}) {
     rollbackTransaction: jest.fn(),
     manager: { createQueryBuilder: jest.fn(() => builder) },
     query: jest.fn((sql: string) =>
-      Promise.resolve(
-        sql.includes('GET_LOCK')
-          ? [{ acquired }]
-          : sql.startsWith('SELECT migration_key')
-            ? pending
-              ? [{ migration_key: 'formal-fields-v1' }]
-              : []
-            : []
-      )
+      Promise.resolve(sql.includes('GET_LOCK') ? [{ acquired }] : [])
     )
   }
   const source = { createQueryRunner: () => runner } as unknown as DataSource
@@ -48,7 +39,7 @@ function setup({ acquired = 1, pending = false } = {}) {
   }
 }
 
-describe('application preparation migration isolation', () => {
+describe('application preparation runtime isolation', () => {
   it('runtime readiness checks never prepare tables, acquire preparation locks or start write transactions', async () => {
     const { service, runner } = setup()
     const prepare = jest.spyOn(service, 'prepare')
@@ -69,7 +60,6 @@ describe('application preparation migration isolation', () => {
         table_prefix: 'app_123a',
         status,
         schema_version: 2,
-        read_model: 'formal',
         catalog_revision: 1
       })
       await expect(service.requireReady('app')).rejects.toThrow(
@@ -78,7 +68,7 @@ describe('application preparation migration isolation', () => {
       expect(runner.query).not.toHaveBeenCalled()
     }
   )
-  it('does not downgrade or re-run DDL for a ready, migrated application', async () => {
+  it('does not downgrade or re-run DDL for a ready application', async () => {
     const { service, runner } = setup()
     expect(await service.prepare('app')).toMatchObject({
       schemaVersion: 2,
@@ -93,8 +83,8 @@ describe('application preparation migration isolation', () => {
     expect(runner.commitTransaction).toHaveBeenCalledTimes(1)
     expect(runner.release).toHaveBeenCalledTimes(1)
   })
-  it.each([{ acquired: 0 }, { pending: true }])(
-    'does not mark a competing/paused migration failed: %j',
+  it.each([{ acquired: 0 }])(
+    'does not mark a competing preparation failed: %j',
     async options => {
       const { service, runner } = setup(options)
       await expect(service.prepare('app')).rejects.toThrow()

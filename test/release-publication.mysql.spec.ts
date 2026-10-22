@@ -1,11 +1,8 @@
+import { InitialSchema1792713600000 } from '@/migrations/1792713600000-InitialSchema'
 import 'reflect-metadata'
 import { randomUUID } from 'crypto'
-import type { Request } from 'express'
-import { ConfigService } from '@nestjs/config'
 import { Logger } from '@nestjs/common'
 import { DataSource, QueryRunner } from 'typeorm'
-import { RefactoringFoundation1792444800000 } from '@/migrations/1792444800000-RefactoringFoundation'
-import { ApplicationDataMigration1792445100000 } from '@/migrations/1792445100000-ApplicationDataMigration'
 import {
   ApplicationRegistryService,
   RegisteredApplication
@@ -14,25 +11,19 @@ import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service
 import { ReleaseDraftService } from '@/releases/release-draft.service'
 import { ReleaseManagementService } from '@/releases/release-management.service'
 import { PublishTaskWorkerService } from '@/jobs/publish/publish-task-worker.service'
-import { VersionService } from './fixtures/legacy-version.service'
-import { UpdateQueryService } from '@/updates/update-query.service'
 import {
   PlatformType,
   ReleaseScopeType,
   UpdateType
 } from '@/contracts/release-values'
-import { ApplicationDataMigrator } from '@/infrastructure/migrations/application-data-migrator'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
-import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
-import { inspectBackfillRow } from '@/infrastructure/persistence/legacy/backfill-row'
+import { SqlReleaseRepository } from '@/infrastructure/persistence/sql-release.repository'
 import { AuditQueryService } from '@/manage/audit/audit.service'
 import { AdminReadRepository } from '@/infrastructure/persistence/admin-read.repository'
 
 function deferred() {
   let resolve!: () => void
-  const promise = new Promise<void>(done => {
-    resolve = done
-  })
+  const promise = new Promise<void>(done => (resolve = done))
   return { promise, resolve }
 }
 const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
@@ -44,15 +35,9 @@ mysql('publication transactions on isolated MySQL', () => {
   let applications: ApplicationRegistryService
   let application: RegisteredApplication
   let drafts: ReleaseDraftService
-  let legacy: VersionService
   let policy: ReleaseManagementService
   const appName = 'publishing-app'
   const context = { requestId: 'publish-test' }
-  const request = {
-    headers: { 'x-request-id': 'legacy-publish-test' },
-    ip: '127.0.0.1',
-    user: { sub: 17, username: 'legacy-operator' }
-  } as unknown as Request
   const catalog = { invalidate: jest.fn() }
   const worker = { execute: jest.fn() }
   const connection = {
@@ -67,24 +52,10 @@ mysql('publication transactions on isolated MySQL', () => {
   }
   const query = (sql: string, args: unknown[] = []) =>
     source.query<Record<string, unknown>[]>(sql, args)
-  const legacyPublish = (name = appName, userIds: string[] = []) =>
-    legacy.create(request, {
-      name,
-      ver: '1.1.0',
-      platform: 'windows',
-      baseVersions: '1.0.0',
-      installUrl: 'https://example.test/app.exe',
-      enable: 1,
-      mandatory: 0,
-      releaseScope: userIds.length
-        ? ReleaseScopeType.Allowlist
-        : ReleaseScopeType.Public,
-      userIds
-    })
-  const draft = async (userIds: string[] = []) =>
+  const draft = async (userIds: string[] = [], targetAppName = appName) =>
     (
       await drafts.createDraft(
-        appName,
+        targetAppName,
         {
           targetVersionCode: 120,
           compatibleBaseVersionCodes: [100],
@@ -118,8 +89,7 @@ mysql('publication transactions on isolated MySQL', () => {
     await source.initialize()
     const runner = source.createQueryRunner()
     try {
-      await new RefactoringFoundation1792444800000().up(runner)
-      await new ApplicationDataMigration1792445100000().up(runner)
+      await new InitialSchema1792713600000().up(runner)
     } finally {
       await runner.release()
     }
@@ -133,21 +103,13 @@ mysql('publication transactions on isolated MySQL', () => {
       applications,
       catalog as unknown as ReleaseCatalogService,
       worker as unknown as PublishTaskWorkerService,
-      new DualWriteReleaseRepository()
-    )
-    legacy = new VersionService(
-      catalog as unknown as UpdateQueryService,
-      { get: jest.fn() } as unknown as ConfigService,
-      source,
-      applications,
-      policy,
-      new DualWriteReleaseRepository()
+      new SqlReleaseRepository()
     )
     drafts = new ReleaseDraftService(
       source,
       applications,
       catalog as unknown as ReleaseCatalogService,
-      new DualWriteReleaseRepository()
+      new SqlReleaseRepository()
     )
     catalog.invalidate.mockClear()
     worker.execute.mockReset()
@@ -162,9 +124,11 @@ mysql('publication transactions on isolated MySQL', () => {
     if (control?.isInitialized) await control.destroy()
   })
 
-  it('holds allocation order through commit across legacy/v2, excludes migration and allows another application', async () => {
+  it('holds allocation order through commit for different drafts and allows another application', async () => {
     const releaseId = await draft()
+    const firstReleaseId = await draft()
     await applications.prepare('other-app')
+    const otherReleaseId = await draft([], 'other-app')
     const inserted = deferred()
     const resume = deferred()
     const competitor = deferred()
@@ -199,36 +163,32 @@ mysql('publication transactions on isolated MySQL', () => {
       runner.query = intercepted as QueryRunner['query']
       return runner
     })
-    const first = legacyPublish()
+    const first = drafts.publish(appName, firstReleaseId, context)
     let second: ReturnType<ReleaseDraftService['publish']> | undefined
     try {
-      await inserted.promise // The legacy ID exists, but its transaction is not committed.
+      await inserted.promise // The first ID exists, but its transaction is not committed.
       second = drafts.publish(appName, releaseId, context)
       await competitor.promise
       expect(
         await query(`SELECT id FROM \`${application.tables.version}\``)
       ).toEqual([])
-      await expect(
-        new ApplicationDataMigrator(source).run({
-          appName,
-          tablePrefix: application.tablePrefix,
-          mode: 'apply',
-          batchSize: 1,
-          confirmedIssuedId: 0,
-          confirmBackup: true,
-          confirmWritesPaused: true
-        })
-      ).rejects.toThrow('already running')
-      expect((await legacyPublish('other-app')).code).toBe(0)
+      expect(
+        (await drafts.publish('other-app', otherReleaseId, context)).code
+      ).toBe(0)
       resume.resolve()
       const [a, b] = await Promise.all([first, second])
-      expect(Number(a.data.id)).toBeGreaterThanOrEqual(2000)
-      expect(Number(a.data.id)).toBeLessThan(b.data.releaseSequence)
+      expect(Number(a.data.releaseSequence)).toBeGreaterThanOrEqual(2000)
+      expect(Number(a.data.releaseSequence)).toBeLessThan(
+        b.data.releaseSequence
+      )
       expect(
         await query(
           `SELECT id FROM \`${application.tables.version}\` ORDER BY id`
         )
-      ).toEqual([{ id: a.data.id }, { id: b.data.releaseSequence }])
+      ).toEqual([
+        { id: a.data.releaseSequence },
+        { id: b.data.releaseSequence }
+      ])
       expect(
         await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
       ).toHaveLength(2)
@@ -257,59 +217,52 @@ mysql('publication transactions on isolated MySQL', () => {
       )
     ).toHaveLength(1)
   })
-
-  it.each(['legacy', 'v2'] as const)(
-    'rolls back release, task, revision and draft state when %s audit fails',
-    async kind => {
-      const releaseId = kind === 'v2' ? await draft() : undefined
-      await query(`CREATE TRIGGER publication_fail BEFORE INSERT ON \`${application.tables.auditLog}\`
+  it('rolls back release, task, revision and draft state when its audit fails', async () => {
+    const releaseId = await draft()
+    await query(`CREATE TRIGGER publication_fail BEFORE INSERT ON \`${application.tables.auditLog}\`
       FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected publication failure'`)
-      const publish = () =>
-        releaseId
-          ? drafts.publish(appName, releaseId, context)
-          : legacyPublish()
-      await expect(publish()).rejects.toThrow('injected publication failure')
+    const publish = async () => drafts.publish(appName, releaseId, context)
+    await expect(publish()).rejects.toThrow('injected publication failure')
+    expect(
+      await query(`SELECT id FROM \`${application.tables.version}\``)
+    ).toHaveLength(0)
+    expect(
+      await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
+    ).toHaveLength(0)
+    expect(
+      Number(
+        (
+          await query(
+            'SELECT catalog_revision FROM ota_applications WHERE app_name = ?',
+            [appName]
+          )
+        )[0].catalog_revision
+      )
+    ).toBe(0)
+    expect(catalog.invalidate).not.toHaveBeenCalled()
+    if (releaseId)
       expect(
-        await query(`SELECT id FROM \`${application.tables.version}\``)
-      ).toHaveLength(0)
-      expect(
-        await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
-      ).toHaveLength(0)
-      expect(
-        Number(
-          (
-            await query(
-              'SELECT catalog_revision FROM ota_applications WHERE app_name = ?',
-              [appName]
-            )
-          )[0].catalog_revision
-        )
-      ).toBe(0)
-      expect(catalog.invalidate).not.toHaveBeenCalled()
-      if (releaseId)
-        expect(
-          (
-            await query(
-              `SELECT status FROM \`${application.tables.releaseDraft}\``
-            )
-          )[0].status
-        ).toBe('draft')
-      await query('DROP TRIGGER publication_fail')
-      await publish()
-      expect(
-        await query(`SELECT id FROM \`${application.tables.version}\``)
-      ).toHaveLength(1)
-    }
-  )
+        (
+          await query(
+            `SELECT status FROM \`${application.tables.releaseDraft}\``
+          )
+        )[0].status
+      ).toBe('draft')
+    await query('DROP TRIGGER publication_fail')
+    await publish()
+    expect(
+      await query(`SELECT id FROM \`${application.tables.version}\``)
+    ).toHaveLength(1)
+  })
 
-  it('revalidates stale readiness before either publishing path allocates an ID', async () => {
+  it('rejects draft creation and publication when the application is no longer ready', async () => {
     const releaseId = await draft()
     jest.spyOn(applications, 'prepare').mockResolvedValue(application)
     await query(
       "UPDATE ota_applications SET status = 'preparing' WHERE app_name = ?",
       [appName]
     )
-    await expect(legacyPublish()).rejects.toThrow('not ready')
+    await expect(publishRelease()).rejects.toThrow('not ready')
     await expect(drafts.publish(appName, releaseId, context)).rejects.toThrow(
       'not ready'
     )
@@ -318,51 +271,8 @@ mysql('publication transactions on isolated MySQL', () => {
     ).toHaveLength(0)
   })
 
-  it('both writers reconcile after formal cutover and policy changes keep the columns synchronized', async () => {
-    const old = await legacyPublish()
-    expect(old.data).toMatchObject({
-      ver: 110,
-      baseVersions: '100',
-      enable: 1,
-      mandatory: 0
-    })
-    const releaseId = await draft()
-    await drafts.publish(appName, releaseId, context)
-    const records = await query(
-      `SELECT * FROM \`${application.tables.version}\` ORDER BY id`
-    )
-    expect(records.map(row => inspectBackfillRow('version', row))).toEqual([
-      { patch: {}, issues: [] },
-      { patch: {}, issues: [] }
-    ])
-    expect(records[0].compatible_base_version_codes).toEqual([110, 100])
-    expect(records[1].compatible_base_version_codes).toEqual([100])
-    await new ApplicationDataMigrator(source).run({
-      appName,
-      tablePrefix: application.tablePrefix,
-      mode: 'apply',
-      batchSize: 1,
-      confirmedIssuedId: 5000,
-      confirmBackup: true,
-      confirmWritesPaused: true,
-      activateFormal: true
-    })
-    await policy.setEnabled(appName, releaseId, false, context)
-    const disabled = (
-      await query(
-        `SELECT enable, is_enabled FROM \`${application.tables.version}\` WHERE release_id = ?`,
-        [releaseId]
-      )
-    )[0]
-    expect(disabled).toEqual({ enable: 0, is_enabled: 0 })
-    const actualCatalog = new ReleaseCatalogService(source, applications)
-    expect(
-      (await actualCatalog.loadCatalog(appName)).available.releases.find(
-        row => row.releaseId === releaseId
-      )?.enabled
-    ).toBe(false)
-    expect((await legacyPublish()).data.id).toBe(5001)
-  })
+  const publishRelease = async () =>
+    drafts.publish(appName, await draft(), context)
 
   const rejectSuccessAudit = () =>
     query(
@@ -377,73 +287,59 @@ mysql('publication transactions on isolated MySQL', () => {
     query(
       `SELECT * FROM \`${application.tables.auditLog}\` WHERE action NOT IN ('draft_created', 'draft_updated') ORDER BY created_at, audit_id`
     )
+  it('persists an independent failed publication audit after complete rollback', async () => {
+    const releaseId = await draft()
+    await rejectSuccessAudit()
+    await expect(drafts.publish(appName, releaseId, context)).rejects.toThrow(
+      'injected secret SQL payload'
+    )
+    expect(
+      await query(`SELECT id FROM \`${application.tables.version}\``)
+    ).toEqual([])
+    expect(
+      await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
+    ).toEqual([])
+    expect(
+      Number(
+        (
+          await query(
+            'SELECT catalog_revision FROM ota_applications WHERE app_name = ?',
+            [appName]
+          )
+        )[0].catalog_revision
+      )
+    ).toBe(0)
+    const rows = await auditRows()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      action: 'publish',
+      result: 'failed',
+      error_code: 'DATABASE_WRITE_FAILED',
+      task_id: null,
+      revision_before: null,
+      revision_after: null,
+      change_summary: { source: 'v1' }
+    })
+    expect(JSON.stringify(rows)).not.toMatch(/secret|payload|example\.test/)
 
-  it.each(['legacy', 'v2'] as const)(
-    'persists an independent failed %s publication audit after complete rollback',
-    async kind => {
-      const releaseId = kind === 'v2' ? await draft() : undefined
-      await rejectSuccessAudit()
-      await expect(
-        releaseId
-          ? drafts.publish(appName, releaseId, context)
-          : legacyPublish()
-      ).rejects.toThrow('injected secret SQL payload')
+    if (releaseId) {
+      expect(rows[0].release_id).toBe(releaseId)
       expect(
-        await query(`SELECT id FROM \`${application.tables.version}\``)
-      ).toEqual([])
-      expect(
-        await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
-      ).toEqual([])
-      expect(
-        Number(
-          (
-            await query(
-              'SELECT catalog_revision FROM ota_applications WHERE app_name = ?',
-              [appName]
-            )
-          )[0].catalog_revision
-        )
-      ).toBe(0)
-      const rows = await auditRows()
-      expect(rows).toHaveLength(1)
-      expect(rows[0]).toMatchObject({
-        action: 'publish',
-        result: 'failed',
-        error_code: 'DATABASE_WRITE_FAILED',
-        task_id: null,
-        revision_before: null,
-        revision_after: null,
-        change_summary: { source: kind === 'legacy' ? 'legacy-http' : 'v2' }
-      })
-      expect(JSON.stringify(rows)).not.toMatch(/secret|payload|example\.test/)
-      if (kind === 'legacy') {
-        expect(rows[0]).toMatchObject({
-          request_id: 'legacy-publish-test',
-          actor_admin_id: 17,
-          actor_name_snapshot: 'legacy-operator',
-          actor_type: 'admin'
-        })
-      }
-      if (releaseId) {
-        expect(rows[0].release_id).toBe(releaseId)
-        expect(
-          (
-            await query(
-              `SELECT status FROM \`${application.tables.releaseDraft}\``
-            )
-          )[0].status
-        ).toBe('draft')
-      }
-      expect(catalog.invalidate).not.toHaveBeenCalled()
-      await query('DROP TRIGGER reject_success_audit')
-      if (releaseId) await drafts.publish(appName, releaseId, context)
-      else await legacyPublish()
-      expect((await auditRows()).map(row => row.result).sort()).toEqual([
-        'failed',
-        'succeeded'
-      ])
+        (
+          await query(
+            `SELECT status FROM \`${application.tables.releaseDraft}\``
+          )
+        )[0].status
+      ).toBe('draft')
     }
-  )
+    expect(catalog.invalidate).not.toHaveBeenCalled()
+    await query('DROP TRIGGER reject_success_audit')
+    await drafts.publish(appName, releaseId, context)
+    expect((await auditRows()).map(row => row.result).sort()).toEqual([
+      'failed',
+      'succeeded'
+    ])
+  })
 
   it.each(['enable', 'disable', 'redispatch', 'users', 'scope'] as const)(
     'rolls back %s mutations and exposes the failed audit to administrators, then permits a clean retry',
@@ -456,7 +352,7 @@ mysql('publication transactions on isolated MySQL', () => {
       catalog.invalidate.mockClear()
       const operationContext = {
         requestId: `failed-${action}`,
-        actorAdminId: 7,
+        actorKeyId: '10000000-0000-4000-8000-000000000007',
         actorName: 'operator',
         sourceIp: '127.0.0.1'
       }
@@ -522,7 +418,7 @@ mysql('publication transactions on isolated MySQL', () => {
       expect(page.data.data[0]).toMatchObject({
         result: 'failed',
         error_code: 'DATABASE_WRITE_FAILED',
-        actor_admin_id: 7,
+        actor_key_id: '10000000-0000-4000-8000-000000000007',
         request_id: operationContext.requestId,
         release_id: releaseId,
         task_id: null,
@@ -650,10 +546,10 @@ mysql('publication transactions on isolated MySQL', () => {
     expect(
       (
         await query(
-          `SELECT enable, is_enabled, policy_revision FROM \`${application.tables.version}\``
+          `SELECT is_enabled, policy_revision FROM \`${application.tables.version}\``
         )
       )[0]
-    ).toEqual({ enable: 0, is_enabled: 0, policy_revision: 2 })
+    ).toEqual({ is_enabled: 0, policy_revision: 2 })
     expect((await auditRows()).map(row => row.result)).toEqual([
       'succeeded',
       'succeeded'
@@ -683,53 +579,46 @@ mysql('publication transactions on isolated MySQL', () => {
       `SELECT user_id FROM \`${application.tables.releaseUser}\` WHERE release_id = ? ORDER BY user_id`,
       [releaseId]
     )
-
-  it.each(['legacy', 'v2'] as const)(
-    'audits every initial audience member in a segmented %s publication',
-    async kind => {
-      const userIds = audienceIds('initial', 401)
-      const releaseId = kind === 'v2' ? await draft(userIds) : undefined
-      const publish = () =>
-        releaseId
-          ? drafts.publish(appName, releaseId, context)
-          : legacyPublish(appName, userIds)
-      await query(`CREATE TRIGGER publication_part_fail BEFORE INSERT ON \`${application.tables.auditLog}\`
+  it('audits every initial audience member in a segmented publication', async () => {
+    const userIds = audienceIds('initial', 401)
+    const releaseId = await draft(userIds)
+    const publish = async () => drafts.publish(appName, releaseId, context)
+    await query(`CREATE TRIGGER publication_part_fail BEFORE INSERT ON \`${application.tables.auditLog}\`
         FOR EACH ROW BEGIN IF NEW.part_no = 2 AND NEW.result = 'succeeded' THEN
           SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'publication second part failed'; END IF; END`)
-      await expect(publish()).rejects.toThrow('publication second part failed')
-      expect(
-        await query(`SELECT id FROM \`${application.tables.version}\``)
-      ).toEqual([])
-      expect(
-        await query(`SELECT user_id FROM \`${application.tables.releaseUser}\``)
-      ).toEqual([])
-      expect(
-        await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
-      ).toEqual([])
-      expect(await auditRows()).toEqual([
-        expect.objectContaining({ result: 'failed', change_detail: null })
-      ])
-      await query('DROP TRIGGER publication_part_fail')
-      await publish()
-      const rows = (await auditRows())
-        .filter(row => row.result === 'succeeded')
-        .sort((a, b) => Number(a.part_no) - Number(b.part_no))
-      expect(rows.map(row => row.part_no)).toEqual([1, 2, 3])
-      expect(new Set(rows.map(row => row.operation_id)).size).toBe(1)
-      expect(new Set(rows.map(row => row.task_id)).size).toBe(1)
-      expect(rows[0].change_summary).toMatchObject({
-        audience: {
-          scopeBefore: null,
-          scopeAfter: 'allowlist',
-          addedCount: 401,
-          removedCount: 0,
-          partCount: 3
-        }
-      })
-      expect(details(rows).flatMap(part => part.addedUserIds)).toEqual(userIds)
-      expect(details(rows).flatMap(part => part.removedUserIds)).toEqual([])
-    }
-  )
+    await expect(publish()).rejects.toThrow('publication second part failed')
+    expect(
+      await query(`SELECT id FROM \`${application.tables.version}\``)
+    ).toEqual([])
+    expect(
+      await query(`SELECT user_id FROM \`${application.tables.releaseUser}\``)
+    ).toEqual([])
+    expect(
+      await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
+    ).toEqual([])
+    expect(await auditRows()).toEqual([
+      expect.objectContaining({ result: 'failed', change_detail: null })
+    ])
+    await query('DROP TRIGGER publication_part_fail')
+    await publish()
+    const rows = (await auditRows())
+      .filter(row => row.result === 'succeeded')
+      .sort((a, b) => Number(a.part_no) - Number(b.part_no))
+    expect(rows.map(row => row.part_no)).toEqual([1, 2, 3])
+    expect(new Set(rows.map(row => row.operation_id)).size).toBe(1)
+    expect(new Set(rows.map(row => row.task_id)).size).toBe(1)
+    expect(rows[0].change_summary).toMatchObject({
+      audience: {
+        scopeBefore: null,
+        scopeAfter: 'allowlist',
+        addedCount: 401,
+        removedCount: 0,
+        partCount: 3
+      }
+    })
+    expect(details(rows).flatMap(part => part.addedUserIds)).toEqual(userIds)
+    expect(details(rows).flatMap(part => part.removedUserIds)).toEqual([])
+  })
 
   it('audits all 10000 membership changes and allows paginated administrator reconstruction', async () => {
     const before = audienceIds('old', 5000)

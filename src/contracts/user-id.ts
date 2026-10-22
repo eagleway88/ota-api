@@ -4,7 +4,8 @@ export type ParsedUserId = {
   businessUserId: string
 }
 
-export function parseUserId(value: string): ParsedUserId | null {
+export function parseUserId(value: unknown): ParsedUserId | null {
+  if (typeof value !== 'string' || value.length > 191) return null
   const firstSeparator = value.indexOf(':')
   const secondSeparator = value.indexOf(':', firstSeparator + 1)
   if (firstSeparator <= 0 || secondSeparator <= firstSeparator + 1) {

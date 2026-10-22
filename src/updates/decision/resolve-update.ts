@@ -58,7 +58,7 @@ function matchesChannel(
   policy: ApplicationUpdatePolicy
 ) {
   if (!release.distributionChannel) {
-    return policy.legacyEmptyChannelMatchesAny
+    return policy.emptyChannelMatchesAny
   }
   if (!context.distributionChannel) {
     return true

@@ -1,7 +1,7 @@
 import { Global, Module } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import { DataSource } from 'typeorm'
-import { LegacyUpdateCheckController } from '@/compat/legacy/update-check.controller'
+import { UpdateCheckController } from '@/app/updates/update-check.controller'
 import { TelemetryWriteRepository } from '@/telemetry/ports/telemetry-write.repository'
 import { TelemetryWriteService } from '@/telemetry/telemetry-write.service'
 import { TelemetryWritesModule } from '@/telemetry/telemetry-writes.module'
@@ -15,7 +15,7 @@ const database = { createQueryRunner: jest.fn() }
 class PersistenceFixture {}
 
 describe('telemetry write boundary', () => {
-  it('replaces persistence without loading legacy HTTP, workers or OSS', async () => {
+  it('replaces persistence without loading HTTP controllers, workers or OSS', async () => {
     const reports = {
       success: jest.fn().mockResolvedValue({ id: 1 }),
       failure: jest.fn(),
@@ -39,7 +39,7 @@ describe('telemetry write boundary', () => {
         id: 1
       })
       expect(reports.success).toHaveBeenCalledWith(input, expect.any(Object))
-      expect(() => module.get(LegacyUpdateCheckController)).toThrow()
+      expect(() => module.get(UpdateCheckController)).toThrow()
       expect(database.createQueryRunner).not.toHaveBeenCalled()
     } finally {
       await module.close()

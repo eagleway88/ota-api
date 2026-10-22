@@ -71,52 +71,6 @@ export class ReleaseManagementService {
     private readonly releaseWrites: ReleaseWriteRepository
   ) {}
 
-  async enqueuePublishedRelease(
-    queryRunner: QueryRunner,
-    application: RegisteredApplication,
-    releaseId: string,
-    context: ReleaseOperationContext,
-    operationId = randomUUID()
-  ) {
-    const taskId = randomUUID()
-    const catalogRevision = await this.applications.incrementCatalogRevision(
-      queryRunner,
-      application.appName
-    )
-    await this.insertTask(queryRunner, application, {
-      taskId,
-      operationId,
-      releaseId,
-      action: 'publish',
-      revision: catalogRevision
-    })
-    const release = await this.lockRelease(queryRunner, application, releaseId)
-    const audience = planAudienceChange(
-      { scope: null, userIds: [] },
-      await this.readAudience(queryRunner, application, releaseId, release)
-    )
-    await insertReleaseSuccessAudit(queryRunner, application, {
-      context,
-      taskId,
-      operationId,
-      releaseId,
-      action: 'publish',
-      revisionBefore: 0,
-      revisionAfter: 1,
-      changeSummary: { source: 'legacy-http' },
-      audience
-    })
-    return { taskId, operationId }
-  }
-
-  async executePersistedTask(
-    application: RegisteredApplication,
-    taskId: string,
-    requestId?: string
-  ) {
-    return this.taskWorker.execute(application, taskId, requestId)
-  }
-
   async list(appName: string, query: ReleaseListQueryDto) {
     const application = await this.applications.resolve(appName)
     const page = Math.max(Number(query.page) || 1, 1)
@@ -131,13 +85,13 @@ export class ReleaseManagementService {
         .createQueryBuilder()
         .select('COUNT(*)', 'total')
         .from(application.tables.version, 'version')
-        .where('version.name = :appName', { appName })
+        .where('version.app_name = :appName', { appName })
         .getRawOne<{ total: string | number }>()
       const records = await queryRunner.manager
         .createQueryBuilder()
         .select('*')
         .from(application.tables.version, 'version')
-        .where('version.name = :appName', { appName })
+        .where('version.app_name = :appName', { appName })
         .orderBy('version.id', 'DESC')
         .skip((page - 1) * pageSize)
         .take(pageSize)
@@ -167,7 +121,7 @@ export class ReleaseManagementService {
           .select('version.release_id', 'releaseId')
           .from(application.tables.version, 'version')
           .where('version.release_id = :releaseId', { releaseId })
-          .andWhere('version.name = :appName', { appName })
+          .andWhere('version.app_name = :appName', { appName })
           .getRawOne<{ releaseId: string }>()
         if (published) {
           if (!(await queryRunner.hasTable(application.tables.releaseUser))) {
@@ -226,7 +180,7 @@ export class ReleaseManagementService {
         try {
           normalized = normalizeReleaseAudience({
             appName,
-            platforms: String(release.platform),
+            platforms: mapStoredReleaseRecord(release).platforms,
             releaseScope: 'allowlist',
             userIds: body.userIds
           })
@@ -398,7 +352,7 @@ export class ReleaseManagementService {
         await queryRunner.manager
           .createQueryBuilder()
           .update(application.tables.version)
-          .set({ policy_revision: revisionAfter })
+          .set({ policy_revision: revisionAfter, updated_at: new Date() })
           .where('release_id = :releaseId', { releaseId })
           .execute()
         const catalogRevision =
@@ -495,7 +449,7 @@ export class ReleaseManagementService {
         try {
           normalized = normalizeReleaseAudience({
             appName,
-            platforms: platforms.join(','),
+            platforms,
             releaseScope: nextScope,
             userIds: nextUserIds
           })
@@ -589,7 +543,7 @@ export class ReleaseManagementService {
         .select('*')
         .from(application.tables.version, 'version')
         .where('version.release_id = :releaseId', { releaseId })
-        .andWhere('version.name = :appName', { appName })
+        .andWhere('version.app_name = :appName', { appName })
         .getRawOne<Record<string, unknown>>()
       if (!release) {
         throw new NotFoundException('Release does not exist')
@@ -611,7 +565,7 @@ export class ReleaseManagementService {
       .from(application.tables.version, 'version')
       .setLock('pessimistic_write')
       .where('version.release_id = :releaseId', { releaseId })
-      .andWhere('version.name = :appName', { appName: application.appName })
+      .andWhere('version.app_name = :appName', { appName: application.appName })
       .getRawOne<Record<string, unknown>>()
     if (!release) {
       throw new NotFoundException('Release does not exist')
@@ -688,12 +642,12 @@ export class ReleaseManagementService {
       enabled: release.enabled,
       mandatory: release.mandatory,
       showUpdateDialog: release.showUpdateDialog,
-      policyRevision: Number(release.legacyPayload.policyRevision) || 1,
-      installerSourceUrl: release.legacyPayload.installUrl,
-      bundleUrl: release.legacyPayload.packageUrl,
-      releaseNotes: release.legacyPayload.desc,
-      artifactSizeBytes: release.legacyPayload.fileSize,
-      createdAt: release.legacyPayload.createTime
+      policyRevision: Number(release.policyRevision) || 1,
+      installerSourceUrl: release.installerSourceUrl,
+      bundleUrl: release.bundleUrl,
+      releaseNotes: release.releaseNotes,
+      artifactSizeBytes: release.artifactSizeBytes,
+      createdAt: release.createdAt
     }
   }
 }

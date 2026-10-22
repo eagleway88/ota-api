@@ -7,8 +7,8 @@ function selected(payload: Record<string, unknown>) {
     payload,
     decision: {
       release: {
-        releaseId: `release-${Number(payload.id)}`,
-        releaseSequence: Number(payload.id)
+        releaseId: `release-${Number(payload.releaseSequence)}`,
+        releaseSequence: Number(payload.releaseSequence)
       }
     }
   }
@@ -55,6 +55,29 @@ describe('RealtimeGateway OTA dispatch', () => {
     }
   }
 
+  it.each([
+    { otaName: 'app', ver: 100 },
+    { appName: 'app', platform: 'windows', nativeVersionCode: '100' },
+    { appName: 'app', platform: 'windows', nativeVersionCode: -1 },
+    { appName: '../app', platform: 'windows', nativeVersionCode: 100 },
+    { appName: 'app', platform: 'invalid', nativeVersionCode: 100 },
+    { appName: 'app', platform: 'windows', nativeVersionCode: 100, extra: true }
+  ])(
+    'rejects invalid or retired subscription input before joining rooms: %j',
+    async body => {
+      const client = createClient(),
+        service = new RealtimeGateway(
+          {} as never,
+          {} as never,
+          new ConnectionSubscriptionStore()
+        )
+      expect(
+        await service.handleApplicationSubscribe(client as never, body as never)
+      ).toHaveProperty('error')
+      expect(client.join).not.toHaveBeenCalled()
+    }
+  )
+
   it('checkpoints inspected connections, skip reasons and send errors in bounded batches', async () => {
     const subscriptions = new ConnectionSubscriptionStore()
     const sockets = new Map<string, ReturnType<typeof createClient>>()
@@ -83,13 +106,14 @@ describe('RealtimeGateway OTA dispatch', () => {
         loadCatalog: jest
           .fn()
           .mockResolvedValue({ available: { revision: 1 } }),
-        resolveAvailableDecision: jest.fn((query: { ver: number }) =>
-          query.ver === 5
-            ? {
-                payload: null,
-                decision: { release: null, skipReason: 'platform_mismatch' }
-              }
-            : selected({ id: 2000, name: 'app' })
+        resolveAvailableDecision: jest.fn(
+          (query: { nativeVersionCode: number }) =>
+            query.nativeVersionCode === 5
+              ? {
+                  payload: null,
+                  decision: { release: null, skipReason: 'platform_mismatch' }
+                }
+              : selected({ releaseSequence: 2000, appName: 'app' })
         )
       } as never,
       {} as never,
@@ -142,7 +166,7 @@ describe('RealtimeGateway OTA dispatch', () => {
       loadCatalog: jest.fn().mockResolvedValue({ available: { revision: 1 } }),
       resolveAvailableDecision: jest
         .fn()
-        .mockReturnValue(selected({ id: 2000, name: 'app' }))
+        .mockReturnValue(selected({ releaseSequence: 2000, appName: 'app' }))
     }
     const service = new RealtimeGateway(
       query as never,
@@ -155,7 +179,7 @@ describe('RealtimeGateway OTA dispatch', () => {
     } as never
     await service.dispatchApplicationUpdate('app')
     query.resolveAvailableDecision.mockReturnValue(
-      selected({ id: 2001, name: 'app' })
+      selected({ releaseSequence: 2001, appName: 'app' })
     )
     client.emit.mockImplementationOnce(() => {
       throw new Error('send failed')
@@ -192,9 +216,9 @@ describe('RealtimeGateway OTA dispatch', () => {
       revoked: 1,
       emitErrors: 0
     })
-    expect(client.emit).toHaveBeenLastCalledWith('app', {
-      id: 2001,
-      name: 'app'
+    expect(client.emit).toHaveBeenLastCalledWith('app:app:update', {
+      releaseSequence: 2001,
+      appName: 'app'
     })
   })
 
@@ -219,9 +243,9 @@ describe('RealtimeGateway OTA dispatch', () => {
         .mockResolvedValue(catalog),
       resolveAvailableDecision: jest.fn((query: { platform: string }) =>
         selected({
-          id: query.platform === 'ios' ? 2001 : 2000,
-          name: 'app',
-          enable: 1
+          releaseSequence: query.platform === 'ios' ? 2001 : 2000,
+          appName: 'app',
+          enabled: true
         })
       )
     }
@@ -231,26 +255,28 @@ describe('RealtimeGateway OTA dispatch', () => {
       subscriptions
     )
     const client = createClient()
-    const oldReplay = service.handleOtaNameSubscribe(client as never, {
-      otaName: 'app',
+    const oldReplay = service.handleApplicationSubscribe(client as never, {
+      appName: 'app',
       platform: 'windows',
-      ver: 100,
-      id: 0
+      nativeVersionCode: 100,
+      installedReleaseSequence: 0
     })
     await started
-    await service.handleOtaNameUnsubscribe(client as never, { otaName: 'app' })
-    await service.handleOtaNameSubscribe(client as never, {
-      otaName: 'app',
+    await service.handleApplicationUnsubscribe(client as never, {
+      appName: 'app'
+    })
+    await service.handleApplicationSubscribe(client as never, {
+      appName: 'app',
       platform: 'ios',
-      ver: 200,
-      id: 0
+      nativeVersionCode: 200,
+      installedReleaseSequence: 0
     })
     finishOld(catalog)
     await oldReplay
     expect(client.emit).toHaveBeenCalledTimes(1)
     expect(client.emit).toHaveBeenCalledWith(
-      'app',
-      expect.objectContaining({ id: 2001 })
+      'app:app:update',
+      expect.objectContaining({ releaseSequence: 2001 })
     )
     expect(queryService.resolveAvailableDecision).toHaveBeenCalledTimes(1)
   })
@@ -264,9 +290,9 @@ describe('RealtimeGateway OTA dispatch', () => {
         .fn()
         .mockImplementation((query: { userIds: readonly string[] }) =>
           selected({
-            id: query.userIds.length ? 2001 : 2000,
-            name: 'app',
-            enable: 1
+            releaseSequence: query.userIds.length ? 2001 : 2000,
+            appName: 'app',
+            enabled: true
           })
         )
     }
@@ -278,11 +304,11 @@ describe('RealtimeGateway OTA dispatch', () => {
     )
     const client = createClient()
 
-    await service.handleOtaNameSubscribe(client as never, {
-      otaName: 'app',
+    await service.handleApplicationSubscribe(client as never, {
+      appName: 'app',
       platform: 'windows',
-      ver: 100,
-      id: 0
+      nativeVersionCode: 100,
+      installedReleaseSequence: 0
     })
     await service.handleUserIdSubscribe(client as never, {
       userId: 'app:windows:1'
@@ -290,18 +316,18 @@ describe('RealtimeGateway OTA dispatch', () => {
 
     expect(client.emit).toHaveBeenNthCalledWith(
       1,
-      'app',
-      expect.objectContaining({ id: 2000 })
+      'app:app:update',
+      expect.objectContaining({ releaseSequence: 2000 })
     )
     expect(client.emit).toHaveBeenNthCalledWith(
       2,
-      'app',
-      expect.objectContaining({ id: 2000, enable: 0 })
+      'app:app:update',
+      expect.objectContaining({ releaseSequence: 2000, enabled: false })
     )
     expect(client.emit).toHaveBeenNthCalledWith(
       3,
-      'app',
-      expect.objectContaining({ id: 2001 })
+      'app:app:update',
+      expect.objectContaining({ releaseSequence: 2001 })
     )
   })
 
@@ -320,8 +346,8 @@ describe('RealtimeGateway OTA dispatch', () => {
       loadCatalog: jest.fn().mockResolvedValue(catalog),
       resolveAvailableDecision: jest.fn().mockReturnValue(
         selected({
-          id: 2000,
-          name: 'app'
+          releaseSequence: 2000,
+          appName: 'app'
         })
       )
     }

@@ -21,7 +21,11 @@ const application: RegisteredApplication = {
 }
 const audit: ApplicationWriteAudit = {
   operationId: 'operation-a',
-  context: { requestId: 'request-a', actorAdminId: 3, actorName: 'admin' },
+  context: {
+    requestId: 'request-a',
+    actorKeyId: '10000000-0000-4000-8000-000000000003',
+    actorName: 'admin'
+  },
   releaseId: 'release-a',
   action: 'disable',
   targetType: 'release',
@@ -146,7 +150,7 @@ describe('application failure audit', () => {
         expect.objectContaining({
           operation_id: 'operation-a',
           request_id: 'request-a',
-          actor_admin_id: 3,
+          actor_key_id: '10000000-0000-4000-8000-000000000003',
           result: 'failed',
           error_code: code,
           task_id: null,
