@@ -1,9 +1,10 @@
 import { randomUUID } from 'crypto'
 import type { NextFunction, Request, Response } from 'express'
 import { fetchIP } from '@/utils'
+import type { ApiKeyPrincipal } from '@/auth/api-key.policy'
 
-export type AdministratorRequest = Request & {
-  user?: { sub: number; username: string; sid: string }
+export type ApiRequest = Request & {
+  principal?: ApiKeyPrincipal
 }
 
 export function requestIdMiddleware(
@@ -21,11 +22,12 @@ export function requestIdMiddleware(
   next()
 }
 
-export function administratorContext(request: AdministratorRequest) {
+export function operationContext(request: ApiRequest) {
   return {
     requestId: String(request.headers['x-request-id'] || randomUUID()),
     sourceIp: fetchIP(request),
-    actorAdminId: request.user?.sub,
-    actorName: request.user?.username
+    actorType: request.principal ? ('api_key' as const) : ('system' as const),
+    actorKeyId: request.principal?.keyId,
+    actorName: request.principal?.name
   }
 }

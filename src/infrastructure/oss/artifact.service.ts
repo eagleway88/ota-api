@@ -6,6 +6,7 @@ import { DataSource } from 'typeorm'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ReleaseOperationContext } from '@/contracts/release-operation'
 import { apiUtil } from '@/utils/api'
+import { insertAudit } from '@/audit/global-audit'
 import { OssArtifactStorage } from '@/infrastructure/oss/oss-artifact.storage'
 import {
   otaUploadMaxBytes,
@@ -37,7 +38,7 @@ export class ArtifactService {
       return apiUtil.error(uploadError)
     }
 
-    const application = await this.applications.prepare(appName, context)
+    const application = await this.applications.requireReady(appName)
     const artifactId = randomUUID()
     const checksumSha256 = createHash('sha256')
       .update(file.buffer)
@@ -53,6 +54,7 @@ export class ArtifactService {
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     try {
+      await queryRunner.startTransaction()
       const now = new Date()
       await queryRunner.manager
         .createQueryBuilder()
@@ -69,6 +71,19 @@ export class ArtifactService {
           updated_at: now
         })
         .execute()
+      await insertAudit(
+        queryRunner,
+        {
+          context,
+          action: 'artifact_uploaded',
+          targetType: 'artifact',
+          targetId: artifactId,
+          result: 'succeeded',
+          changeSummary: { sizeBytes: file.size, checksumSha256 }
+        },
+        application.tables.auditLog
+      )
+      await queryRunner.commitTransaction()
       return apiUtil.data({
         artifactId,
         url: uploaded.url,
@@ -76,6 +91,10 @@ export class ArtifactService {
         checksumSha256,
         status: 'pending'
       })
+    } catch (error) {
+      if (queryRunner.isTransactionActive)
+        await queryRunner.rollbackTransaction()
+      throw error
     } finally {
       await queryRunner.release()
     }

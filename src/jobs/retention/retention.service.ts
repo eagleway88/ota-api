@@ -39,9 +39,6 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
     }
     this.running = true
     try {
-      // Independent of application tables; expiry is enforced at request time, not by this job.
-      await this.dataSource.query(`DELETE FROM ota_admin_sessions
-        WHERE expires_at <= UTC_TIMESTAMP(3) OR revoked_at IS NOT NULL LIMIT 500`)
       const taskCutoff = this.cutoff('TASK_RETENTION_DAYS', 90)
       const auditCutoff = this.cutoff('AUDIT_RETENTION_DAYS', 180)
       for (const application of await this.applications.listReady()) {

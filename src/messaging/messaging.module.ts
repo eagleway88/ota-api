@@ -1,11 +1,10 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
-import { UserIdMessage } from '@/entities/user-id.entity'
-import { UniqueIdMessage } from '@/entities/unique-id.entity'
+import { ApplicationMessage } from '@/entities/application-message.entity'
 import { LastMessageService } from './last-message.service'
 
 @Module({
-  imports: [TypeOrmModule.forFeature([UserIdMessage, UniqueIdMessage])],
+  imports: [TypeOrmModule.forFeature([ApplicationMessage])],
   providers: [LastMessageService],
   exports: [LastMessageService]
 })

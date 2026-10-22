@@ -5,15 +5,15 @@
 - 唯一向后兼容承诺是 `POST /api/version/check` 的旧请求与响应：`name/platform/ver/id`、原版本字段、下载别名和 `{ code: 0, data: null }` 均保留。
 - 旧 `/api/version/create`、`upload`、`list/:name`、`success`、`error`、`app-error` 已退出注册，返回 `404`；调用方随本版更新，不提供旧方法转发。
 - 上传和发布统一使用 `POST /api/v1/manage/apps/:appName/artifacts` → `POST /releases` 创建草稿 → `POST /releases/:releaseId/publish` 显式发布。`artifacts` 使用 multipart `file`，草稿使用正式 JSON 字段和显式发布范围；全量包也可通过 `installerSourceUrl` 引用已有安装源。
-- 管理员和普通消息使用 `/api/v1/manage/auth/*`、`/api/v1/manage/messages/*`，旧入口不再注册。登录返回结构化会话而不是裸 JWT，旧 Token 无效，见 [认证手册](AUTHENTICATION.md)。
+- 第三方后端与发布脚本直接携带 API Key，无需登录；Key 显式授权多个应用并选择权限预设，见 [认证手册](AUTHENTICATION.md)。不要向客户端/浏览器下发 Key。普通消息统一位于 /api/v1/manage/apps/:appName/messages/*。
 
 ## 新增可选能力
 
 - `/api/version/check` 可传完整 `userId`；不传时只返回公共版本。
 - 草稿通过正式 JSON 传 `releaseScope` 与 `userIds: string[]`，文件上传不携带名单。
 - 新版成功/失败上报可传 UUID `reportId` 实现重试幂等。
-- v2 管理 API 支持资源、草稿、发布、名单、范围、启停、重推、任务和审计。
-- 外部管理后台的统计、上报和日志查询参见 [外部管理员 API](ADMIN_API.md)，使用现有管理员登录签发的 Bearer Token。
+- v1 Manage API 支持资源、草稿、发布、名单、范围、启停、重推、任务和审计。
+- 外部管理后台的统计、上报和日志查询参见 [外部管理员 API](ADMIN_API.md)，由第三方后端持有 observer 或 full API Key。
 
 ## 名单上限与审计
 
@@ -31,7 +31,7 @@
 
 ## 上报、重试与错误记录更新
 
-新版公开客户端上报路径为 `POST /api/v1/app/apps/:appName/telemetry/successes`、`failures`、`app-errors`。这些 POST 不要求管理员 Token，数据按不可信客户端上报处理；GET 明细及统计/审计查询位于 `/api/v1/manage/apps/:appName/`，必须管理员认证。应用取自路径，IP 由服务端解析，正文伪造 `appName/sourceIp` 或其他未声明字段会被拒绝。
+新版公开客户端上报路径为 `POST /api/v1/app/apps/:appName/telemetry/successes`、`failures`、`app-errors`。这些 POST 不要求 API Key，数据按不可信客户端上报处理；GET 明细及统计/审计查询位于 `/api/v1/manage/apps/:appName/`，必须通过 API Key 的应用/权限校验。应用取自路径，IP 由服务端解析，正文伪造 `appName/sourceIp` 或其他未声明字段会被拒绝。
 
 成功/失败正文使用 `platform`（平台枚举）、`versionCode`（数值整数）、`releaseSequence`（正整数），可选 `reportedUsername`、`extras` 和 UUID `reportId`。失败额外要求 `message`，可选正整数 `recordId` 更新现有无键记录。运行错误使用 `platform/versionCode/kind/message`，可选 `reportedUsername/extras/stack`，不带 `releaseSequence/reportId`。响应为 `{ code: 0, data: ... }`，数据使用正式字段。
 
@@ -49,6 +49,14 @@
 
 ## 普通应用消息与 OTA 重推
 
-`POST /api/v1/manage/messages/applications` 只发送普通应用消息，正文为 `{ "appName": "应用名", "data": ... }`，不再接受 `otaName`。在线订阅查询为 `GET /api/v1/manage/messages/user-id-subscriptions?appName=应用名`。服务端不会根据任意 `data.id` 猜测它是版本记录，调用方不得直接广播原始 OTA 版本数据。
+`POST /api/v1/manage/apps/:appName/messages/application` 只发送普通应用消息，正文为 `{ "data": ... }`，不再接受 `otaName`。在线订阅查询为 `GET /api/v1/manage/apps/:appName/messages/user-id-subscriptions`。服务端不会根据任意 `data.id` 猜测它是版本记录，调用方不得直接广播原始 OTA 版本数据。
 
 需要重新发送已发布版本时，调用 `POST /api/v1/manage/apps/:appName/releases/:releaseId/redispatch`。服务端重新读取真实版本、当前发布范围和白名单，通过统一决策后向符合条件的连接发送完整适用版本。
+
+## 设备消息协议切换
+
+设备订阅/取消订阅事件仍为 `uniqueId:subscribe`/`uniqueId:unsubscribe`，但正文必须是 { appName, uniqueId }；ACK 事件 `uniqueId:ack` 正文为 { appName, uniqueId, messageId }。设备消息事件名为 device:<appName>:<uniqueId>。用户消息仍使用完整 userId，ACK 必须来自已订阅该标识的连接。
+
+HTTP 定向发送为 POST /api/v1/manage/apps/:appName/messages/users 或 devices，正文分别带 userId 或 uniqueId、可选 data 与 resend。用户标识中的应用必须与路径相同；设备 ID 只在本应用有效。持久化统一到 ota_messages，JSON 字符串不会在补发时被二次解析为对象。旧两张全局消息表只在空表检查通过后删除，不会把无归属旧消息分配给任意应用。
+
+这些自报订阅标识不是身份认证，不能据此推送敏感业务数据；授权 API Key 只保护发送和查询管理接口。

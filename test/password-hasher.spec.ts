@@ -1,4 +1,4 @@
-import { PasswordHasher } from '@/auth/password-hasher'
+import { PasswordHasher } from './fixtures/legacy-password-hasher'
 
 describe('PasswordHasher', () => {
   const hasher = new PasswordHasher()

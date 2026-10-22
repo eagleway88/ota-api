@@ -1,3 +1,4 @@
+import { RequirePermission } from '@/auth/api-key.policy'
 import { Controller, Get, Param, Query, ValidationPipe } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AdminTimeQueryDto } from '@/contracts/admin-query.dto'
@@ -12,6 +13,7 @@ const validation = new ValidationPipe({
 
 @ApiTags('manage/tasks')
 @ApiBearerAuth()
+@RequirePermission('tasks:read')
 @Controller('manage/apps/:appName')
 export class TaskQueryController {
   constructor(private readonly service: TaskQueryService) {}

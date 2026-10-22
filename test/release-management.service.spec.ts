@@ -110,7 +110,7 @@ function fixture() {
   ws.server = { sockets: { sockets: new Map([[client.id, client]]) } } as never
   const worker = { execute: jest.fn(() => ws.dispatchApplicationUpdate('app')) }
   const applications = {
-    prepare: jest.fn().mockResolvedValue(application),
+    requireReady: jest.fn().mockResolvedValue(application),
     incrementCatalogRevision: jest.fn().mockResolvedValue(2)
   }
   const service = new ReleaseManagementService(

@@ -25,6 +25,34 @@ const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
 const mysql = socketPath ? describe : describe.skip
 
 mysql('draft creation and editing audits on isolated MySQL', () => {
+  it('attributes API-key draft writes and audit filters to the credential, never a fake administrator', async () => {
+    const keyId = randomUUID()
+    await drafts.createDraft(appName, body(), undefined, {
+      requestId: 'key-draft',
+      actorType: 'api_key',
+      actorKeyId: keyId,
+      actorName: 'project CI'
+    })
+    const rows = await query(
+      `SELECT actor_type, actor_key_id, actor_admin_id, actor_name_snapshot FROM \`${application.tables.auditLog}\` WHERE request_id = ?`,
+      ['key-draft']
+    )
+    expect(rows).toEqual([
+      {
+        actor_type: 'api_key',
+        actor_key_id: keyId,
+        actor_admin_id: null,
+        actor_name_snapshot: 'project CI'
+      }
+    ])
+    const result = await new AuditQueryService(
+      new AdminReadRepository(source, applications)
+    ).listApplication(appName, {
+      actorKeyId: keyId,
+      to: new Date(Date.now() + 10000).toISOString()
+    })
+    expect(result.data.total).toBe(1)
+  })
   let control: DataSource
   let source: DataSource
   let database: string
@@ -227,6 +255,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
   })
 
   it('keeps the same create key isolated across applications', async () => {
+    await applications.prepare('other-app')
     const first = await create([], 'shared-key')
     const second = await drafts.createDraft(
       'other-app',
@@ -397,6 +426,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
   })
 
   it('rejects edits of published, missing and other-application drafts and scopes each failure audit', async () => {
+    await applications.prepare('other-app')
     const releaseId = (await create()).data.releaseId
     await drafts.publish(appName, releaseId, context('publish'))
     await expect(
@@ -537,7 +567,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
       const log = jest
         .spyOn(Logger.prototype, 'error')
         .mockImplementation(() => undefined)
-      jest.spyOn(applications, 'prepare').mockResolvedValue(application)
+      jest.spyOn(applications, 'requireReady').mockResolvedValue(application)
       await query(
         "UPDATE ota_applications SET status = 'preparing' WHERE app_name = ?",
         [appName]

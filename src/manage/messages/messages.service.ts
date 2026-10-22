@@ -1,9 +1,8 @@
-import { Injectable } from '@nestjs/common'
+import { ForbiddenException, Injectable } from '@nestjs/common'
 import { apiUtil } from '@/utils/api'
 import { RealtimeGateway } from '@/realtime/gateway/realtime.gateway'
 import {
-  SendGlobalDto,
-  SendApplicationDto,
+  SendMessageDto,
   TargetedMessageEnvelope
 } from '@/manage/messages/messages.dto'
 import { SendUserIdDto, SendUniqueIdDto } from '@/manage/messages/messages.dto'
@@ -11,6 +10,7 @@ import { Request } from 'express'
 import { ConfigService } from '@nestjs/config'
 import { isRequestIpAllowed } from '@/utils'
 import { LastMessageService } from '@/messaging/last-message.service'
+import { parseUserId } from '@/contracts/user-id'
 
 @Injectable()
 export class MessageService {
@@ -43,14 +43,6 @@ export class MessageService {
     }
   }
 
-  async sendGlobal(req: Request, body: SendGlobalDto) {
-    if (!this.checkPermission(req)) {
-      return apiUtil.error('Permission denied')
-    }
-    await this.wsService.sendMessage(body.data)
-    return apiUtil.data('success')
-  }
-
   async listSubscribedUserIds(req: Request, name?: string) {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
@@ -58,18 +50,19 @@ export class MessageService {
     return apiUtil.data(await this.wsService.getSubscribedUserIds(name))
   }
 
-  async sendApplication(req: Request, body: SendApplicationDto) {
+  async sendApplication(req: Request, appName: string, body: SendMessageDto) {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
-    const bool = await this.wsService.sendApplicationMessage(
-      body.appName,
-      body.data
-    )
-    return bool ? apiUtil.data(body.appName) : apiUtil.error('Send failed')
+    const bool = await this.wsService.sendApplicationMessage(appName, body.data)
+    return bool ? apiUtil.data(appName) : apiUtil.error('Send failed')
   }
 
-  async sendUserId(req: Request, body: SendUserIdDto) {
+  async sendUserId(req: Request, appName: string, body: SendUserIdDto) {
+    if (parseUserId(body.userId)?.appName !== appName)
+      throw new ForbiddenException(
+        'User target belongs to a different application'
+      )
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
@@ -83,18 +76,19 @@ export class MessageService {
       : apiUtil.error('Send failed')
   }
 
-  async sendUniqueId(req: Request, body: SendUniqueIdDto) {
+  async sendUniqueId(req: Request, appName: string, body: SendUniqueIdDto) {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
     const payload = body.resend
       ? await this.lastMessageService.createUniqueId(
-          body,
+          { ...body, appName },
           this.getResendTtlMs()
         )
       : this.createTransientEnvelope(body.data)
 
     const bool = await this.wsService.sendUniqueIdMessage(
+      appName,
       body.uniqueId,
       payload
     )

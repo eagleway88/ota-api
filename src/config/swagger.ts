@@ -9,7 +9,12 @@ export function configureSwagger(app: INestApplication) {
   const config = new DocumentBuilder()
     .setTitle('OTA API')
     .setVersion('1')
-    .addBearerAuth()
+    .addBearerAuth({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'API Key',
+      description: '长期 API Key；无登录步骤，按显式应用名单与权限预设授权'
+    })
     .build()
   SwaggerModule.setup(
     'api/docs',

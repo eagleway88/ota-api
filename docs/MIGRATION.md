@@ -1,6 +1,6 @@
 # 数据迁移手册
 
-`prepare` 只解决结构和发布元数据准备，不代表历史正式字段已经迁移。使用独立 CLI `yarn migrate:app` 分批回填、对账和逐应用切换；它不启动 Nest、任务 Worker 或 OSS，也不删除旧列、重编号或伪造历史审计/推送记录。
+本地 CLI `app prepare`（或 `key create --prepare-apps`）只解决结构和发布元数据准备，不代表历史正式字段已经迁移。使用独立 CLI `yarn migrate:app` 分批回填、对账和逐应用切换；它不启动 Nest、任务 Worker 或 OSS，也不删除应用旧列、重编号或伪造历史审计/推送记录；全局账号/消息退役是下述独立、明确的删除步骤。
 
 ## 1. 先备份、核对并暂停写入
 
@@ -18,12 +18,32 @@
 
 ## 2. 全局迁移与确认映射
 
-1. 使用受控写凭证执行 `yarn typeorm:run`，包含 `ApplicationDataMigration1792445100000`（迁移账本及 `read_model`）和新增 `AdministratorSessions1792445200000`（会话表）。必须在新版认证启动前完成；旧账号保留，旧 Token 需重新登录，见 [认证迁移](AUTHENTICATION.md)。
+1. **停止所有旧服务/消息写入进程并备份**，再使用受控写凭证执行 `yarn typeorm:run`。保留并顺序执行既有迁移历史，新增 ApiKeys1792445300000（Key/显式多应用授权及审计 actor_key_id）、ApplicationMessages1792445400000（统一消息）、RetireAdministratorAccounts1792445500000（账号退役）。后两项不是仅追加表结构，删除策略见下文。旧 Token 无效，不自动转换为 Key，见 [认证迁移](AUTHENTICATION.md)。
 2. 对历史应用先确认登记中的 `table_prefix` 与物理表完全一致。未登记时，先只读预演检查原表，再由 DBA 在受控变更中录入确认后的唯一映射，初始 `schema_version=0/status=preparing`；**目前没有自动映射导入工具**。已有映射不一致时停止，不能直接覆盖为新前缀。
-3. 用当前版本调用 `POST /api/v1/manage/apps/:appName/prepare`，创建辅助表及准备列。已就绪应用不重复 DDL，也不降级 schema version；已有未完成迁移时拒绝 prepare，要求续跑 CLI。首次准备会填充版本 UUID/默认范围/策略修订，但不再批量改写历史上报计数、时间或正式上报字段。
+3. 用当前源码 CLI 运行 `yarn ota app prepare --app APP --database DB`，创建辅助表及准备列。已就绪应用不重复 DDL，也不降级 schema version；已有未完成迁移时拒绝 prepare，要求续跑 CLI。首次准备会填充版本 UUID/默认范围/策略修订，但不再批量改写历史上报计数、时间或正式上报字段。
 4. 保持该应用写入口关闭，执行下列预演与回填。历史版本表不存在、表引擎不是 InnoDB、应用混表或映射冲突时，工具拒绝实际迁移。
 
 未登记/未准备时只读预演仍可输出表诊断，但状态为 `blocked`，不是允许上线。CLI 不自动创建“替代历史版本表”。
+
+### 全局退役边界与空库说明
+
+- unique_id_message、user_id_message 已确认线上为空。迁移会再次检查两张表，任一非空则在新建/删除消息表之前中止，保留原数据；不能用自动清空绕过。停掉旧消息写入进程，防止检查与删除之间再次写入。
+- 新建 ota_messages，以 app_name/target_type/target_id 为复合主键，用户和设备消息统一存储并隔离；不是为无归属旧设备消息猜测应用。
+- admins 和 ota_admin_sessions 按已批准的决定全部删除，即便存在旧账号/会话。历史审计、actor_admin_id/名称快照及应用业务表保留。
+- MySQL DDL 非原子；失败后先核实已完成结构再重跑，不能删除迁移历史。消息和账号退役不提供自动 down；恢复需要升级前备份和匹配服务版本。
+- 不修改已提交的迁移历史。**全新空库**需先提供旧 AdminSecurity 迁移所需的空 admins 基线，再运行完整迁移链；它最终会被退役迁移删除。以下 SQL 仅用于新空库，不在已有库覆盖/重建账号表：
+
+```sql
+CREATE TABLE admins (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(255) NOT NULL,
+  password VARCHAR(255) NOT NULL,
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+```
+
+全局迁移完成后才能运行 Key CLI。新应用可在签发时使用 `--prepare-apps`，历史应用仍需确认映射并完成下述回填；业务请求不会隐式建表。示例见 [API Key 运维](AUTHENTICATION.md)。
 
 ## 3. 预演与执行
 
@@ -101,7 +121,7 @@ OTA_MIGRATION_TEST_SOCKET=/private/tmp/ota-migration-mysql.EXAMPLE/mysql.sock \
 
 应使用 `mktemp -d /private/tmp/ota-migration-mysql.XXXXXX` 创建全新私有目录，再用 `mysqld --no-defaults --initialize-insecure --datadir=<目录>/data` 初始化；启动时同样使用 `--no-defaults`，显式指定 datadir/socket/pid/log，并启用 `--skip-networking --mysqlx=0 --skip-log-bin`。仅在这种独立、无网络、无业务数据的实例使用无密码 root；不要把生产 socket 传给测试。测试只创建并删除自身随机命名的 `ota_migration_test_*` 数据库，不读取项目 `.env`。结束后停止这个独立实例。
 
-当前在本机 MySQL 26.7.0 上运行 82 项真实数据库测试：9 项迁移、27 项发布/策略审计、20 项草稿创建/编辑审计、8 项任务、18 项检查/上报测试。覆盖迁移互斥、历史/正式写入事务、名单 50 段完整性和失败回滚；草稿新增创建并发幂等、JSON 键顺序、失败重试、并发编辑、存储不一致拒绝和提交响应丢失不误报。真实 HTTP 测试验证旧检查结果、正式 v2 上报、旧写路由退出和 JSON 类型。历史写入实现已移至测试夹具，仅用于验证迁移，不再注册旧发布/上报 API。任务测试仍非进程 kill/重启，目标 MySQL 与实际 Socket.IO 客户端验收仍须单独执行；没有执行生产迁移。
+历史基线曾在本机 MySQL 26.7.0 上运行 82 项真实数据库测试（本批新增 Key/CLI/消息测试见 [最新进度](REFACTOR_PROGRESS.md)）：9 项迁移、27 项发布/策略审计、20 项草稿创建/编辑审计、8 项任务、18 项检查/上报测试。覆盖迁移互斥、历史/正式写入事务、名单 50 段完整性和失败回滚；草稿新增创建并发幂等、JSON 键顺序、失败重试、并发编辑、存储不一致拒绝和提交响应丢失不误报。真实 HTTP 测试验证旧检查结果、正式上报、旧写路由退出和 JSON 类型。历史写入实现已移至测试夹具，仅用于验证迁移，不再注册旧发布/上报 API。任务测试仍非进程 kill/重启，目标 MySQL 与实际 Socket.IO 客户端验收仍须单独执行；没有执行生产迁移。
 
 草稿审计与接口切换不增加表列；复用现有审计字段和唯一键，不补造历史操作。仅保留旧检查兼容并不免除历史数据迁移：新版仍需读取原应用发布、有效基础版本集合、ID 水位和已有统计。旧列是否停止双写或删除，按实际读取依赖与回滚窗口另行受控处理。
 

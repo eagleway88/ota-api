@@ -14,6 +14,7 @@ import {
 } from '@/utils/version'
 import { randomUUID } from 'crypto'
 import { GlobalAuditContext, insertGlobalAudit } from '@/audit/global-audit'
+import { ensureApiKeyAuditSchema } from '@/infrastructure/persistence/api-key-audit-schema'
 import {
   APPLICATION_MIGRATION_LEDGER,
   applicationPreparationLock
@@ -46,6 +47,17 @@ export class ApplicationRegistryService {
     } finally {
       await queryRunner.release()
     }
+  }
+
+  /** HTTP operations never register applications or prepare schemas. */
+  async requireReady(appName: string): Promise<RegisteredApplication> {
+    const app = await this.resolve(appName)
+    if (app.status !== 'ready' || app.schemaVersion < 1) {
+      throw new ConflictException(
+        'Application is not ready; use the operational CLI to prepare it first'
+      )
+    }
+    return app
   }
 
   /** Uses the caller's connection so catalog metadata shares its read snapshot. */
@@ -371,6 +383,7 @@ export class ApplicationRegistryService {
         part_no INT NOT NULL DEFAULT 1,
         actor_type VARCHAR(16) NOT NULL,
         actor_admin_id INT NULL,
+        actor_key_id VARCHAR(36) NULL,
         actor_name_snapshot VARCHAR(191) NULL,
         action VARCHAR(64) NOT NULL,
         target_type VARCHAR(64) NOT NULL,
@@ -384,6 +397,7 @@ export class ApplicationRegistryService {
         PRIMARY KEY (audit_id),
         UNIQUE KEY ota_admin_audit_operation_request_part_uq (operation_id, request_id, part_no),
         KEY ota_admin_audit_actor_created_idx (actor_admin_id, created_at),
+        KEY ota_admin_audit_key_created_idx (actor_key_id, created_at),
         KEY ota_admin_audit_action_created_idx (action, created_at),
         KEY ota_admin_audit_created_idx (created_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
@@ -481,6 +495,7 @@ export class ApplicationRegistryService {
         part_no INT NOT NULL DEFAULT 1,
         actor_type VARCHAR(16) NOT NULL,
         actor_admin_id INT NULL,
+        actor_key_id VARCHAR(36) NULL,
         actor_name_snapshot VARCHAR(191) NULL,
         action VARCHAR(64) NOT NULL,
         target_type VARCHAR(64) NOT NULL,
@@ -500,10 +515,17 @@ export class ApplicationRegistryService {
         UNIQUE KEY \`${prefix}_audit_operation_request_part_uq\` (operation_id, request_id, part_no),
         KEY \`${prefix}_audit_release_created_idx\` (release_id, created_at),
         KEY \`${prefix}_audit_actor_created_idx\` (actor_admin_id, created_at),
+        KEY \`${prefix}_audit_key_created_idx\` (actor_key_id, created_at),
         KEY \`${prefix}_audit_action_created_idx\` (action, created_at),
         KEY \`${prefix}_audit_task_idx\` (task_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
     `)
+    // A historical mapping may be registered only after the global migration ran.
+    await ensureApiKeyAuditSchema(
+      queryRunner,
+      tables.auditLog,
+      `${prefix}_audit_key_created_idx`
+    )
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS \`${tables.releaseDraft}\` (
         release_id VARCHAR(36) NOT NULL,

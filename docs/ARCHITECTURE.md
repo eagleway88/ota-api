@@ -6,22 +6,20 @@
 src/
   app.ts                    根模块：数据库、App、Manage、Jobs、旧检查
   app/                      客户端 API（AppApiModule）：telemetry
-  manage/                   管理员 API（ManageApiModule）
-    auth/                   管理员初始化和登录
-    applications/           应用准备
+  manage/                   按应用授权的业务 API（ManageApiModule）
     artifacts/              文件上传
     releases/               草稿、发布、名单、策略
     statistics/             统计和客户端上报明细
     tasks/                  发布任务和执行日志
-    audit/                  应用/全局管理审计
+    audit/                  应用业务审计
     messages/               普通消息发送、订阅查询
     common/                 无 Worker 的只读管理装配
-  auth/                     身份、密码、认证服务
+  auth/                     API Key 校验、权限预设、CLI 专用签发/撤销
   config/                   环境校验、HTTP、Swagger、TypeORM CLI
   jobs/                     发布 Worker、保留期清理
   applications/、releases/   应用和发布领域服务、DTO、写入端口
   telemetry/、audit/         上报领域及审计写入边界
-  messaging/                最后消息、ACK 与 TTL 存储
+  messaging/                统一 ota_messages、应用隔离、ACK 与 TTL 存储
   updates/                  共用查询、catalog 快照和纯 decision
   realtime/                 Gateway、协议 DTO、连接索引、分发指标
   infrastructure/
@@ -31,7 +29,7 @@ src/
     migrations/             数据迁移器、预检、断点账本
   compat/legacy/            唯一旧 HTTP 检查入口、参数及返回适配
   migrations/               只追加的数据库迁移历史
-  scripts/                  独立运维 CLI，不进入部署构建
+  scripts/                  应用准备、Key 管理、全局审计及迁移 CLI，不进入部署构建
   contracts/                共用契约和值类型
   guards/、middleware/       访问检查、异常、请求上下文
 test/
@@ -48,7 +46,11 @@ test/
 
 Swagger 管理分组显式扫描只读管理聚合，避免库的单层嵌套扫描漏掉统计、审计及任务日志。装配测试核对全量接口恰好分入 App/Manage/Legacy 三组。构建禁用增量缓存，输出入口及非运行时文件排除由 `test/verify-build.cjs` 自动验证。
 
-`AppApiModule` 装配公开上报，`ManageApiModule` 装配管理员操作和查询。`AdministrationModule` 可独立装配认证与只读查询，不启动推送 Worker。`JobsModule` 集中装配任务和保留期服务。上传、应用准备、发布各有独立 Controller；核心 `ReleasesModule`、`TelemetryWritesModule` 不注册 HTTP Controller。Realtime ACK DTO 不依赖管理 HTTP 层。
+`AppApiModule` 装配公开上报，`ManageApiModule` 装配管理员操作和查询。`AdministrationModule` 可独立装配认证与只读查询，不启动推送 Worker。`JobsModule` 集中装配任务和保留期服务。上传、发布各有独立 Controller；应用准备与 Key 管理仅通过本地 CLI；核心 `ReleasesModule`、`TelemetryWritesModule` 不注册 HTTP Controller。Realtime ACK DTO 不依赖管理 HTTP 层。
+
+运行时无管理员模型、登录/会话接口或平台超级 Key。每次管理请求验证 Key 的精确应用授权与路由权限，未标注权限默认拒绝。full 只覆盖明确授权应用的业务操作。CLI 与运行时隔离，业务请求仅 requireReady，不做 DDL。
+
+用户和设备消息统一存到 ota_messages，复合主键为 app_name/target_type/target_id；设备订阅、事件和 ACK 必须带应用范围。历史管理员账户/会话删除，但审计中的旧身份快照保留。
 
 ## 数据与事务
 
@@ -66,4 +68,4 @@ Swagger 管理分组显式扫描只读管理聚合，避免库的单层嵌套扫
 
 ## 尚未完成
 
-读取、草稿/名单端口及 Gateway 内部职责仍可继续细分；正式发布模型仍带 `legacyPayload`，文件审计仍待补齐。目录整理不等于这些功能验收完成。目标环境迁移演练、真实进程恢复和压测仍须执行，见 [进度报告](REFACTOR_PROGRESS.md)。
+读取、草稿/名单端口及 Gateway 内部职责仍可继续细分；正式发布模型仍带 `legacyPayload`，文件成功入库审计已补充，文件失败/清理审计仍待补齐。目录整理不等于这些功能验收完成。目标环境迁移演练、真实进程恢复和压测仍须执行，见 [进度报告](REFACTOR_PROGRESS.md)。

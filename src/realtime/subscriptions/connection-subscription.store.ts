@@ -108,12 +108,28 @@ export class ConnectionSubscriptionStore {
     this.incrementApplicationRevisions(state)
   }
 
-  subscribeUniqueId(socketId: string, uniqueId: string) {
-    this.getOrConnect(socketId).uniqueIds.add(uniqueId)
+  subscribeUniqueId(socketId: string, appName: string, uniqueId: string) {
+    this.getOrConnect(socketId).uniqueIds.add(
+      JSON.stringify([appName, uniqueId])
+    )
   }
 
-  unsubscribeUniqueId(socketId: string, uniqueId: string) {
-    this.connections.get(socketId)?.uniqueIds.delete(uniqueId)
+  unsubscribeUniqueId(socketId: string, appName: string, uniqueId: string) {
+    this.connections
+      .get(socketId)
+      ?.uniqueIds.delete(JSON.stringify([appName, uniqueId]))
+  }
+
+  hasUniqueId(socketId: string, appName: string, uniqueId: string) {
+    return (
+      this.connections
+        .get(socketId)
+        ?.uniqueIds.has(JSON.stringify([appName, uniqueId])) ?? false
+    )
+  }
+
+  hasUserId(socketId: string, userId: string) {
+    return this.connections.get(socketId)?.userIds.has(userId) ?? false
   }
 
   getApplicationSubscriber(socketId: string, appName: string) {

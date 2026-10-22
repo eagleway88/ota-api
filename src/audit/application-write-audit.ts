@@ -112,8 +112,12 @@ export async function withAuditedApplicationWrite<T>(
             operation_id: audit.operationId,
             part_no: 1,
             actor_type:
-              audit.context.actorAdminId === undefined ? 'system' : 'admin',
+              audit.context.actorType ??
+              (audit.context.actorAdminId === undefined ? 'system' : 'admin'),
             actor_admin_id: audit.context.actorAdminId,
+            ...(audit.context.actorKeyId
+              ? { actor_key_id: audit.context.actorKeyId }
+              : {}),
             actor_name_snapshot: audit.context.actorName,
             action: audit.action,
             target_type: audit.targetType,

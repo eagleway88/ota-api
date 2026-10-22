@@ -1,24 +1,18 @@
 # 外部管理员查询接口
 
-这些接口用于业务管理后台、运维工具或其他持有 OTA 管理员凭证的调用方。入口位于 `/api/v1/manage/`，Swagger 文档位于 `/api/docs/manage`。
+这些接口用于业务管理后台、运维工具或其他持有按应用授权 API Key 的调用方。入口位于 `/api/v1/manage/`，Swagger 文档位于 `/api/docs/manage`。
 
-## 登录和权限
+## API Key 与权限
 
-通过已有 `POST /api/v1/manage/auth/login` 登录：
-
-```json
-{ "username": "admin", "password": "<管理员密码>" }
-```
-
-成功 HTTP 200，响应为 `{ "code": 0, "data": { "accessToken": "<JWT>", "tokenType": "Bearer", "expiresIn": 3600, "administrator": { "id": 1, "username": "admin" } } }`。后续请求携带：
+项目不提供管理后台或登录接口。第三方后端持有运维 CLI 签发的 API Key，并自行认证其管理后台用户：
 
 ```http
-Authorization: Bearer <JWT>
+Authorization: Bearer ota_ak_<keyId>.<secret>
 ```
 
-每次受保护请求均验证 JWT 和数据库会话，账号不存在、会话已注销/过期及旧 Token 均返回 `401`。默认有效期一小时，提供 `me/logout/logout-all`，不提供刷新令牌。初始化与新增迁移步骤见 [管理员认证](AUTHENTICATION.md)。身份认证独立于旧协议模块装配。
+Key 必须显式授权路径中的应用；observer 可读统计、上报、任务、审计及发布详情，full 包含这些和写入权限，但不能访问未授权应用。消息订阅查询需 messages:read（messenger/full）。无效、到期或撤销返回 401；应用/权限不足返回 403。每次查库，不缓存授权状态，旧 JWT 无效。
 
-当前管理员是 OTA 全局管理员，可以查看所有应用；尚未实现按应用授予管理员角色。业务客户端自报的 `userId` 和设备 `uniqueId` 不能访问管理接口。新查询接口按管理员身份授权，不使用旧消息接口的 `IPS` 白名单替代认证。
+没有全局数据查询 HTTP 接口；平台级审计由运维运行 `yarn ota audit list`。业务 userId、设备 uniqueId 以及 IPS 允许列表均不能替代 API Key 认证。详细签发、多应用授权和轮换步骤见 [认证手册](AUTHENTICATION.md)。
 
 ## 接口清单
 
@@ -34,12 +28,11 @@ Authorization: Bearer <JWT>
 | `/api/v1/manage/apps/:appName/tasks/:taskId` | 单个任务及最后一次执行记录 | 不带分页/时间筛选 |
 | `/api/v1/manage/apps/:appName/tasks/:taskId/logs` | 每次执行、重试、租约过期记录 | `status` |
 | `/api/v1/manage/apps/:appName/releases/:releaseId/delivery` | 该发布触发的任务及各任务最后一次执行摘要 | 通用分页/时间参数 |
-| `/api/v1/manage/apps/:appName/audit-logs` | 应用发布、名单、启停等管理审计 | `action`、`result`、`actorAdminId`、`requestId`、`operationId`、`releaseId`、`taskId` |
-| `/api/v1/manage/audit-logs` | 管理员、应用登记等全局审计 | `action`、`result`、`actorAdminId`、`requestId`、`operationId` |
+| `/api/v1/manage/apps/:appName/audit-logs` | 应用发布、名单、启停等管理审计 | `action`、`result`、`actorKeyId`（历史记录仍可用 actorAdminId）、`requestId`、`operationId`、`releaseId`、`taskId` |
 
 任务状态为 `pending/running/retry_wait/succeeded/failed`；执行日志状态为 `running/succeeded/failed/lease_expired`。平台为 `ios/android/windows/linux/macos`。筛选值按精确值匹配。
 
-应用查询先解析已登记的应用表前缀，所有数据落在对应应用的表内。任务或发布 ID 只在路径指定的应用内查找，找不到返回 `404`。应用未准备或查询表不存在返回 `409`，需要先完成迁移及 `POST /api/v1/manage/apps/:appName/prepare`。全局审计表由全局迁移准备。
+应用查询先解析已登记的应用表前缀，所有数据落在对应应用的表内。任务或发布 ID 只在路径指定的应用内查找，找不到返回 `404`。应用未准备或查询表不存在返回 `409`，需要先完成迁移及本地 CLI `yarn ota app prepare --app APP --database DB`。全局审计表由全局迁移准备。
 
 ## 分页与时间范围
 

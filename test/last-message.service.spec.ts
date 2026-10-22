@@ -1,52 +1,58 @@
 import { Repository } from 'typeorm'
 import { LastMessageService } from '@/messaging/last-message.service'
-import { UserIdMessage } from '@/entities/user-id.entity'
-import { UniqueIdMessage } from '@/entities/unique-id.entity'
+import { ApplicationMessage } from '@/entities/application-message.entity'
 
 describe('LastMessageService', () => {
   it('only deletes the expired message that was actually read', async () => {
     const expired = {
-      userId: 'app:windows:1',
+      appName: 'app',
+      targetType: 'user',
+      targetId: 'app:windows:1',
       messageId: 'old-message',
       content: '{}',
       updatedAt: new Date(Date.now() - 20_000),
       expiresAt: new Date(Date.now() - 10_000)
-    } as UserIdMessage
+    } as ApplicationMessage
     const deleteMessage = jest.fn().mockResolvedValue({ affected: 0 })
-    const userRepository = {
+    const service = new LastMessageService({
       findOneBy: jest.fn().mockResolvedValue(expired),
       delete: deleteMessage
-    } as unknown as Repository<UserIdMessage>
-    const service = new LastMessageService(
-      userRepository,
-      {} as Repository<UniqueIdMessage>
-    )
-
+    } as unknown as Repository<ApplicationMessage>)
     await expect(
-      service.queryUserId({ userId: expired.userId })
+      service.queryUserId({ userId: expired.targetId })
     ).resolves.toBeNull()
     expect(deleteMessage).toHaveBeenCalledWith({
-      userId: expired.userId,
+      appName: 'app',
+      targetType: 'user',
+      targetId: expired.targetId,
       messageId: expired.messageId
     })
   })
 
-  it('ACK deletes by both target and messageId', async () => {
+  it('ACK deletes by application, target type, target ID and messageId', async () => {
     const deleteMessage = jest.fn().mockResolvedValue({ affected: 1 })
-    const userRepository = {
+    const service = new LastMessageService({
       delete: deleteMessage
-    } as unknown as Repository<UserIdMessage>
-    const service = new LastMessageService(
-      userRepository,
-      {} as Repository<UniqueIdMessage>
-    )
-
+    } as unknown as Repository<ApplicationMessage>)
     await expect(
       service.ackUserId({ userId: 'app:windows:1', messageId: 'message-1' })
     ).resolves.toBe(true)
     expect(deleteMessage).toHaveBeenCalledWith({
-      userId: 'app:windows:1',
+      appName: 'app',
+      targetType: 'user',
+      targetId: 'app:windows:1',
       messageId: 'message-1'
     })
+  })
+
+  it('rejects malformed user targets before accessing persistence', () => {
+    const find = jest.fn()
+    const service = new LastMessageService({
+      findOneBy: find
+    } as unknown as Repository<ApplicationMessage>)
+    expect(() => service.queryUserId({ userId: 'unscoped' })).toThrow(
+      'Invalid userId'
+    )
+    expect(find).not.toHaveBeenCalled()
   })
 })

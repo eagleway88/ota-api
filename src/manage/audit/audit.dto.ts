@@ -1,5 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger'
-import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator'
+import {
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MaxLength
+} from 'class-validator'
 import { AdminTimeQueryDto } from '@/contracts/admin-query.dto'
 
 export class AuditQueryDto extends AdminTimeQueryDto {
@@ -18,6 +25,11 @@ export class AuditQueryDto extends AdminTimeQueryDto {
   @IsOptional()
   @Matches(/^[1-9]\d{0,9}$/)
   actorAdminId?: string
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID('4')
+  actorKeyId?: string
 
   @ApiPropertyOptional()
   @IsOptional()

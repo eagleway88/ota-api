@@ -5,13 +5,15 @@ export type GlobalAuditContext = {
   requestId: string
   sourceIp?: string
   actorAdminId?: number
+  actorKeyId?: string
+  actorType?: 'admin' | 'system' | 'api_key' | 'operator'
   actorName?: string
 }
 
 export type GlobalAuditInput = {
   context: GlobalAuditContext
   operationId?: string
-  actorType?: 'admin' | 'system'
+  actorType?: GlobalAuditContext['actorType']
   action: string
   targetType: string
   targetId?: string
@@ -20,22 +22,27 @@ export type GlobalAuditInput = {
   errorCode?: string
 }
 
-export async function insertGlobalAudit(
+export async function insertAudit(
   queryRunner: QueryRunner,
-  input: GlobalAuditInput
+  input: GlobalAuditInput,
+  table: string
 ) {
   await queryRunner.manager
     .createQueryBuilder()
     .insert()
-    .into('ota_admin_audit_log')
+    .into(table)
     .values({
       audit_id: randomUUID(),
       operation_id: input.operationId ?? randomUUID(),
       part_no: 1,
       actor_type:
         input.actorType ??
+        input.context.actorType ??
         (input.context.actorAdminId !== undefined ? 'admin' : 'system'),
       actor_admin_id: input.context.actorAdminId,
+      ...(input.context.actorKeyId
+        ? { actor_key_id: input.context.actorKeyId }
+        : {}),
       actor_name_snapshot: input.context.actorName,
       action: input.action,
       target_type: input.targetType,
@@ -50,4 +57,11 @@ export async function insertGlobalAudit(
       created_at: new Date()
     })
     .execute()
+}
+
+export function insertGlobalAudit(
+  runner: QueryRunner,
+  input: GlobalAuditInput
+) {
+  return insertAudit(runner, input, 'ota_admin_audit_log')
 }

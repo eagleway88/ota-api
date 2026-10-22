@@ -1,3 +1,4 @@
+import { validDeviceTarget } from '@/realtime/protocol.dto'
 import { Logger } from '@nestjs/common'
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets'
 import { SubscribeMessage } from '@nestjs/websockets'
@@ -36,6 +37,7 @@ type UserIdMessage = {
 }
 
 type UniqueIdMessage = {
+  appName: string
   uniqueId: string
 }
 
@@ -111,18 +113,8 @@ export class RealtimeGateway {
     return `userId:${userId}`
   }
 
-  private getUniqueIdRoom(uniqueId: string) {
-    return `uniqueId:${uniqueId}`
-  }
-
-  async sendMessage(data?: unknown) {
-    const ids: Record<string, boolean> = {}
-    const sockets = await this.server.fetchSockets()
-    for (const client of sockets) {
-      const bool = client.emit('message', data)
-      ids[client.id] = bool
-    }
-    return ids
+  private getUniqueIdRoom(appName: string, uniqueId: string) {
+    return 'uniqueId:' + JSON.stringify([appName, uniqueId])
   }
 
   sendApplicationMessage(otaName: string, data: unknown) {
@@ -182,9 +174,15 @@ export class RealtimeGateway {
     )
   }
 
-  sendUniqueIdMessage(uniqueId: string, data: TargetedMessageEnvelope) {
+  sendUniqueIdMessage(
+    appName: string,
+    uniqueId: string,
+    data: TargetedMessageEnvelope
+  ) {
     return Promise.resolve(
-      this.server.to(this.getUniqueIdRoom(uniqueId)).emit(uniqueId, data)
+      this.server
+        .to(this.getUniqueIdRoom(appName, uniqueId))
+        .emit('device:' + appName + ':' + uniqueId, data)
     )
   }
 
@@ -243,19 +241,20 @@ export class RealtimeGateway {
     client: Socket,
     data: UniqueIdMessage
   ): Promise<UniqueIdSubscriptionAckResponse | ErrorAckResponse> {
-    if (!data?.uniqueId) {
+    if (!validDeviceTarget(data)) {
       return { error: 'UniqueId is required' }
     }
 
-    await client.join(this.getUniqueIdRoom(data.uniqueId))
-    this.subscriptions.subscribeUniqueId(client.id, data.uniqueId)
+    await client.join(this.getUniqueIdRoom(data.appName, data.uniqueId))
+    this.subscriptions.subscribeUniqueId(client.id, data.appName, data.uniqueId)
 
     try {
       const msg = await this.lastMessageService.queryUniqueId({
+        appName: data.appName,
         uniqueId: data.uniqueId
       })
       if (msg) {
-        client.emit(data.uniqueId, msg)
+        client.emit('device:' + data.appName + ':' + data.uniqueId, msg)
       }
     } catch (error) {
       this.logger.error(
@@ -272,12 +271,16 @@ export class RealtimeGateway {
     client: Socket,
     data: UniqueIdMessage
   ): Promise<UniqueIdSubscriptionAckResponse | ErrorAckResponse> {
-    if (!data?.uniqueId) {
+    if (!validDeviceTarget(data)) {
       return { error: 'UniqueId is required' }
     }
 
-    await client.leave(this.getUniqueIdRoom(data.uniqueId))
-    this.subscriptions.unsubscribeUniqueId(client.id, data.uniqueId)
+    await client.leave(this.getUniqueIdRoom(data.appName, data.uniqueId))
+    this.subscriptions.unsubscribeUniqueId(
+      client.id,
+      data.appName,
+      data.uniqueId
+    )
     return { uniqueId: data.uniqueId }
   }
 
@@ -341,7 +344,11 @@ export class RealtimeGateway {
     client: Socket,
     data: AckUserIdDto
   ): Promise<UserIdAckResponse | ErrorAckResponse> {
-    if (!data?.userId || !data?.messageId) {
+    if (
+      !data?.userId ||
+      !data?.messageId ||
+      !this.subscriptions.hasUserId(client.id, data.userId)
+    ) {
       return { error: 'UserId and messageId are required' }
     }
 
@@ -359,7 +366,11 @@ export class RealtimeGateway {
     client: Socket,
     data: AckUniqueIdDto
   ): Promise<UniqueIdAckResponse | ErrorAckResponse> {
-    if (!data?.uniqueId || !data?.messageId) {
+    if (
+      !validDeviceTarget(data) ||
+      !data?.messageId ||
+      !this.subscriptions.hasUniqueId(client.id, data.appName, data.uniqueId)
+    ) {
       return { error: 'UniqueId and messageId are required' }
     }
 

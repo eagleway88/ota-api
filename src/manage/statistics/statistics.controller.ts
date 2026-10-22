@@ -1,3 +1,4 @@
+import { RequirePermission } from '@/auth/api-key.policy'
 import { Controller, Get, Param, Query, ValidationPipe } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import {
@@ -14,6 +15,7 @@ const queryValidation = new ValidationPipe({
 
 @ApiTags('manage/statistics')
 @ApiBearerAuth()
+@RequirePermission('telemetry:read')
 @Controller('manage/apps/:appName')
 export class TelemetryController {
   constructor(private readonly service: TelemetryQueryService) {}

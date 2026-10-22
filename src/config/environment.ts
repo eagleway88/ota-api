@@ -5,7 +5,6 @@ const requiredKeys = [
   'ORM_USERNAME',
   'ORM_PASSWORD',
   'ORM_DATABASE',
-  'JWT_SECRET',
   'OSS_BUCKER',
   'OSS_KEY',
   'OSS_SECRET',
@@ -41,32 +40,8 @@ export function validateRuntimeConfig(config: RuntimeConfig) {
     }
   }
 
-  const tokenLifetime = positiveInteger(
-    config.ADMIN_ACCESS_TOKEN_TTL_SECONDS,
-    'ADMIN_ACCESS_TOKEN_TTL_SECONDS',
-    3600
-  )
-  if (tokenLifetime < 60 || tokenLifetime > 86400) {
-    throw new Error(
-      'ADMIN_ACCESS_TOKEN_TTL_SECONDS must be between 60 and 86400'
-    )
-  }
-  const initializationToken = config.ADMIN_INITIALIZATION_TOKEN
-  if (
-    initializationToken !== undefined &&
-    initializationToken !== '' &&
-    (typeof initializationToken !== 'string' ||
-      initializationToken.length < 32 ||
-      initializationToken.length > 1024)
-  ) {
-    throw new Error(
-      'ADMIN_INITIALIZATION_TOKEN must be 32–1024 characters or unset'
-    )
-  }
-
   return {
     ...config,
-    ADMIN_ACCESS_TOKEN_TTL_SECONDS: tokenLifetime,
     PORT: positiveInteger(config.PORT, 'PORT', 3001),
     ORM_PORT: positiveInteger(config.ORM_PORT, 'ORM_PORT', 3306),
     OTA_UPLOAD_MAX_BYTES: positiveInteger(

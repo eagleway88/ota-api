@@ -15,7 +15,9 @@ NestJS + TypeORM + MySQL + Socket.IO 的模块化 OTA 与普通消息服务。
 - 发布任务使用数据库租约、退避重试和启动恢复。
 - 新发布序号至少从 `2000` 开始，并保留更高历史水位。
 - 草稿发布和策略修改使用应用级事务锁；发布、启停的新旧存储列由统一写入适配器维护，旧发布 API 不注册。
-- 外部管理员可查询更新统计、上报明细、客户端错误、任务执行日志和应用/全局审计，支持分页和时间筛选。
+- 第三方后台使用按应用授权的 API Key 查询更新统计、上报明细、客户端错误、任务执行日志及应用审计；全局运维审计只通过本地 CLI。
+- 不维护管理员账号；本地 CLI 支持多应用授权、publisher/observer/messenger/full 预设、永久或有期限 Key 及撤销。
+- 用户/设备最后消息统一存到按应用与目标类型隔离的 ota_messages，旧管理员及空消息表由退役迁移删除。
 - 逐应用历史数据迁移 CLI：只读预演、分批回填、断点续跑、计数/ID 对账和显式正式字段读取切换。
 
 ## 本地验证
@@ -37,10 +39,11 @@ MySQL 发布/迁移集成测试默认跳过，只有显式配置独立临时 soc
 
 1. 从 `.env.example` 创建 `.env` 并填写全部必需配置。
 2. 先执行只读核对：`yarn audit:db`。
-3. 备份并验证恢复后执行全局迁移：`yarn typeorm:run`。
-4. 历史应用先核实并登记实际物理前缀；使用管理员 Token 调用 `POST /api/v1/manage/apps/:appName/prepare`，逐应用准备分表。
+3. 停止所有旧实例/写入口，备份并验证恢复后执行全局迁移（会删除旧账号/会话及经空表检查的旧消息表，不能自动 down）：`yarn typeorm:run`。
+4. 历史应用先核实并登记实际物理前缀；使用本地 CLI `yarn ota app prepare --app APP --database DB`，逐应用准备分表。
 5. 历史应用按迁移手册停止写入，运行 `yarn migrate:app` 预演、分批回填和验证；prepare 本身不代表数据迁移完成。
-6. 构建并启动：`yarn build && yarn start:prod`。正式字段读取须额外通过逐应用对账及显式切换。
+6. 按 [API Key 手册](docs/AUTHENTICATION.md) 为每个调用方签发 Key；新应用可通过 key create --prepare-apps 在签发时准备结构。
+7. 构建并启动：`yarn build && yarn start:prod`。正式字段读取须额外通过逐应用对账及显式切换。
 
 详细步骤见：
 
@@ -52,7 +55,7 @@ MySQL 发布/迁移集成测试默认跳过，只有显式配置独立临时 soc
 - [性能验证](docs/PERFORMANCE.md)
 - [外部管理员 API](docs/ADMIN_API.md)
 - [统一 API 索引](docs/API.md)
-- [管理员认证与会话迁移](docs/AUTHENTICATION.md)
+- [API Key 认证与本地运维](docs/AUTHENTICATION.md)
 - [目录与模块边界](docs/ARCHITECTURE.md)
 
 ## 关键约束

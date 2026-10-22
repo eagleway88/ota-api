@@ -1,3 +1,4 @@
+import { RequirePermission } from '@/auth/api-key.policy'
 import {
   Controller,
   Param,
@@ -9,11 +10,12 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express'
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger'
 import { ArtifactService } from '@/infrastructure/oss/artifact.service'
-import { administratorContext } from '@/middleware/request-context'
-import type { AdministratorRequest } from '@/middleware/request-context'
+import { operationContext } from '@/middleware/request-context'
+import type { ApiRequest } from '@/middleware/request-context'
 
 @ApiTags('manage/artifacts')
 @ApiBearerAuth()
+@RequirePermission('releases:write')
 @Controller('manage/apps/:appName/artifacts')
 export class ArtifactsController {
   constructor(private readonly service: ArtifactService) {}
@@ -22,14 +24,10 @@ export class ArtifactsController {
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
   upload(
-    @Req() request: AdministratorRequest,
+    @Req() request: ApiRequest,
     @Param('appName') appName: string,
     @UploadedFile() file?: Express.Multer.File
   ) {
-    return this.service.uploadArtifact(
-      appName,
-      file,
-      administratorContext(request)
-    )
+    return this.service.uploadArtifact(appName, file, operationContext(request))
   }
 }

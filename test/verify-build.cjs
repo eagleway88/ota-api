@@ -7,7 +7,7 @@ for (const file of [
   'main.js',
   'app.js',
   'config/typeorm.js',
-  'auth/auth.service.js'
+  'auth/api-key.service.js'
 ]) {
   assert.ok(
     fs.existsSync(path.join(output, file)),

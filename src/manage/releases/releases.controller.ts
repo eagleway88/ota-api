@@ -1,3 +1,4 @@
+import { RequirePermission } from '@/auth/api-key.policy'
 import {
   Body,
   Controller,
@@ -10,8 +11,8 @@ import {
   Req
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
-import { administratorContext } from '@/middleware/request-context'
-import type { AdministratorRequest } from '@/middleware/request-context'
+import { operationContext } from '@/middleware/request-context'
+import type { ApiRequest } from '@/middleware/request-context'
 import { ReleaseManagementService } from '@/releases/release-management.service'
 import {
   ChangeReleaseScopeDto,
@@ -26,6 +27,7 @@ import {
 
 @ApiTags('manage/releases')
 @ApiBearerAuth()
+@RequirePermission('releases:write')
 @Controller('manage/apps/:appName/releases')
 export class ReleaseManagementController {
   constructor(
@@ -34,6 +36,7 @@ export class ReleaseManagementController {
   ) {}
 
   @Get()
+  @RequirePermission('releases:read')
   list(
     @Param('appName') appName: string,
     @Query() query: ReleaseCatalogListQueryDto
@@ -43,7 +46,7 @@ export class ReleaseManagementController {
 
   @Post()
   createDraft(
-    @Req() request: AdministratorRequest,
+    @Req() request: ApiRequest,
     @Param('appName') appName: string,
     @Body() body: CreateReleaseDraftDto
   ) {
@@ -52,11 +55,12 @@ export class ReleaseManagementController {
       appName,
       body,
       typeof idempotencyKey === 'string' ? idempotencyKey : undefined,
-      administratorContext(request)
+      operationContext(request)
     )
   }
 
   @Get(':releaseId')
+  @RequirePermission('releases:read')
   detail(
     @Param('appName') appName: string,
     @Param('releaseId') releaseId: string
@@ -66,7 +70,7 @@ export class ReleaseManagementController {
 
   @Patch(':releaseId')
   updateDraft(
-    @Req() request: AdministratorRequest,
+    @Req() request: ApiRequest,
     @Param('appName') appName: string,
     @Param('releaseId') releaseId: string,
     @Body() body: UpdateReleaseDraftDto
@@ -75,24 +79,21 @@ export class ReleaseManagementController {
       appName,
       releaseId,
       body,
-      administratorContext(request)
+      operationContext(request)
     )
   }
 
   @Post(':releaseId/publish')
   publish(
-    @Req() request: AdministratorRequest,
+    @Req() request: ApiRequest,
     @Param('appName') appName: string,
     @Param('releaseId') releaseId: string
   ) {
-    return this.drafts.publish(
-      appName,
-      releaseId,
-      administratorContext(request)
-    )
+    return this.drafts.publish(appName, releaseId, operationContext(request))
   }
 
   @Get(':releaseId/users')
+  @RequirePermission('releases:read')
   users(
     @Param('appName') appName: string,
     @Param('releaseId') releaseId: string
@@ -102,7 +103,7 @@ export class ReleaseManagementController {
 
   @Put(':releaseId/users')
   replaceUsers(
-    @Req() request: AdministratorRequest,
+    @Req() request: ApiRequest,
     @Param('appName') appName: string,
     @Param('releaseId') releaseId: string,
     @Body() body: ReplaceReleaseUsersDto
@@ -111,13 +112,13 @@ export class ReleaseManagementController {
       appName,
       releaseId,
       body,
-      administratorContext(request)
+      operationContext(request)
     )
   }
 
   @Patch(':releaseId/scope')
   changeScope(
-    @Req() request: AdministratorRequest,
+    @Req() request: ApiRequest,
     @Param('appName') appName: string,
     @Param('releaseId') releaseId: string,
     @Body() body: ChangeReleaseScopeDto
@@ -126,13 +127,13 @@ export class ReleaseManagementController {
       appName,
       releaseId,
       body,
-      administratorContext(request)
+      operationContext(request)
     )
   }
 
   @Post(':releaseId/disable')
   disable(
-    @Req() request: AdministratorRequest,
+    @Req() request: ApiRequest,
     @Param('appName') appName: string,
     @Param('releaseId') releaseId: string
   ) {
@@ -140,13 +141,13 @@ export class ReleaseManagementController {
       appName,
       releaseId,
       false,
-      administratorContext(request)
+      operationContext(request)
     )
   }
 
   @Post(':releaseId/enable')
   enable(
-    @Req() request: AdministratorRequest,
+    @Req() request: ApiRequest,
     @Param('appName') appName: string,
     @Param('releaseId') releaseId: string
   ) {
@@ -154,20 +155,20 @@ export class ReleaseManagementController {
       appName,
       releaseId,
       true,
-      administratorContext(request)
+      operationContext(request)
     )
   }
 
   @Post(':releaseId/redispatch')
   redispatch(
-    @Req() request: AdministratorRequest,
+    @Req() request: ApiRequest,
     @Param('appName') appName: string,
     @Param('releaseId') releaseId: string
   ) {
     return this.service.redispatch(
       appName,
       releaseId,
-      administratorContext(request)
+      operationContext(request)
     )
   }
 }

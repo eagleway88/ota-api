@@ -40,11 +40,7 @@ describe('App/Manage API assembly and documentation', () => {
       .overrideProvider(ConfigService)
       .useValue({
         get: (key: string) =>
-          key === 'JWT_SECRET'
-            ? 'assembly-test-only-secret'
-            : key === 'PUBLISH_TASKS_PAUSED'
-              ? 'true'
-              : undefined
+          key === 'PUBLISH_TASKS_PAUSED' ? 'true' : undefined
       })
       .compile()
     const app = module.createNestApplication({ logger: false })
@@ -65,17 +61,17 @@ describe('App/Manage API assembly and documentation', () => {
       const manage = paths('/manage'),
         client = paths('/app'),
         legacy = paths('/legacy')
-      expect(manage.length).toBeGreaterThan(20)
+      expect(manage.length).toBeGreaterThan(15)
       expect(manage.every(path => path.startsWith('/api/v1/manage/'))).toBe(
         true
       )
       expect(client.every(path => path.startsWith('/api/v1/app/'))).toBe(true)
       expect(legacy).toEqual(['/api/version/check'])
       for (const path of [
-        '/api/v1/manage/audit-logs',
+        '/api/v1/manage/apps/{appName}/audit-logs',
         '/api/v1/manage/apps/{appName}/statistics/summary',
         '/api/v1/manage/apps/{appName}/tasks/{taskId}/logs',
-        '/api/v1/manage/auth/logout',
+        '/api/v1/manage/apps/{appName}/messages/devices',
         '/api/v1/manage/apps/{appName}/artifacts',
         '/api/v1/manage/apps/{appName}/releases'
       ]) {
@@ -85,9 +81,7 @@ describe('App/Manage API assembly and documentation', () => {
       expect(
         paths('').some(path => /\/v2\/|\/admin\/|\/message\//.test(path))
       ).toBe(false)
-      expect(
-        documents.get('api/docs/manage')!.components!.schemas!.AdministratorDto
-      ).not.toHaveProperty('properties.password')
+      expect(manage.some(path => /auth|prepare|keys/.test(path))).toBe(false)
       expect(database.createQueryRunner).not.toHaveBeenCalled()
     } finally {
       setup.mockRestore()

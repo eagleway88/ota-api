@@ -49,6 +49,7 @@ export class AuditQueryService {
       action: query.action,
       result: query.result,
       actor_admin_id: query.actorAdminId,
+      actor_key_id: query.actorKeyId,
       request_id: query.requestId,
       operation_id: query.operationId,
       ...(application

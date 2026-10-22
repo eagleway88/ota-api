@@ -1,7 +1,6 @@
 import { Server } from 'http'
 import { Global, INestApplication, Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
-import { JwtService } from '@nestjs/jwt'
 import { Test } from '@nestjs/testing'
 import { DataSource, EntityManager, QueryRunner, Table } from 'typeorm'
 import request from 'supertest'
@@ -9,21 +8,12 @@ import { ApplicationRegistryService } from '@/applications/application-registry.
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
 import { configureHttp } from '@/config/http'
 import { AdministrationModule } from '@/manage/common/administration.module'
-import { administratorJwtOptions } from '@/auth/auth.service'
+import { generateApiKey } from '@/auth/api-key.service'
 
-const sessionId = '2f9d717d-5267-448d-8e81-f9df3c5c3410'
+const credential = generateApiKey()
 
 const sql: Array<{ query: string; parameters: unknown[] }> = []
 const sqlSource = new DataSource({ type: 'mysql', database: 'test' })
-const repository = {
-  findOne: jest.fn(({ where }: { where: { id?: number; username?: string } }) =>
-    Promise.resolve(
-      where.id === 1 || where.username === 'admin'
-        ? { id: 1, username: 'admin' }
-        : null
-    )
-  )
-}
 const table = (name: string) =>
   new Table({
     name,
@@ -118,11 +108,16 @@ function createQueryRunner() {
       useValue: {
         options: { type: 'mysql' },
         entityMetadatas: [],
-        getRepository: () => repository,
         query: (_sql: string, parameters: unknown[]) =>
           Promise.resolve(
-            parameters[0] === sessionId && parameters[1] === 1
-              ? [{ id: 1, username: 'admin' }]
+            parameters[0] === credential.keyId
+              ? ['app-a', 'app-b'].map(app_name => ({
+                  key_id: credential.keyId,
+                  secret_hash: credential.secretHash,
+                  name: 'test-key',
+                  preset: 'full',
+                  app_name
+                }))
               : []
           ),
         createQueryRunner
@@ -133,10 +128,9 @@ function createQueryRunner() {
 })
 class TestDatabaseModule {}
 
-describe('external administrator HTTP APIs', () => {
+describe('external application APIs with access keys', () => {
   let app: INestApplication<Server>
   let token: string
-  let jwt: JwtService
   const range = { from: '2026-10-01T00:00:00Z', to: '2026-10-20T00:00:00Z' }
   const tables = new ApplicationTableResolver()
 
@@ -154,8 +148,7 @@ describe('external administrator HTTP APIs', () => {
     })
       .overrideProvider(ConfigService)
       .useValue({
-        get: (key: string) =>
-          key === 'JWT_SECRET' ? 'administration-test-only-secret' : undefined
+        get: () => undefined
       })
       .overrideProvider(ApplicationRegistryService)
       .useValue({
@@ -178,11 +171,7 @@ describe('external administrator HTTP APIs', () => {
     })
     configureHttp(app)
     await app.listen(0, '127.0.0.1')
-    jwt = module.get(JwtService)
-    token = await jwt.signAsync(
-      { sub: '1', sid: sessionId, tokenType: 'admin-access' },
-      { ...administratorJwtOptions, expiresIn: 3600 }
-    )
+    token = credential.accessKey
   })
 
   beforeEach(() => {
@@ -202,7 +191,7 @@ describe('external administrator HTTP APIs', () => {
     '/v1/manage/apps/app-a/tasks/task-a/logs',
     '/v1/manage/apps/app-a/releases/release-a/delivery',
     '/v1/manage/apps/app-a/audit-logs',
-    '/v1/manage/audit-logs'
+    '/v1/manage/apps/app-b/audit-logs'
   ])(
     'requires authentication independently of legacy modules: %s',
     async path => {
@@ -211,31 +200,26 @@ describe('external administrator HTTP APIs', () => {
     }
   )
 
-  it('rejects tampered, expired, unknown administrator and identity-less tokens', async () => {
-    const tokens = [
-      `${token}bad`,
-      await jwt.signAsync({ sub: 1 }, { expiresIn: -1 }),
-      await jwt.signAsync({ sub: 999 }),
-      await jwt.signAsync({})
-    ]
+  it('rejects tampered, unknown and obsolete credentials', async () => {
+    const tokens = [`${token}bad`, generateApiKey().accessKey, 'old.jwt.token']
     for (const bearer of tokens) {
       await request(app.getHttpServer())
-        .get('/api/v1/manage/audit-logs')
+        .get('/api/v1/manage/apps/app-a/audit-logs')
         .set('Authorization', `Bearer ${bearer}`)
         .expect(401)
     }
     expect(sql).toHaveLength(0)
   })
 
-  it('rejects old username-only tokens, and parameterizes filters for active sessions', async () => {
-    const oldToken = await jwt.signAsync({ username: 'admin' })
+  it('rejects old username-only tokens, and parameterizes filters for valid keys', async () => {
+    const oldToken = 'obsolete.username.token'
     await request(app.getHttpServer())
-      .get('/api/v1/manage/audit-logs')
+      .get('/api/v1/manage/apps/app-a/audit-logs')
       .set('Authorization', `Bearer ${oldToken}`)
       .expect(401)
     const action = "publish' OR 1=1 --"
     await request(app.getHttpServer())
-      .get('/api/v1/manage/audit-logs')
+      .get('/api/v1/manage/apps/app-a/audit-logs')
       .set('Authorization', `Bearer ${token}`)
       .query({ ...range, action, result: 'failed', actorAdminId: '1' })
       .expect(200)
@@ -379,11 +363,11 @@ describe('external administrator HTTP APIs', () => {
     }
   )
 
-  it('refuses unprepared applications without running schema mutations', async () => {
+  it('refuses ungranted applications before querying data or mutating schemas', async () => {
     await request(app.getHttpServer())
       .get('/api/v1/manage/apps/unknown/statistics/summary')
       .set('Authorization', `Bearer ${token}`)
-      .expect(409)
+      .expect(403)
     expect(sql).toHaveLength(0)
   })
 })

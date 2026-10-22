@@ -12,3 +12,5 @@
 单独运行可加过滤条件，例如 `yarn test --runInBand --watchman=false release-draft.mysql`。
 
 MySQL 仅接受 `/private/tmp/ota-migration-mysql.<随机字符>/mysql.sock` 或 `/tmp/` 下同名路径。按 [迁移手册](../docs/MIGRATION.md#6-隔离-mysql-回归) 创建新的临时数据目录，以 `--no-defaults --skip-networking --mysqlx=0 --skip-log-bin` 启动；测试结束后停止该实例。测试只创建/删除自身随机命名的数据库，不可传入业务数据库 socket。
+
+API Key 回归覆盖权限预设、显式多应用授权、撤销/过期、默认拒绝和真实 HTTP/SQL。application-messages.mysql 验证旧表非空拒绝、空表退役、消息隔离及历史管理员删除；ota-cli.mysql 使用真实子进程、临时 DB 专用账号，验证签发时准备应用、一次性凭证、撤销与审计失败回滚。CLI 测试不读取项目 .env，不启动业务 HTTP/OSS/Worker。

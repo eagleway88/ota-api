@@ -11,26 +11,9 @@ const TARGETED_MESSAGE_ID_MAX_LENGTH = 191
 
 export type { TargetedMessageEnvelope } from '@/contracts/messaging'
 
-export class SendGlobalDto {
+export class SendMessageDto {
   @Allow()
   data?: unknown
-}
-
-export class SendApplicationDto {
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(128)
-  appName: string
-
-  @Allow()
-  data?: unknown
-}
-
-export class MessageSubscriptionsQueryDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(128)
-  appName?: string
 }
 
 export class SendUserIdDto {

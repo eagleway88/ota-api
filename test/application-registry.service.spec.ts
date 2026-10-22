@@ -13,7 +13,8 @@ function setup({ acquired = 1, pending = false } = {}) {
       table_prefix: 'app_123a',
       status: 'ready',
       schema_version: 2,
-      read_model: 'formal'
+      read_model: 'formal',
+      catalog_revision: 1
     })
   }
   const runner = {
@@ -38,6 +39,7 @@ function setup({ acquired = 1, pending = false } = {}) {
   }
   const source = { createQueryRunner: () => runner } as unknown as DataSource
   return {
+    builder,
     runner,
     service: new ApplicationRegistryService(
       source,
@@ -47,6 +49,35 @@ function setup({ acquired = 1, pending = false } = {}) {
 }
 
 describe('application preparation migration isolation', () => {
+  it('runtime readiness checks never prepare tables, acquire preparation locks or start write transactions', async () => {
+    const { service, runner } = setup()
+    const prepare = jest.spyOn(service, 'prepare')
+    expect(await service.requireReady('app')).toMatchObject({
+      status: 'ready',
+      schemaVersion: 2
+    })
+    expect(prepare).not.toHaveBeenCalled()
+    expect(runner.query).not.toHaveBeenCalled()
+    expect(runner.startTransaction).not.toHaveBeenCalled()
+  })
+  it.each(['preparing', 'failed'])(
+    'runtime rejects %s applications without repairing their schema',
+    async status => {
+      const { service, builder, runner } = setup()
+      builder.getRawOne.mockResolvedValue({
+        app_name: 'app',
+        table_prefix: 'app_123a',
+        status,
+        schema_version: 2,
+        read_model: 'formal',
+        catalog_revision: 1
+      })
+      await expect(service.requireReady('app')).rejects.toThrow(
+        'operational CLI'
+      )
+      expect(runner.query).not.toHaveBeenCalled()
+    }
+  )
   it('does not downgrade or re-run DDL for a ready, migrated application', async () => {
     const { service, runner } = setup()
     expect(await service.prepare('app')).toMatchObject({

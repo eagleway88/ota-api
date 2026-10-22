@@ -7,6 +7,14 @@ export type TargetedMessageEnvelope = {
 }
 
 export type UserMessageCommand = { userId: string; data?: unknown }
-export type DeviceMessageCommand = { uniqueId: string; data?: unknown }
+export type DeviceMessageCommand = {
+  appName: string
+  uniqueId: string
+  data?: unknown
+}
 export type UserMessageAck = { userId: string; messageId: string }
-export type DeviceMessageAck = { uniqueId: string; messageId: string }
+export type DeviceMessageAck = {
+  appName: string
+  uniqueId: string
+  messageId: string
+}

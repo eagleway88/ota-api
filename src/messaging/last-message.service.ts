@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 import { randomUUID } from 'crypto'
@@ -9,165 +9,113 @@ import {
   DeviceMessageAck,
   TargetedMessageEnvelope
 } from '@/contracts/messaging'
-import { UserIdMessage } from '@/entities/user-id.entity'
-import { UniqueIdMessage } from '@/entities/unique-id.entity'
+import { parseUserId } from '@/contracts/user-id'
+import { ApplicationMessage } from '@/entities/application-message.entity'
+
+type MessageTarget = Pick<
+  ApplicationMessage,
+  'appName' | 'targetType' | 'targetId'
+>
 
 @Injectable()
 export class LastMessageService {
   constructor(
-    @InjectRepository(UserIdMessage)
-    private readonly tUserId: Repository<UserIdMessage>,
-    @InjectRepository(UniqueIdMessage)
-    private readonly tUniqueId: Repository<UniqueIdMessage>
+    @InjectRepository(ApplicationMessage)
+    private readonly messages: Repository<ApplicationMessage>
   ) {}
 
-  private parseContent(content: string) {
-    try {
-      return JSON.parse(content) as unknown
-    } catch {
-      return content
+  private userTarget(userId: string): MessageTarget {
+    const parsed = parseUserId(userId)
+    if (!parsed) throw new BadRequestException('Invalid userId')
+    return { appName: parsed.appName, targetType: 'user', targetId: userId }
+  }
+
+  private deviceTarget(
+    body: Pick<DeviceMessageCommand, 'appName' | 'uniqueId'>
+  ): MessageTarget {
+    return {
+      appName: body.appName,
+      targetType: 'device',
+      targetId: body.uniqueId
     }
   }
 
-  private stringifyContent(data: unknown) {
-    return typeof data === 'string' ? data : JSON.stringify(data)
-  }
-
-  private parseDate(value: Date | string | null | undefined) {
-    if (!value) {
+  private async query(
+    target: MessageTarget
+  ): Promise<TargetedMessageEnvelope | null> {
+    const entity = await this.messages.findOneBy(target)
+    if (!entity) return null
+    const updatedAt = new Date(entity.updatedAt)
+    const expiresAt = new Date(entity.expiresAt)
+    if (
+      !Number.isFinite(updatedAt.getTime()) ||
+      !Number.isFinite(expiresAt.getTime()) ||
+      expiresAt.getTime() <= Date.now()
+    ) {
+      // A concurrent replacement must not be deleted with the expired message.
+      await this.messages.delete({ ...target, messageId: entity.messageId })
       return null
     }
-
-    const date = value instanceof Date ? value : new Date(value)
-    return Number.isNaN(date.getTime()) ? null : date
-  }
-
-  private getEnvelopeDates(entity: UserIdMessage | UniqueIdMessage) {
-    const updatedAt = this.parseDate(entity.updatedAt)
-    const expiresAt = this.parseDate(entity.expiresAt)
-
-    if (!updatedAt || !expiresAt) {
-      return null
-    }
-
-    return { updatedAt, expiresAt }
-  }
-
-  private toEnvelope(
-    entity: UserIdMessage | UniqueIdMessage,
-    dates: { updatedAt: Date; expiresAt: Date }
-  ): TargetedMessageEnvelope {
     return {
       messageId: entity.messageId,
-      data: this.parseContent(entity.content),
-      updatedAt: dates.updatedAt.toISOString(),
-      expiresAt: dates.expiresAt.toISOString(),
-      ackRequired: true
-    }
-  }
-
-  private isExpired(expiresAt: Date | string | null | undefined) {
-    const date = this.parseDate(expiresAt)
-    return !date || date.getTime() <= Date.now()
-  }
-
-  async queryUserId(body: Pick<UserMessageCommand, 'userId'>) {
-    const entity = await this.tUserId.findOneBy({
-      userId: body.userId
-    })
-    if (!entity) {
-      return null
-    }
-    const dates = this.getEnvelopeDates(entity)
-    if (!dates || this.isExpired(dates.expiresAt)) {
-      await this.tUserId.delete({
-        userId: body.userId,
-        messageId: entity.messageId
-      })
-      return null
-    }
-    return this.toEnvelope(entity, dates)
-  }
-
-  async createUserId(body: UserMessageCommand, ttlMs: number) {
-    const now = new Date()
-    const messageId = randomUUID()
-    const expiresAt = new Date(now.getTime() + ttlMs)
-    await this.tUserId.upsert(
-      {
-        userId: body.userId,
-        content: this.stringifyContent(body.data),
-        messageId,
-        updatedAt: now,
-        expiresAt
-      },
-      ['userId']
-    )
-
-    return {
-      messageId,
-      data: body.data,
-      updatedAt: now.toISOString(),
+      data: JSON.parse(entity.content) as unknown,
+      updatedAt: updatedAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
       ackRequired: true
-    } satisfies TargetedMessageEnvelope
+    }
   }
 
-  async ackUserId(body: UserMessageAck) {
-    const result = await this.tUserId.delete({
-      userId: body.userId,
-      messageId: body.messageId
-    })
+  private async create(
+    target: MessageTarget,
+    data: unknown,
+    ttlMs: number
+  ): Promise<
+    TargetedMessageEnvelope & { messageId: string; expiresAt: string }
+  > {
+    const updatedAt = new Date()
+    const expiresAt = new Date(updatedAt.getTime() + ttlMs)
+    const messageId = randomUUID()
+    const normalizedData = data === undefined ? null : data
+    await this.messages.upsert(
+      {
+        ...target,
+        content: JSON.stringify(normalizedData),
+        messageId,
+        updatedAt,
+        expiresAt
+      },
+      ['appName', 'targetType', 'targetId']
+    )
+    return {
+      messageId,
+      data: normalizedData,
+      updatedAt: updatedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      ackRequired: true
+    }
+  }
+
+  private async ack(target: MessageTarget, messageId: string) {
+    const result = await this.messages.delete({ ...target, messageId })
     return Boolean(result.affected)
   }
 
-  async queryUniqueId(body: Pick<DeviceMessageCommand, 'uniqueId'>) {
-    const entity = await this.tUniqueId.findOneBy({
-      uniqueId: body.uniqueId
-    })
-    if (!entity) {
-      return null
-    }
-    const dates = this.getEnvelopeDates(entity)
-    if (!dates || this.isExpired(dates.expiresAt)) {
-      await this.tUniqueId.delete({
-        uniqueId: body.uniqueId,
-        messageId: entity.messageId
-      })
-      return null
-    }
-    return this.toEnvelope(entity, dates)
+  queryUserId(body: Pick<UserMessageCommand, 'userId'>) {
+    return this.query(this.userTarget(body.userId))
   }
-
-  async createUniqueId(body: DeviceMessageCommand, ttlMs: number) {
-    const now = new Date()
-    const messageId = randomUUID()
-    const expiresAt = new Date(now.getTime() + ttlMs)
-    await this.tUniqueId.upsert(
-      {
-        uniqueId: body.uniqueId,
-        content: this.stringifyContent(body.data),
-        messageId,
-        updatedAt: now,
-        expiresAt
-      },
-      ['uniqueId']
-    )
-
-    return {
-      messageId,
-      data: body.data,
-      updatedAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-      ackRequired: true
-    } satisfies TargetedMessageEnvelope
+  createUserId(body: UserMessageCommand, ttlMs: number) {
+    return this.create(this.userTarget(body.userId), body.data, ttlMs)
   }
-
-  async ackUniqueId(body: DeviceMessageAck) {
-    const result = await this.tUniqueId.delete({
-      uniqueId: body.uniqueId,
-      messageId: body.messageId
-    })
-    return Boolean(result.affected)
+  ackUserId(body: UserMessageAck) {
+    return this.ack(this.userTarget(body.userId), body.messageId)
+  }
+  queryUniqueId(body: Pick<DeviceMessageCommand, 'appName' | 'uniqueId'>) {
+    return this.query(this.deviceTarget(body))
+  }
+  createUniqueId(body: DeviceMessageCommand, ttlMs: number) {
+    return this.create(this.deviceTarget(body), body.data, ttlMs)
+  }
+  ackUniqueId(body: DeviceMessageAck) {
+    return this.ack(this.deviceTarget(body), body.messageId)
   }
 }

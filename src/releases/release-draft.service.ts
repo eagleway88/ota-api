@@ -63,7 +63,7 @@ export class ReleaseDraftService {
     idempotencyKey: string | undefined,
     context: ReleaseOperationContext
   ) {
-    const application = await this.applications.prepare(appName, context)
+    const application = await this.applications.requireReady(appName)
     const audit: ApplicationWriteAudit = {
       operationId: randomUUID(),
       context,
@@ -256,7 +256,7 @@ export class ReleaseDraftService {
     body: UpdateReleaseDraftDto,
     context: ReleaseOperationContext
   ) {
-    const application = await this.applications.prepare(appName, context)
+    const application = await this.applications.requireReady(appName)
     const audit: ApplicationWriteAudit = {
       operationId: randomUUID(),
       context,
@@ -361,7 +361,7 @@ export class ReleaseDraftService {
     releaseId: string,
     context: ReleaseOperationContext
   ) {
-    const application = await this.applications.prepare(appName, context)
+    const application = await this.applications.requireReady(appName)
     const operationId = randomUUID()
     const taskId = randomUUID()
     const result = await withAuditedApplicationWrite(

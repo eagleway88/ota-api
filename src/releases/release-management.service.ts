@@ -71,16 +71,6 @@ export class ReleaseManagementService {
     private readonly releaseWrites: ReleaseWriteRepository
   ) {}
 
-  async prepare(appName: string, context: ReleaseOperationContext) {
-    const application = await this.applications.prepare(appName, context)
-    return apiUtil.data({
-      appName: application.appName,
-      tablePrefix: application.tablePrefix,
-      schemaVersion: application.schemaVersion,
-      status: application.status
-    })
-  }
-
   async enqueuePublishedRelease(
     queryRunner: QueryRunner,
     application: RegisteredApplication,
@@ -371,7 +361,7 @@ export class ReleaseManagementService {
     context: ReleaseOperationContext,
     mutation: PolicyMutation
   ) {
-    const application = await this.applications.prepare(appName, context)
+    const application = await this.applications.requireReady(appName)
     const operationId = randomUUID()
     const taskId = randomUUID()
     let revisionAfter = 0
