@@ -13,11 +13,11 @@ import { AdminReadRepository } from '@/infrastructure/persistence/admin-read.rep
 import { ConnectionSubscriptionStore } from '@/realtime/subscriptions/connection-subscription.store'
 import { DispatchProgress } from '@/realtime/dispatch/dispatch-progress'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
-import { OtaVersionQueryService } from '@/compat/legacy/http/version/ota-version-query.service'
+import { UpdateQueryService } from '@/updates/update-query.service'
 import { Release } from '@/contracts/releases'
-import { WsService } from '@/ws/ws.service'
-import { PublishTaskWorkerService } from '@/infrastructure/tasks/publish-task-worker.service'
-import { TaskQueryService } from '@/infrastructure/tasks/task-query.service'
+import { RealtimeGateway } from '@/realtime/gateway/realtime.gateway'
+import { PublishTaskWorkerService } from '@/jobs/publish/publish-task-worker.service'
+import { TaskQueryService } from '@/manage/tasks/tasks.service'
 
 function deferred() {
   let resolve!: () => void
@@ -96,13 +96,13 @@ mysql('publish task checkpoints on isolated MySQL', () => {
         }
       }
     }
-    const ws = new WsService(
-      new OtaVersionQueryService(catalog as unknown as ReleaseCatalogService),
+    const ws = new RealtimeGateway(
+      new UpdateQueryService(catalog as unknown as ReleaseCatalogService),
       {} as never,
       subscriptions
     )
     ws.server = { sockets: { sockets } } as never
-    const dispatcher: Pick<WsService, 'dispatchApplicationUpdate'> = {
+    const dispatcher: Pick<RealtimeGateway, 'dispatchApplicationUpdate'> = {
       dispatchApplicationUpdate: (name, checkpoint, revision) =>
         ws.dispatchApplicationUpdate(
           name,
@@ -118,7 +118,7 @@ mysql('publish task checkpoints on isolated MySQL', () => {
       source,
       { get: () => undefined } as unknown as ConfigService,
       applications,
-      dispatcher as WsService
+      dispatcher as RealtimeGateway
     )
   }
 

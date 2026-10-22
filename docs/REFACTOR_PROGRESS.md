@@ -1,5 +1,13 @@
 # 重构完成度核对报告
 
+## 2026-10-22 新目录与接口交付
+
+测试已集中根目录 `test/`，运维 CLI 放在 `src/scripts/` 且不进入生产构建。参照 eagleway-network-api 建立 `app/`、`manage/`、`config/`、`jobs/`、`infrastructure/oss/` 和统一 `realtime/`；上传、应用准备与发布 Controller 分离。管理员、消息及历史存储适配已移出旧 HTTP 兼容目录。
+
+正式路由统一 `/api/v1/app/*`、`/api/v1/manage/*`，只有 `/api/version/check` 保留旧协议。运行时与真实 HTTP 测试共用前缀、版本、请求 ID 和校验配置。39 套件 / 298 项（含 82 项隔离 MySQL）通过，typecheck、build、lint 通过。
+
+当前结构以 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [API.md](API.md) 为准。下方是历次验收记录和旧 50 项评分基线，旧目录描述不再代表当前结构；没有把目录移动等同于剩余功能全部完成。
+
 核对日期：2026-10-21。原交付基线：`463bd41`。目录调整后核对版本：`330ae28`。
 
 追加核对：2026-10-22。`9fa23be` 名单分段审计、`b9b24a5` 草稿创建/编辑审计、`2dffe06` 收窄旧 HTTP 兼容范围已交付。
@@ -56,7 +64,7 @@
 | --- | --- | --- | --- |
 | 01 | 旧路径、事件、字段、版本语义清单（§4） | 已实现 | [方案](../REFACTOR_PLAN.md) §4 和 [接入说明](SDK_INTEGRATION.md) 已列明约定。 |
 | 02 | 真实旧 SDK/业务客户端固定契约样本（§13.1） | 未完成 | 当前测试是本仓库构造数据；没有真实 SDK 驱动的 HTTP、multipart、Socket.IO 兼容测试集。 |
-| 03 | 数据库只读核对工具（§10.4） | 部分 | [audit-database.ts](../scripts/audit-database.ts) 有表、应用名、ID、字符集和缺列统计；缺孤立上报、历史适配分布、文件引用及数据对账报告。 |
+| 03 | 数据库只读核对工具（§10.4） | 部分 | [audit-database.ts](../src/scripts/audit-database.ts) 有表、应用名、ID、字符集和缺列统计；缺孤立上报、历史适配分布、文件引用及数据对账报告。 |
 | 04 | 生产应用表映射及已发放 ID 证据（§10.2、§16） | 未完成 | 没有本次目标数据库核对结果；文档中的人工核对步骤不是已经取得的证据。 |
 
 ### P1：决策与边界
@@ -64,7 +72,7 @@
 | 编号 | 方案要求 | 状态 | 证据与缺口 |
 | --- | --- | --- | --- |
 | 05 | 无数据库依赖的纯决策函数（§6） | 已实现 | [resolve-update.ts](../src/updates/decision/resolve-update.ts) 及场景测试覆盖全量优先、热更新基础版本、名单和强更隔离。 |
-| 06 | HTTP、订阅补发、实时推送共用选择逻辑（§6、§8） | 已实现 | [查询服务](../src/compat/legacy/http/version/ota-version-query.service.ts) 和 [WebSocket 服务](../src/ws/ws.service.ts) 共用 `resolveUpdate`。 |
+| 06 | HTTP、订阅补发、实时推送共用选择逻辑（§6、§8） | 已实现 | [查询服务](../src/updates/update-query.service.ts) 和 [WebSocket 服务](../src/realtime/gateway/realtime.gateway.ts) 共用 `resolveUpdate`。 |
 | 07 | 旧协议、旧列、凭证兼容集中（§3.1） | 部分 | 旧 HTTP 集中到 `compat/legacy/http/`，发布双写及历史解释集中到 `compat/legacy/persistence/`；Gateway、部分版本编码和旧密码校验仍在 `ws/`、`utils/`、`admin/`。 |
 | 08 | 正式 Repository 端口与兼容模块可独立移除（§3.1、§10.5） | 部分 | 已提供 [ReleaseWriteRepository](../src/releases/ports/release-write.repository.ts) 发布/启停端口与 [TelemetryWriteRepository](../src/telemetry/ports/telemetry-write.repository.ts) 上报端口；Nest 测试可替换写入端口而不加载旧 HTTP 路由。读取、草稿/名单存储尚未全部端口化，仍不能删除兼容层。 |
 | 09 | 检查、订阅与普通消息读取不执行 DDL（§10.2） | 已实现 | 查询链路只读表与元数据；建表/补列位于管理和发布准备路径。 |
@@ -80,7 +88,7 @@
 | 14 | 候选与名单为同一修订快照（§8.2） | 已实现 | 同一 `REPEATABLE READ` 事务读取应用映射、应用目录修订、版本及名单；失效/强制刷新隔离在途旧结果，任务校验实际快照修订。本地回归通过；真实 MySQL 验收见 45。 |
 | 15 | 合并加载、有界候选与让出事件循环（§8.2） | 部分 | 有合并加载、5 秒缓存和每 100 个连接让出执行；候选与名单仍全量载入，订阅重算没有合并调度。 |
 | 16 | 版本、名单、目录修订、任务和成功审计原子提交（§8.1、§10.6） | 已实现 | 旧发布及 [草稿发布](../src/releases/release-draft.service.ts) 均在同一事务写入这些对象；实际 MySQL 回滚验证见 45。 |
-| 17 | 持久化领取、恢复、重试、租约防陈旧写（§10.6） | 部分 | [任务执行器](../src/infrastructure/tasks/publish-task-worker.service.ts) 绑定实际快照修订；领取、续租、完成统一应用→任务加锁顺序，进度/结果校验 owner/token/有效期，完成事务再次校验目录。真实 MySQL 已验证竞争领取、过期接管和迟到写隔离；实际进程 kill/重启恢复仍缺验收。 |
+| 17 | 持久化领取、恢复、重试、租约防陈旧写（§10.6） | 部分 | [任务执行器](../src/jobs/publish/publish-task-worker.service.ts) 绑定实际快照修订；领取、续租、完成统一应用→任务加锁顺序，进度/结果校验 owner/token/有效期，完成事务再次校验目录。真实 MySQL 已验证竞争领取、过期接管和迟到写隔离；实际进程 kill/重启恢复仍缺验收。 |
 | 18 | 按版本、有效内容和策略修订去重（§8.3） | 部分 | 连接记录仅比较版本 ID；任务分发使用 `force=true`，未实现内容/修订指纹。 |
 | 19 | 停用、名单移除和撤销（§8.4） | 已实现 | 启停在同一事务同步 `enable/is_enabled`；真实 mapper/决策/Gateway 代码回归覆盖停用后检查、补发、实时撤销和重新启用。真实网络及数据库验收仍见 44/45。 |
 | 20 | 执行计数、跳过原因、批量进度和不完整标记（§10.6） | 已实现 | [聚合器](../src/realtime/dispatch/dispatch-progress.ts) 分离检查/资格/发送尝试/即时错误；每 100 个连接及结束保存进度，跳过原因来自同一决策。实际版本摘要最多 100 项，超限标明不完整及遗漏计数；失败/接管保留不完整 checkpoint，恢复执行生成 requestId。管理员查询读取现有日志列，历史缺失不补造。 |
@@ -104,17 +112,17 @@
 | 28 | 应用登记、持久化前缀与历史映射冲突处理（§10.2） | 部分 | [表路由](../src/infrastructure/persistence/application-table-resolver.ts) 和所有 schema 工厂/旧写入保留登记前缀数字；迁移检测映射冲突及混合应用行。确认映射仍需 DBA 受控登记，没有自动导入/历史碰撞修复工具。 |
 | 29 | 结构互斥、版本进度、索引升级和失败隔离（§10.2） | 部分 | 准备与迁移共用应用锁；就绪 prepare 不重复 DDL/降级；应用+迁移版本账本保存批次、失败状态，恢复可重入，并补充必要唯一索引。通用已有索引差异升级仍缺。 |
 | 30 | 2000 起点、已发放水位及并发提交顺序（§4.3） | 已实现 | 迁移持久化已确认水位；旧/v2 发布在分配 ID 前取得共享应用锁并持有到提交/回滚，与迁移/准备互斥。真实 MySQL 验证混合发布顺序、同草稿并发不重复编号、迁移后新 ID 不回退。目标历史水位证据仍由条目 04/49 约束。 |
-| 31 | 正式历史字段分批回填、干跑及断点续跑（§10.5） | 已实现 | [迁移器](../src/infrastructure/migrations/application-data-migrator.ts) 和 [CLI](../scripts/migrate-application.ts) 支持预演、行锁批次、数据/进度同事务、失败续跑及幂等重跑；版本与三类上报保留 ID/旧列，冲突拒绝覆盖，真实 MySQL 已验证。 |
+| 31 | 正式历史字段分批回填、干跑及断点续跑（§10.5） | 已实现 | [迁移器](../src/infrastructure/migrations/application-data-migrator.ts) 和 [CLI](../src/scripts/migrate-application.ts) 支持预演、行锁批次、数据/进度同事务、失败续跑及幂等重跑；版本与三类上报保留 ID/旧列，冲突拒绝覆盖，真实 MySQL 已验证。 |
 | 32 | 影子读取、逐应用对账与读取模型切换（§10.5） | 部分 | 有逐行有效决策字段对比、行数/ID/旧列指纹/错误次数对账，以及仅验证后显式切换的 `read_model`；严格正式映射回归通过。仍缺完整 Repository 装配切换、名单/真实业务查询全链路影子验收。 |
-| 33 | 文件引用、校验和待发布状态（§12.1） | 部分 | [文件服务](../src/artifacts/artifact.service.ts) 实现 v2 pending/校验；旧上传未统一登记文件，未形成完整引用核对链。 |
+| 33 | 文件引用、校验和待发布状态（§12.1） | 部分 | [文件服务](../src/infrastructure/oss/artifact.service.ts) 实现 v2 pending/校验；旧上传未统一登记文件，未形成完整引用核对链。 |
 | 34 | 文件内容不可覆盖（§12.1） | 部分 | v2 文件路径含 UUID；旧上传同应用/版本仍用毫秒时间哈希文件名，同毫秒上传同扩展名存在冲突可能。 |
 | 35 | 上传资源上限及孤立对象清理（§12.1） | 部分 | 有单文件大小和 ZIP 头校验；仍使用内存 buffer，无并发总量限制、孤立对象清单及保留窗口流程。 |
-| 36 | 原统计语义、可选 reportId、错误聚合（§12.2） | 已实现 | [统计写入适配器](../src/compat/legacy/persistence/dual-write-telemetry.repository.ts) 保留无键逐次计数、旧失败 ID 原位更新及历史时间；拒绝跨发布重绑、reportId 内容冲突和旧指纹歧义。聚合详情/次数同事务，缺列拒绝而不执行 DDL。真实 MySQL 验证并发、历史空正式字段、回滚、应用隔离及 HTTP/管理员读取；目标环境仍见 45/49。 |
+| 36 | 原统计语义、可选 reportId、错误聚合（§12.2） | 已实现 | [统计写入适配器](../src/infrastructure/persistence/legacy/dual-write-telemetry.repository.ts) 保留无键逐次计数、旧失败 ID 原位更新及历史时间；拒绝跨发布重绑、reportId 内容冲突和旧指纹歧义。聚合详情/次数同事务，缺列拒绝而不执行 DDL。真实 MySQL 验证并发、历史空正式字段、回滚、应用隔离及 HTTP/管理员读取；目标环境仍见 45/49。 |
 | 37 | 普通消息、ACK/TTL 与精确在线状态（§11） | 部分 | 有信封、upsert、按目标+messageId 删除及查询时过期判断；未见独立过期清理，旧应用消息 OTA 调用盘点也未完成。 |
-| 38 | 管理员密码散列与初始化互斥（§12.3） | 已实现 | [密码组件](../src/admin/password-hasher.ts) 与 [管理服务](../src/compat/legacy/http/admin/admin.service.ts) 有散列、登录迁移、初始化锁和密码字段过滤。 |
-| 39 | 必需配置验证与可信代理 IP（§12.3） | 已实现 | [配置校验](../src/infrastructure/config/validate-config.ts)、`fetchIP()` 和相关测试已实现。 |
+| 38 | 管理员密码散列与初始化互斥（§12.3） | 已实现 | [密码组件](../src/auth/password-hasher.ts) 与 [管理服务](../src/auth/administrator.service.ts) 有散列、登录迁移、初始化锁和密码字段过滤。 |
+| 39 | 必需配置验证与可信代理 IP（§12.3） | 已实现 | [配置校验](../src/config/environment.ts)、`fetchIP()` 和相关测试已实现。 |
 | 40 | 完整成功/失败审计与名单分段差异（§10.7） | 部分 | 管理员/应用准备、发布/策略及草稿创建/普通编辑已有失败审计；[名单差异](../src/audit/audience-change.ts) 保存完整有界分段，真实 MySQL 验证最多 50 段、管理员分页、并发修订与后续段回滚。草稿元数据记录允许字段名；文件上传及前置拒绝仍未全部覆盖。 |
-| 41 | 任务/审计保留清理及历史缺失提示（§10.8） | 部分 | [保留服务](../src/infrastructure/tasks/retention.service.ts) 仅清理成功任务及旧审计；查询已提供历史缺失说明，仍缺精确保留水位、可配置低峰调度和失败任务受控归档流程。 |
+| 41 | 任务/审计保留清理及历史缺失提示（§10.8） | 部分 | [保留服务](../src/jobs/retention/retention.service.ts) 仅清理成功任务及旧审计；查询已提供历史缺失说明，仍缺精确保留水位、可配置低峰调度和失败任务受控归档流程。 |
 | 42 | 按职责组织目录与服务（§3） | 部分 | 任务、文件、消息存储、目录、审计和统计读写已拆分；`VersionModule` 只装配检查服务，原 `VersionService` 移至测试夹具，正式 v2 上报独立装配。管理员/消息目录、读取/草稿端口及 Gateway 职责仍待收拢。 |
 
 ### P5：验证与上线

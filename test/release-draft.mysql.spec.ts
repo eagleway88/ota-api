@@ -6,10 +6,10 @@ import {
   ApplicationRegistryService,
   RegisteredApplication
 } from '@/applications/application-registry.service'
-import { AuditQueryService } from '@/audit/audit-query.service'
+import { AuditQueryService } from '@/manage/audit/audit.service'
 import { AdminReadRepository } from '@/infrastructure/persistence/admin-read.repository'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
-import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
+import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
 import { RefactoringFoundation1792444800000 } from '@/migrations/1792444800000-RefactoringFoundation'
 import { ApplicationDataMigration1792445100000 } from '@/migrations/1792445100000-ApplicationDataMigration'
 import {

@@ -1,7 +1,7 @@
 import {
   MigratedTableKind,
   RowIssue
-} from '@/compat/legacy/persistence/backfill-row'
+} from '@/infrastructure/persistence/legacy/backfill-row'
 
 export const APPLICATION_DATA_MIGRATION = 'formal-fields-v1'
 export const APPLICATION_MIGRATION_LEDGER = 'ota_application_migrations'

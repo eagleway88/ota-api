@@ -1,4 +1,4 @@
-import { PasswordHasher } from '@/admin/password-hasher'
+import { PasswordHasher } from '@/auth/password-hasher'
 
 describe('PasswordHasher', () => {
   const hasher = new PasswordHasher()

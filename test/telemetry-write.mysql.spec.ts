@@ -2,7 +2,6 @@ import 'reflect-metadata'
 import { randomUUID } from 'crypto'
 import { DataSource } from 'typeorm'
 import { Test } from '@nestjs/testing'
-import { ValidationPipe } from '@nestjs/common'
 import { Server } from 'http'
 import request from 'supertest'
 import {
@@ -12,18 +11,18 @@ import {
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
 import { AdminReadRepository } from '@/infrastructure/persistence/admin-read.repository'
 import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
-import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
-import { DualWriteTelemetryRepository } from '@/compat/legacy/persistence/dual-write-telemetry.repository'
-import { VersionController } from '@/compat/legacy/http/version/version.controller'
-import { VersionCheckService } from '@/compat/legacy/http/version/version-check.service'
-import { OtaVersionQueryService } from '@/compat/legacy/http/version/ota-version-query.service'
+import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
+import { DualWriteTelemetryRepository } from '@/infrastructure/persistence/legacy/dual-write-telemetry.repository'
+import { LegacyUpdateCheckController } from '@/compat/legacy/update-check.controller'
+import { LegacyUpdateCheckService } from '@/compat/legacy/update-check.service'
+import { UpdateQueryService } from '@/updates/update-query.service'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
-import { TelemetryWriteController } from '@/telemetry/telemetry-write.controller'
+import { TelemetryWriteController } from '@/app/telemetry/telemetry.controller'
 import { RefactoringFoundation1792444800000 } from '@/migrations/1792444800000-RefactoringFoundation'
 import { ApplicationDataMigration1792445100000 } from '@/migrations/1792445100000-ApplicationDataMigration'
-import { ExceptionFilter } from '@/middleware/exception-filter'
+import { configureHttp } from '@/config/http'
 import { TelemetryWriteService } from '@/telemetry/telemetry-write.service'
-import { TelemetryQueryService } from '@/telemetry/telemetry-query.service'
+import { TelemetryQueryService } from '@/manage/statistics/statistics.service'
 import { StatusReportInput } from '@/telemetry/ports/telemetry-write.repository'
 
 const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
@@ -127,12 +126,12 @@ mysql('telemetry writes on isolated MySQL', () => {
 
   it('keeps the old check contract while serving formal v2 reports and rejecting retired version routes', async () => {
     const module = await Test.createTestingModule({
-      controllers: [VersionController, TelemetryWriteController],
+      controllers: [LegacyUpdateCheckController, TelemetryWriteController],
       providers: [
-        VersionCheckService,
+        LegacyUpdateCheckService,
         {
-          provide: OtaVersionQueryService,
-          useValue: new OtaVersionQueryService(
+          provide: UpdateQueryService,
+          useValue: new UpdateQueryService(
             new ReleaseCatalogService(source, applications)
           )
         },
@@ -142,9 +141,7 @@ mysql('telemetry writes on isolated MySQL', () => {
     const http = module.createNestApplication<
       import('@nestjs/common').INestApplication<Server>
     >({ logger: false })
-    http.setGlobalPrefix('api')
-    http.useGlobalPipes(new ValidationPipe())
-    http.useGlobalFilters(new ExceptionFilter())
+    configureHttp(http)
     await http.listen(0, '127.0.0.1')
     try {
       for (const ver of [100, '1.0.0']) {
@@ -189,7 +186,7 @@ mysql('telemetry writes on isolated MySQL', () => {
           .send({})
           .expect(404)
       }
-      const base = '/api/v2/apps/' + appName + '/telemetry/'
+      const base = '/api/v1/app/apps/' + appName + '/telemetry/'
       const body = {
         platform: 'windows',
         versionCode: 110,

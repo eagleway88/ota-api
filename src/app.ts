@@ -3,14 +3,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { join } from 'path'
 
-import { ReleasesModule } from './releases/releases.module'
-import { validateRuntimeConfig } from './infrastructure/config/validate-config'
-import { LegacyCompatibilityModule } from './compat/legacy/legacy.module'
+import { validateRuntimeConfig } from '@/config/environment'
+import { LegacyCompatibilityModule } from '@/compat/legacy'
 import { AuthModule } from './auth/auth.module'
-import { AdministrationModule } from './admin/administration.module'
-import { TelemetryWritesModule } from './telemetry/telemetry-writes.module'
-import { AdminModule } from './compat/legacy/http/admin/admin.module'
-import { MessageModule } from './compat/legacy/http/message/message.module'
+import { AppApiModule } from '@/app/index'
+import { ManageApiModule } from '@/manage'
+import { JobsModule } from '@/jobs'
 
 @Module({
   imports: [
@@ -34,12 +32,10 @@ import { MessageModule } from './compat/legacy/http/message/message.module'
       inject: [ConfigService]
     }),
     AuthModule,
-    AdministrationModule,
-    TelemetryWritesModule,
-    AdminModule,
-    MessageModule,
-    LegacyCompatibilityModule,
-    ReleasesModule
+    AppApiModule,
+    ManageApiModule,
+    JobsModule,
+    LegacyCompatibilityModule
   ],
   controllers: []
 })

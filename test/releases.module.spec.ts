@@ -2,14 +2,15 @@ import { Global, Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { Test } from '@nestjs/testing'
 import { DataSource } from 'typeorm'
-import { LegacyCompatibilityModule } from '@/compat/legacy/legacy.module'
-import { PublishTasksModule } from '@/infrastructure/tasks/publish-tasks.module'
-import { PublishTaskWorkerService } from '@/infrastructure/tasks/publish-task-worker.service'
-import { ReleaseManagementController } from '@/releases/release-management.controller'
+import { LegacyCompatibilityModule } from '@/compat/legacy'
+import { JobsModule } from '@/jobs'
+import { PublishTaskWorkerService } from '@/jobs/publish/publish-task-worker.service'
+import { ReleaseManagementController } from '@/manage/releases/releases.controller'
 import { ReleasesModule } from '@/releases/releases.module'
+import { ManageReleasesModule } from '@/manage/releases/releases.module'
 import { ReleaseWriteRepository } from '@/releases/ports/release-write.repository'
-import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
-import { VersionController } from '@/compat/legacy/http/version/version.controller'
+import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
+import { LegacyUpdateCheckController } from '@/compat/legacy/update-check.controller'
 
 const database = {
   options: { type: 'mysql' },
@@ -50,13 +51,13 @@ describe('release module wiring', () => {
     try {
       await module.init()
       expect(module.get(ReleaseWriteRepository)).toBe(repository)
-      expect(module.get(ReleaseManagementController)).toBeDefined()
-      expect(() => module.get(VersionController)).toThrow()
+      expect(() => module.get(ReleaseManagementController)).toThrow()
+      expect(() => module.get(LegacyUpdateCheckController)).toThrow()
     } finally {
       await module.close()
     }
   })
-  it('assembles legacy and v2 endpoints with one paused task worker', async () => {
+  it('assembles legacy and manage endpoints with one paused task worker', async () => {
     const module = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -66,7 +67,7 @@ describe('release module wiring', () => {
         }),
         TestPersistenceModule,
         LegacyCompatibilityModule,
-        ReleasesModule
+        ManageReleasesModule
       ]
     })
       .overrideProvider(ConfigService)
@@ -84,7 +85,7 @@ describe('release module wiring', () => {
       )
       expect(
         module
-          .select(PublishTasksModule)
+          .select(JobsModule)
           .get(PublishTaskWorkerService, { strict: true })
       ).toBe(module.get(PublishTaskWorkerService))
       expect(database.createQueryRunner).not.toHaveBeenCalled()

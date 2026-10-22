@@ -6,7 +6,7 @@ NestJS + TypeORM + MySQL + Socket.IO 的模块化 OTA 与普通消息服务。
 
 ## 当前能力
 
-- 兼容原 `/api/version/*`、`/api/message/*`、管理员接口和 Socket.IO 事件。
+- 仅兼容旧 `POST /api/version/check`；其他操作使用新的 App/Manage 接口。
 - HTTP 检查、订阅补发、实时发布共用同一更新决策函数。
 - 按连接保存平台、架构、渠道、原生版本、安装序号和完整 `userId`，精准发送完整版本记录。
 - 支持 `public` 与 `allowlist`；白名单只保存完整 `应用:平台:业务用户ID`。
@@ -27,7 +27,7 @@ yarn build
 yarn lint
 ```
 
-完整仓库已通过 ESLint、TypeScript 构建和 Jest 测试。`yarn lint` 带有 `--fix`，CI 中如需只检查不改文件，可直接执行 `eslint "{src,apps,libs,test}/**/*.ts"`。
+测试统一位于根目录 `test/`：`yarn test:unit`、`yarn test:http`、`yarn test:mysql` 分组执行。`yarn lint` 只检查，`yarn lint:fix` 才修改文件。详见 [测试说明](test/README.md)。
 
 管理员接口测试会监听本机 `127.0.0.1` 随机端口，通过真实 HTTP 请求验证；数据库使用测试替身，不需要实际 MySQL 或 OSS。受限沙箱需允许本地端口监听。
 
@@ -38,7 +38,7 @@ MySQL 发布/迁移集成测试默认跳过，只有显式配置独立临时 soc
 1. 从 `.env.example` 创建 `.env` 并填写全部必需配置。
 2. 先执行只读核对：`yarn audit:db`。
 3. 备份并验证恢复后执行全局迁移：`yarn typeorm:run`。
-4. 历史应用先核实并登记实际物理前缀；使用管理员 Token 调用 `POST /api/v2/apps/:appName/prepare`，逐应用准备分表。
+4. 历史应用先核实并登记实际物理前缀；使用管理员 Token 调用 `POST /api/v1/manage/apps/:appName/prepare`，逐应用准备分表。
 5. 历史应用按迁移手册停止写入，运行 `yarn migrate:app` 预演、分批回填和验证；prepare 本身不代表数据迁移完成。
 6. 构建并启动：`yarn build && yarn start:prod`。正式字段读取须额外通过逐应用对账及显式切换。
 
@@ -51,6 +51,7 @@ MySQL 发布/迁移集成测试默认跳过，只有显式配置独立临时 soc
 - [兼容层清理](docs/COMPATIBILITY_REMOVAL.md)
 - [性能验证](docs/PERFORMANCE.md)
 - [外部管理员 API](docs/ADMIN_API.md)
+- [统一 API 索引](docs/API.md)
 - [目录与模块边界](docs/ARCHITECTURE.md)
 
 ## 关键约束

@@ -1,7 +1,7 @@
 import {
   canClaimPublishTask,
   publishTaskFailureTransition
-} from '@/infrastructure/tasks/publish-task-policy'
+} from '@/jobs/publish/publish-task-policy'
 
 describe('publish task policy', () => {
   const now = new Date('2026-10-20T00:00:00.000Z')

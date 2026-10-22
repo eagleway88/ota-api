@@ -5,35 +5,31 @@ import { Request } from 'express'
 import { randomUUID } from 'crypto'
 import { apiUtil } from '@/utils/api'
 import { ConfigService } from '@nestjs/config'
-import { OssArtifactStorage } from '@/artifacts/oss-artifact.storage'
-import { OtaVersionQueryService } from '@/compat/legacy/http/version/ota-version-query.service'
+import { OssArtifactStorage } from '@/infrastructure/oss/oss-artifact.storage'
+import { UpdateQueryService } from '@/updates/update-query.service'
 import { createVersionTable } from '@/utils/version'
 import { normalizeVersionValue } from '@/utils/version'
 import { fetchIP, isRequestIpAllowed, underlineToHump } from '@/utils'
-import {
-  AppErrorLogDto,
-  CheckDto,
-  CreateDto
-} from '@/compat/legacy/http/version/version.dto'
+import { AppErrorLogDto, CheckDto, CreateDto } from './legacy-version.dto'
 import {
   ErrorDto,
   SuccessDto,
   UpdateType,
   UploadDto
-} from '@/compat/legacy/http/version/version.dto'
+} from './legacy-version.dto'
+import { VersionListItemDto, VersionListQueryDto } from './legacy-version.dto'
 import {
-  VersionListItemDto,
-  VersionListQueryDto
-} from '@/compat/legacy/http/version/version.dto'
-import { otaUploadMaxBytes, validateOtaUpload } from '@/artifacts/upload-policy'
+  otaUploadMaxBytes,
+  validateOtaUpload
+} from '@/infrastructure/oss/upload-policy'
 import { userIdMatchesContext } from '@/contracts/user-id'
 import { ReleaseOperationContext } from '@/contracts/release-operation'
-import { normalizeLegacyReleaseAudience } from '@/compat/legacy/http/release-audience.mapper'
-import { serializeLegacyReleaseRecord } from '@/compat/legacy/mappers/release.mapper'
+import { normalizeLegacyReleaseAudience } from './legacy-release-audience.mapper'
+import { serializeLegacyReleaseRecord } from '@/compat/legacy/release.mapper'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ReleaseManagementService } from '@/releases/release-management.service'
 import { withAuditedApplicationWrite } from '@/audit/application-write-audit'
-import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
+import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
 
 import { TelemetryWriteService } from '@/telemetry/telemetry-write.service'
 import {
@@ -41,14 +37,14 @@ import {
   legacyFailureReport,
   legacyApplicationError,
   serializeLegacyReport
-} from '@/compat/legacy/http/version/telemetry.mapper'
+} from './legacy-telemetry.mapper'
 
 /** Historical writer for migration regressions only; never register in the application. */
 @Injectable()
 export class VersionService {
   private updater?: OssArtifactStorage
   constructor(
-    private readonly otaVersionQueryService: OtaVersionQueryService,
+    private readonly otaVersionQueryService: UpdateQueryService,
     private readonly configService: ConfigService,
     @InjectDataSource() private dataSource: DataSource,
     @Optional()

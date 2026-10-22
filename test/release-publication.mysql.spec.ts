@@ -13,9 +13,9 @@ import {
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
 import { ReleaseDraftService } from '@/releases/release-draft.service'
 import { ReleaseManagementService } from '@/releases/release-management.service'
-import { PublishTaskWorkerService } from '@/infrastructure/tasks/publish-task-worker.service'
+import { PublishTaskWorkerService } from '@/jobs/publish/publish-task-worker.service'
 import { VersionService } from './fixtures/legacy-version.service'
-import { OtaVersionQueryService } from '@/compat/legacy/http/version/ota-version-query.service'
+import { UpdateQueryService } from '@/updates/update-query.service'
 import {
   PlatformType,
   ReleaseScopeType,
@@ -23,9 +23,9 @@ import {
 } from '@/contracts/release-values'
 import { ApplicationDataMigrator } from '@/infrastructure/migrations/application-data-migrator'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
-import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
-import { inspectBackfillRow } from '@/compat/legacy/persistence/backfill-row'
-import { AuditQueryService } from '@/audit/audit-query.service'
+import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
+import { inspectBackfillRow } from '@/infrastructure/persistence/legacy/backfill-row'
+import { AuditQueryService } from '@/manage/audit/audit.service'
 import { AdminReadRepository } from '@/infrastructure/persistence/admin-read.repository'
 
 function deferred() {
@@ -136,7 +136,7 @@ mysql('publication transactions on isolated MySQL', () => {
       new DualWriteReleaseRepository()
     )
     legacy = new VersionService(
-      catalog as unknown as OtaVersionQueryService,
+      catalog as unknown as UpdateQueryService,
       { get: jest.fn() } as unknown as ConfigService,
       source,
       applications,

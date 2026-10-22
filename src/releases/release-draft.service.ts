@@ -14,7 +14,7 @@ import { RegisteredApplication } from '@/applications/application-registry.servi
 import { normalizeReleaseAudience } from './release-audience'
 import { mapStoredReleaseRecord } from './release-record.mapper'
 import { ReleaseOperationContext } from '@/contracts/release-operation'
-import { ReleaseCatalogListQueryDto } from './release-management.dto'
+import { ReleaseCatalogListQueryDto } from '@/releases/release-management.dto'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
 import {
   ApplicationWriteAudit,
@@ -27,7 +27,7 @@ import { draftChangedFields, sameDraftContent } from './draft-audit'
 import {
   CreateReleaseDraftDto,
   UpdateReleaseDraftDto
-} from './release-draft.dto'
+} from '@/releases/release-draft.dto'
 
 type StoredArtifact = {
   artifact_id: string

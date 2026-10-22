@@ -1,7 +1,7 @@
 import {
   mapLegacyReleaseRecord,
   serializeLegacyRelease
-} from '@/compat/legacy/mappers/release.mapper'
+} from '@/compat/legacy/release.mapper'
 
 describe('release legacy mapper', () => {
   it('prefers formal storage columns while preserving old output fields', () => {

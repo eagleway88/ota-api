@@ -14,7 +14,7 @@ import {
   migratedTableKinds,
   MigratedTableKind,
   StoredRow
-} from '@/compat/legacy/persistence/backfill-row'
+} from '@/infrastructure/persistence/legacy/backfill-row'
 import {
   APPLICATION_MIGRATION_LEDGER,
   ApplicationMigrationPlan,

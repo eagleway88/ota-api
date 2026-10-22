@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common'
 import { ApplicationsModule } from '@/applications/applications.module'
 import { TelemetryWriteRepository } from '@/telemetry/ports/telemetry-write.repository'
-import { DualWriteTelemetryRepository } from '@/compat/legacy/persistence/dual-write-telemetry.repository'
+import { DualWriteTelemetryRepository } from '@/infrastructure/persistence/legacy/dual-write-telemetry.repository'
 
 @Module({
   imports: [ApplicationsModule],

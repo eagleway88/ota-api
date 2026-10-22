@@ -2,7 +2,7 @@ import {
   DEFAULT_OTA_UPLOAD_MAX_BYTES,
   otaUploadMaxBytes,
   validateOtaUpload
-} from '@/artifacts/upload-policy'
+} from '@/infrastructure/oss/upload-policy'
 
 describe('OTA upload policy', () => {
   it('uses a configured positive upload limit or the default', () => {

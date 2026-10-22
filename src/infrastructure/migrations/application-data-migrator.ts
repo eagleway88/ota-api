@@ -2,7 +2,7 @@ import { DataSource, QueryRunner, TableIndex } from 'typeorm'
 import {
   inspectBackfillRow,
   migratedTableKinds
-} from '@/compat/legacy/persistence/backfill-row'
+} from '@/infrastructure/persistence/legacy/backfill-row'
 import {
   auditApplication,
   migrationSchemas,

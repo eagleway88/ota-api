@@ -1,4 +1,4 @@
-import { normalizeLegacyReleaseAudience } from '@/compat/legacy/http/release-audience.mapper'
+import { normalizeLegacyReleaseAudience } from './fixtures/legacy-release-audience.mapper'
 
 describe('normalizeLegacyReleaseAudience', () => {
   it('keeps omitted legacy fields as a public release', () => {

@@ -7,8 +7,8 @@ import { DataSource, EntityManager, QueryRunner, Table } from 'typeorm'
 import request from 'supertest'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
-import { ExceptionFilter } from '@/middleware/exception-filter'
-import { AdministrationModule } from '@/admin/administration.module'
+import { configureHttp } from '@/config/http'
+import { AdministrationModule } from '@/manage/common/administration.module'
 
 const sql: Array<{ query: string; parameters: unknown[] }> = []
 const sqlSource = new DataSource({ type: 'mysql', database: 'test' })
@@ -167,8 +167,7 @@ describe('external administrator HTTP APIs', () => {
     app = module.createNestApplication<INestApplication<Server>>({
       logger: false
     })
-    app.setGlobalPrefix('api')
-    app.useGlobalFilters(new ExceptionFilter())
+    configureHttp(app)
     await app.listen(0, '127.0.0.1')
     jwt = module.get(JwtService)
     token = await jwt.signAsync({ sub: 1 })
@@ -182,16 +181,16 @@ describe('external administrator HTTP APIs', () => {
   })
 
   it.each([
-    '/v2/apps/app-a/statistics/summary',
-    '/v2/apps/app-a/telemetry/successes',
-    '/v2/apps/app-a/telemetry/failures',
-    '/v2/apps/app-a/telemetry/app-errors',
-    '/v2/apps/app-a/tasks',
-    '/v2/apps/app-a/tasks/task-a',
-    '/v2/apps/app-a/tasks/task-a/logs',
-    '/v2/apps/app-a/releases/release-a/delivery',
-    '/v2/apps/app-a/audit-logs',
-    '/v2/admin/audit-logs'
+    '/v1/manage/apps/app-a/statistics/summary',
+    '/v1/manage/apps/app-a/telemetry/successes',
+    '/v1/manage/apps/app-a/telemetry/failures',
+    '/v1/manage/apps/app-a/telemetry/app-errors',
+    '/v1/manage/apps/app-a/tasks',
+    '/v1/manage/apps/app-a/tasks/task-a',
+    '/v1/manage/apps/app-a/tasks/task-a/logs',
+    '/v1/manage/apps/app-a/releases/release-a/delivery',
+    '/v1/manage/apps/app-a/audit-logs',
+    '/v1/manage/audit-logs'
   ])(
     'requires authentication independently of legacy modules: %s',
     async path => {
@@ -209,7 +208,7 @@ describe('external administrator HTTP APIs', () => {
     ]
     for (const bearer of tokens) {
       await request(app.getHttpServer())
-        .get('/api/v2/admin/audit-logs')
+        .get('/api/v1/manage/audit-logs')
         .set('Authorization', `Bearer ${bearer}`)
         .expect(401)
     }
@@ -220,7 +219,7 @@ describe('external administrator HTTP APIs', () => {
     const oldToken = await jwt.signAsync({ username: 'admin' })
     const action = "publish' OR 1=1 --"
     await request(app.getHttpServer())
-      .get('/api/v2/admin/audit-logs')
+      .get('/api/v1/manage/audit-logs')
       .set('Authorization', `Bearer ${oldToken}`)
       .query({ ...range, action, result: 'failed', actorAdminId: '1' })
       .expect(200)
@@ -230,7 +229,7 @@ describe('external administrator HTTP APIs', () => {
 
   it('returns report counts filtered by application, platform, release and time', async () => {
     const response = await request(app.getHttpServer())
-      .get('/api/v2/apps/app-a/statistics/summary')
+      .get('/api/v1/manage/apps/app-a/statistics/summary')
       .set('Authorization', `Bearer ${token}`)
       .query({ ...range, platform: 'windows', releaseSequence: '2000' })
       .expect(200)
@@ -254,7 +253,7 @@ describe('external administrator HTTP APIs', () => {
 
   it('returns allowlisted report fields and preserves arbitrary extras keys', async () => {
     const response = await request(app.getHttpServer())
-      .get('/api/v2/apps/app-a/telemetry/successes')
+      .get('/api/v1/manage/apps/app-a/telemetry/successes')
       .set('Authorization', `Bearer ${token}`)
       .query({ ...range, page: '2', pageSize: '2' })
       .expect(200)
@@ -279,7 +278,7 @@ describe('external administrator HTTP APIs', () => {
 
   it('labels aggregated client-error lifetime counts and filters last occurrence', async () => {
     const response = await request(app.getHttpServer())
-      .get('/api/v2/apps/app-a/telemetry/app-errors')
+      .get('/api/v1/manage/apps/app-a/telemetry/app-errors')
       .set('Authorization', `Bearer ${token}`)
       .query({ ...range, kind: 'crash' })
       .expect(200)
@@ -296,7 +295,7 @@ describe('external administrator HTTP APIs', () => {
 
   it('routes application audit logs to the registered application table', async () => {
     await request(app.getHttpServer())
-      .get('/api/v2/apps/app-b/audit-logs')
+      .get('/api/v1/manage/apps/app-b/audit-logs')
       .set('Authorization', `Bearer ${token}`)
       .query({ ...range, taskId: 'task-a', requestId: 'req-1' })
       .expect(200)
@@ -308,7 +307,7 @@ describe('external administrator HTTP APIs', () => {
 
   it('preserves incomplete task execution metrics and task status filters', async () => {
     const response = await request(app.getHttpServer())
-      .get('/api/v2/apps/app-a/tasks/task-a/logs')
+      .get('/api/v1/manage/apps/app-a/tasks/task-a/logs')
       .set('Authorization', `Bearer ${token}`)
       .query({ ...range, status: 'lease_expired' })
       .expect(200)
@@ -322,7 +321,7 @@ describe('external administrator HTTP APIs', () => {
 
   it('does not find another application task by its ID', async () => {
     await request(app.getHttpServer())
-      .get('/api/v2/apps/app-b/tasks/task-a')
+      .get('/api/v1/manage/apps/app-b/tasks/task-a')
       .set('Authorization', `Bearer ${token}`)
       .expect(404)
     expect(sql.every(call => !call.query.includes('app_a_'))).toBe(true)
@@ -330,7 +329,7 @@ describe('external administrator HTTP APIs', () => {
 
   it('paginates delivery tasks and includes their latest execution without recipient claims', async () => {
     const response = await request(app.getHttpServer())
-      .get('/api/v2/apps/app-a/releases/release-a/delivery')
+      .get('/api/v1/manage/apps/app-a/releases/release-a/delivery')
       .set('Authorization', `Bearer ${token}`)
       .query(range)
       .expect(200)
@@ -356,7 +355,7 @@ describe('external administrator HTTP APIs', () => {
     'rejects invalid or unbounded query before database reads %j',
     async query => {
       await request(app.getHttpServer())
-        .get('/api/v2/apps/app-a/telemetry/failures')
+        .get('/api/v1/manage/apps/app-a/telemetry/failures')
         .set('Authorization', `Bearer ${token}`)
         .query(query)
         .expect(400)
@@ -366,7 +365,7 @@ describe('external administrator HTTP APIs', () => {
 
   it('refuses unprepared applications without running schema mutations', async () => {
     await request(app.getHttpServer())
-      .get('/api/v2/apps/unknown/statistics/summary')
+      .get('/api/v1/manage/apps/unknown/statistics/summary')
       .set('Authorization', `Bearer ${token}`)
       .expect(409)
     expect(sql).toHaveLength(0)

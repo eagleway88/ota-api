@@ -1,11 +1,11 @@
 import { ReleaseWriteInput } from '@/releases/ports/release-write.repository'
-import { inspectBackfillRow } from '@/compat/legacy/persistence/backfill-row'
+import { inspectBackfillRow } from '@/infrastructure/persistence/legacy/backfill-row'
 import {
   dualWriteReleaseValues,
   enabledWriteValues,
   legacyReleaseWriteValues
-} from '@/compat/legacy/persistence/release-write.mapper'
-import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
+} from '@/infrastructure/persistence/legacy/release-write.mapper'
+import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
 import { QueryRunner } from 'typeorm'
 import { RegisteredApplication } from '@/applications/application-registry.service'
 

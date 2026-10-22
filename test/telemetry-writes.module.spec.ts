@@ -1,7 +1,7 @@
 import { Global, Module } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import { DataSource } from 'typeorm'
-import { VersionController } from '@/compat/legacy/http/version/version.controller'
+import { LegacyUpdateCheckController } from '@/compat/legacy/update-check.controller'
 import { TelemetryWriteRepository } from '@/telemetry/ports/telemetry-write.repository'
 import { TelemetryWriteService } from '@/telemetry/telemetry-write.service'
 import { TelemetryWritesModule } from '@/telemetry/telemetry-writes.module'
@@ -39,7 +39,7 @@ describe('telemetry write boundary', () => {
         id: 1
       })
       expect(reports.success).toHaveBeenCalledWith(input, expect.any(Object))
-      expect(() => module.get(VersionController)).toThrow()
+      expect(() => module.get(LegacyUpdateCheckController)).toThrow()
       expect(database.createQueryRunner).not.toHaveBeenCalled()
     } finally {
       await module.close()

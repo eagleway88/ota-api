@@ -6,8 +6,8 @@ import {
 } from '@/applications/application-registry.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
 import { ConnectionSubscriptionStore } from '@/realtime/subscriptions/connection-subscription.store'
-import { WsService } from '@/ws/ws.service'
-import { PublishTaskWorkerService } from '@/infrastructure/tasks/publish-task-worker.service'
+import { RealtimeGateway } from '@/realtime/gateway/realtime.gateway'
+import { PublishTaskWorkerService } from '@/jobs/publish/publish-task-worker.service'
 
 function fixture(snapshotRevision = 42, revisionAfterClaim = 42) {
   const tables = new ApplicationTableResolver().resolve('app', 'app')
@@ -101,7 +101,7 @@ function fixture(snapshotRevision = 42, revisionAfterClaim = 42) {
       })
     })
   }
-  const ws = new WsService(
+  const ws = new RealtimeGateway(
     query as never,
     {} as never,
     new ConnectionSubscriptionStore()

@@ -3,7 +3,7 @@ import {
   legacyFailureReport,
   legacySuccessReport,
   serializeLegacyReport
-} from '@/compat/legacy/http/version/telemetry.mapper'
+} from './fixtures/legacy-telemetry.mapper'
 import {
   applicationErrorHash,
   applicationErrorIdentity,
@@ -11,7 +11,7 @@ import {
   sameStatusContent,
   statusReportValues,
   storedReport
-} from '@/compat/legacy/persistence/telemetry-write.mapper'
+} from '@/infrastructure/persistence/legacy/telemetry-write.mapper'
 import {
   ApplicationErrorInput,
   StatusReportInput

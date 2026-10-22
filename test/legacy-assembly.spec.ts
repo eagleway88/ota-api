@@ -1,6 +1,6 @@
 import { MODULE_METADATA } from '@nestjs/common/constants'
-import { VersionModule } from '@/compat/legacy/http/version/version.module'
-import { LegacyCompatibilityModule } from '@/compat/legacy/legacy.module'
+import { LegacyUpdateCheckModule } from '@/compat/legacy/update-check.module'
+import { LegacyCompatibilityModule } from '@/compat/legacy'
 
 describe('LegacyCompatibilityModule', () => {
   it('loads only the legacy update check module', () => {
@@ -9,6 +9,6 @@ describe('LegacyCompatibilityModule', () => {
       LegacyCompatibilityModule
     ) as unknown[]
 
-    expect(imports).toEqual([VersionModule])
+    expect(imports).toEqual([LegacyUpdateCheckModule])
   })
 })

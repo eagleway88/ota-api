@@ -1,4 +1,4 @@
-import type { CreateReleaseDraftDto } from './release-draft.dto'
+import type { CreateReleaseDraftDto } from '@/releases/release-draft.dto'
 
 const fields = [
   'targetVersionCode',

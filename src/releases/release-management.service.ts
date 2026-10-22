@@ -18,14 +18,14 @@ import { RegisteredApplication } from '@/applications/application-registry.servi
 import { mapStoredReleaseRecord } from './release-record.mapper'
 import { normalizeReleaseAudience } from './release-audience'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
-import { PublishTaskWorkerService } from '@/infrastructure/tasks/publish-task-worker.service'
+import { PublishTaskWorkerService } from '@/jobs/publish/publish-task-worker.service'
 import { ReleaseScope } from '@/contracts/releases'
 import { ReleaseScopeType } from '@/contracts/release-values'
 import {
   ChangeReleaseScopeDto,
   ReleaseListQueryDto,
   ReplaceReleaseUsersDto
-} from './release-management.dto'
+} from '@/releases/release-management.dto'
 
 import { ReleaseOperationContext } from '@/contracts/release-operation'
 import { MAX_RELEASE_USERS } from '@/contracts/release-limits'

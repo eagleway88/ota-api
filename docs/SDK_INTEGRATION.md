@@ -4,7 +4,7 @@
 
 - 唯一向后兼容承诺是 `POST /api/version/check` 的旧请求与响应：`name/platform/ver/id`、原版本字段、下载别名和 `{ code: 0, data: null }` 均保留。
 - 旧 `/api/version/create`、`upload`、`list/:name`、`success`、`error`、`app-error` 已退出注册，返回 `404`；调用方随本版更新，不提供旧方法转发。
-- 上传和发布统一使用 `POST /api/v2/apps/:appName/artifacts` → `POST /releases` 创建草稿 → `POST /releases/:releaseId/publish` 显式发布。`artifacts` 使用 multipart `file`，草稿使用正式 JSON 字段和显式发布范围；全量包也可通过 `installerSourceUrl` 引用已有安装源。
+- 上传和发布统一使用 `POST /api/v1/manage/apps/:appName/artifacts` → `POST /releases` 创建草稿 → `POST /releases/:releaseId/publish` 显式发布。`artifacts` 使用 multipart `file`，草稿使用正式 JSON 字段和显式发布范围；全量包也可通过 `installerSourceUrl` 引用已有安装源。
 - 管理员和普通消息接口目前的实现仍可使用，但旧调用形式、事件和 SDK 签名不再作为兼容要求，后续按新版契约调整。
 
 ## 新增可选能力
@@ -31,7 +31,7 @@
 
 ## 上报、重试与错误记录更新
 
-新版公开客户端上报路径为 `POST /api/v2/apps/:appName/telemetry/successes`、`failures`、`app-errors`。这些 POST 不要求管理员 Token，数据按不可信客户端上报处理；同路径 GET 及统计/审计查询仍需要管理员认证。应用取自路径，IP 由服务端解析，正文伪造 `appName/sourceIp` 或其他未声明字段会被拒绝。
+新版公开客户端上报路径为 `POST /api/v1/app/apps/:appName/telemetry/successes`、`failures`、`app-errors`。这些 POST 不要求管理员 Token，数据按不可信客户端上报处理；GET 明细及统计/审计查询位于 `/api/v1/manage/apps/:appName/`，必须管理员认证。应用取自路径，IP 由服务端解析，正文伪造 `appName/sourceIp` 或其他未声明字段会被拒绝。
 
 成功/失败正文使用 `platform`（平台枚举）、`versionCode`（数值整数）、`releaseSequence`（正整数），可选 `reportedUsername`、`extras` 和 UUID `reportId`。失败额外要求 `message`，可选正整数 `recordId` 更新现有无键记录。运行错误使用 `platform/versionCode/kind/message`，可选 `reportedUsername/extras/stack`，不带 `releaseSequence/reportId`。响应为 `{ code: 0, data: ... }`，数据使用正式字段。
 
@@ -49,6 +49,6 @@
 
 ## 普通应用消息与 OTA 重推
 
-旧 `POST /api/message/send-ota-name` 路径仅保留为普通应用消息入口，服务端不会根据任意 `data.id` 猜测它是版本记录。调用方不得通过该路径直接广播原始 OTA 版本数据。
+旧 `POST /api/v1/manage/messages/applications` 路径仅保留为普通应用消息入口，服务端不会根据任意 `data.id` 猜测它是版本记录。调用方不得通过该路径直接广播原始 OTA 版本数据。
 
-需要重新发送已发布版本时，调用 `POST /api/v2/apps/:appName/releases/:releaseId/redispatch`。服务端重新读取真实版本、当前发布范围和白名单，通过统一决策后向符合条件的连接发送完整适用版本。
+需要重新发送已发布版本时，调用 `POST /api/v1/manage/apps/:appName/releases/:releaseId/redispatch`。服务端重新读取真实版本、当前发布范围和白名单，通过统一决策后向符合条件的连接发送完整适用版本。

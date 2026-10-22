@@ -1,14 +1,14 @@
 import { DataSource, QueryRunner } from 'typeorm'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
-import { PublishTaskWorkerService } from '@/infrastructure/tasks/publish-task-worker.service'
+import { PublishTaskWorkerService } from '@/jobs/publish/publish-task-worker.service'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
-import { OtaVersionQueryService } from '@/compat/legacy/http/version/ota-version-query.service'
+import { UpdateQueryService } from '@/updates/update-query.service'
 import { ConnectionSubscriptionStore } from '@/realtime/subscriptions/connection-subscription.store'
-import { WsService } from '@/ws/ws.service'
+import { RealtimeGateway } from '@/realtime/gateway/realtime.gateway'
 import { mapStoredReleaseRecord } from '@/releases/release-record.mapper'
 import { ReleaseManagementService } from '@/releases/release-management.service'
-import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
+import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
 
 function fixture() {
   const row: Record<string, unknown> = {
@@ -96,11 +96,11 @@ function fixture() {
         }
       })
   }
-  const query = new OtaVersionQueryService(
+  const query = new UpdateQueryService(
     catalog as unknown as ReleaseCatalogService
   )
   const subscriptions = new ConnectionSubscriptionStore()
-  const ws = new WsService(query, {} as never, subscriptions)
+  const ws = new RealtimeGateway(query, {} as never, subscriptions)
   const client = {
     id: 'socket-a',
     join: jest.fn(),

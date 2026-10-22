@@ -1,10 +1,10 @@
 # 外部管理员查询接口
 
-这些接口用于业务管理后台、运维工具或其他持有 OTA 管理员凭证的调用方。入口位于 `/api/v2/`，Swagger 文档位于 `/api/docs`。
+这些接口用于业务管理后台、运维工具或其他持有 OTA 管理员凭证的调用方。入口位于 `/api/v1/manage/`，Swagger 文档位于 `/api/docs/manage`。
 
 ## 登录和权限
 
-通过已有 `POST /api/admin/login` 登录：
+通过已有 `POST /api/v1/manage/auth/login` 登录：
 
 ```json
 { "username": "admin", "password": "<管理员密码>" }
@@ -26,20 +26,20 @@ Authorization: Bearer <JWT>
 
 | 路径 | 数据 | 额外筛选 |
 | --- | --- | --- |
-| `/api/v2/apps/:appName/statistics/summary` | 成功/失败上报记录数 | `platform`、`releaseSequence` |
-| `/api/v2/apps/:appName/telemetry/successes` | 安装成功上报明细 | `platform`、`releaseSequence` |
-| `/api/v2/apps/:appName/telemetry/failures` | 更新失败上报明细 | `platform`、`releaseSequence` |
-| `/api/v2/apps/:appName/telemetry/app-errors` | 客户端运行错误/崩溃聚合记录 | `platform`、`kind=crash/error`、`errorHash` |
-| `/api/v2/apps/:appName/tasks` | 发布任务 | `status`、`releaseId` |
-| `/api/v2/apps/:appName/tasks/:taskId` | 单个任务及最后一次执行记录 | 不带分页/时间筛选 |
-| `/api/v2/apps/:appName/tasks/:taskId/logs` | 每次执行、重试、租约过期记录 | `status` |
-| `/api/v2/apps/:appName/releases/:releaseId/delivery` | 该发布触发的任务及各任务最后一次执行摘要 | 通用分页/时间参数 |
-| `/api/v2/apps/:appName/audit-logs` | 应用发布、名单、启停等管理审计 | `action`、`result`、`actorAdminId`、`requestId`、`operationId`、`releaseId`、`taskId` |
-| `/api/v2/admin/audit-logs` | 管理员、应用登记等全局审计 | `action`、`result`、`actorAdminId`、`requestId`、`operationId` |
+| `/api/v1/manage/apps/:appName/statistics/summary` | 成功/失败上报记录数 | `platform`、`releaseSequence` |
+| `/api/v1/manage/apps/:appName/telemetry/successes` | 安装成功上报明细 | `platform`、`releaseSequence` |
+| `/api/v1/manage/apps/:appName/telemetry/failures` | 更新失败上报明细 | `platform`、`releaseSequence` |
+| `/api/v1/manage/apps/:appName/telemetry/app-errors` | 客户端运行错误/崩溃聚合记录 | `platform`、`kind=crash/error`、`errorHash` |
+| `/api/v1/manage/apps/:appName/tasks` | 发布任务 | `status`、`releaseId` |
+| `/api/v1/manage/apps/:appName/tasks/:taskId` | 单个任务及最后一次执行记录 | 不带分页/时间筛选 |
+| `/api/v1/manage/apps/:appName/tasks/:taskId/logs` | 每次执行、重试、租约过期记录 | `status` |
+| `/api/v1/manage/apps/:appName/releases/:releaseId/delivery` | 该发布触发的任务及各任务最后一次执行摘要 | 通用分页/时间参数 |
+| `/api/v1/manage/apps/:appName/audit-logs` | 应用发布、名单、启停等管理审计 | `action`、`result`、`actorAdminId`、`requestId`、`operationId`、`releaseId`、`taskId` |
+| `/api/v1/manage/audit-logs` | 管理员、应用登记等全局审计 | `action`、`result`、`actorAdminId`、`requestId`、`operationId` |
 
 任务状态为 `pending/running/retry_wait/succeeded/failed`；执行日志状态为 `running/succeeded/failed/lease_expired`。平台为 `ios/android/windows/linux/macos`。筛选值按精确值匹配。
 
-应用查询先解析已登记的应用表前缀，所有数据落在对应应用的表内。任务或发布 ID 只在路径指定的应用内查找，找不到返回 `404`。应用未准备或查询表不存在返回 `409`，需要先完成迁移及 `POST /api/v2/apps/:appName/prepare`。全局审计表由全局迁移准备。
+应用查询先解析已登记的应用表前缀，所有数据落在对应应用的表内。任务或发布 ID 只在路径指定的应用内查找，找不到返回 `404`。应用未准备或查询表不存在返回 `409`，需要先完成迁移及 `POST /api/v1/manage/apps/:appName/prepare`。全局审计表由全局迁移准备。
 
 ## 分页与时间范围
 
@@ -100,7 +100,7 @@ Authorization: Bearer <JWT>
 
 ## 发布操作失败审计
 
-现有 `GET /api/v2/apps/:appName/audit-logs?result=failed` 可查询新增失败记录，仍要求管理员 Bearer Token；支持按 `requestId`、`operationId`、`releaseId` 和时间范围筛选。发布/草稿请求沿用 HTTP 请求 ID 与已认证管理员身份。
+现有 `GET /api/v1/manage/apps/:appName/audit-logs?result=failed` 可查询新增失败记录，仍要求管理员 Bearer Token；支持按 `requestId`、`operationId`、`releaseId` 和时间范围筛选。发布/草稿请求沿用 HTTP 请求 ID 与已认证管理员身份。
 
 覆盖已进入应用写入边界的 v2 发布、启用/停用、已发布名单替换/范围修改、重新分发，以及草稿创建/编辑/名单修改。非法应用/平台标识返回 `400` 并记录固定错误分类，不将完整名单或异常正文写入失败摘要。成功审计与业务变更、修订及任务同事务提交。
 
@@ -145,7 +145,7 @@ v2 首次发布、已发布名单替换/范围修改、草稿创建和普通 PAT
 
 ## 发布任务运行进度
 
-管理员可轮询 `GET /api/v2/apps/:appName/tasks/:taskId` 的 `data.latestLog`，或使用 `GET /api/v2/apps/:appName/tasks/:taskId/logs` 查看各次执行。认证沿用管理员 Bearer Token；本轮未新增公开日志入口。运行中每检查 100 个连接保存一次聚合进度，执行前和最后不足一批也保存；数据库写入与续租同事务，不按连接插入明细日志。
+管理员可轮询 `GET /api/v1/manage/apps/:appName/tasks/:taskId` 的 `data.latestLog`，或使用 `GET /api/v1/manage/apps/:appName/tasks/:taskId/logs` 查看各次执行。认证沿用管理员 Bearer Token；本轮未新增公开日志入口。运行中每检查 100 个连接保存一次聚合进度，执行前和最后不足一批也保存；数据库写入与续租同事务，不按连接插入明细日志。
 
 | 日志字段 | 含义 |
 | --- | --- |
@@ -185,7 +185,7 @@ v2 首次发布、已发布名单替换/范围修改、草稿创建和普通 PAT
 以下为接入示例，域名和 Token 由调用方填写：
 
 ```bash
-curl --get 'https://ota.example.com/api/v2/apps/eagleway-network/statistics/summary' \
+curl --get 'https://ota.example.com/api/v1/manage/apps/eagleway-network/statistics/summary' \
   -H "Authorization: Bearer $OTA_ADMIN_TOKEN" \
   --data-urlencode 'platform=windows' \
   --data-urlencode 'releaseSequence=2000' \

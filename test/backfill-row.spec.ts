@@ -1,4 +1,4 @@
-import { inspectBackfillRow } from '@/compat/legacy/persistence/backfill-row'
+import { inspectBackfillRow } from '@/infrastructure/persistence/legacy/backfill-row'
 import { mapStoredReleaseRecord } from '@/releases/release-record.mapper'
 import { mapFormalReleaseRecord } from '@/releases/formal-release.mapper'
 

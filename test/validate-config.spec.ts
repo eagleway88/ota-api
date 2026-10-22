@@ -1,4 +1,4 @@
-import { validateRuntimeConfig } from '@/infrastructure/config/validate-config'
+import { validateRuntimeConfig } from '@/config/environment'
 
 const valid = {
   ORM_HOST: '127.0.0.1',
