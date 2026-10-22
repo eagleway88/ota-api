@@ -1,134 +1,21 @@
-# 数据迁移手册
+# 数据库初始化（不迁移旧数据）
 
-本地 CLI `app prepare`（或 `key create --prepare-apps`）只解决结构和发布元数据准备，不代表历史正式字段已经迁移。使用独立 CLI `yarn migrate:app` 分批回填、对账和逐应用切换；它不启动 Nest、任务 Worker 或 OSS，也不删除应用旧列、重编号或伪造历史审计/推送记录；全局账号/消息退役是下述独立、明确的删除步骤。
+用户已取消历史数据、旧表结构和旧接口兼容要求。本版从空库初始化，不提供旧 SQL 导入、字段回填、双写、断点迁移或旧结构自动升级。
 
-## 1. 先备份、核对并暂停写入
+旧版迁移器、audit:db、migrate:app 及历史数据库升级链已从当前版本移除；历史实现仍可通过 Git 查看，不应混入本版部署。
 
-先用只读凭证运行 `yarn audit:db`，保存表名、应用分布、字符集、MySQL 版本和 ID 水位。必须人工核实：
+## 唯一初始化入口
 
-- `appName → 实际 tablePrefix`，包括早期归一化碰撞、含数字前缀、混合应用名和遗留错误表名；不得自动猜测、重命名或合并表。
-- 已删除但曾发放的最大版本 ID；从备份、日志或业务记录取得证据，不能仅使用现存 `MAX(id)`。
-- 旧版本编码及基础版本列表、孤立上报、历史文件 URL 和业务含义。工具保留孤立上报，不自动改关联。
+~~~bash
+yarn db:init --database ota_new
+~~~
 
-备份必须包含四类历史业务表、应用登记、名单及已有任务/审计，并在目标 MySQL 同版本环境实际演练恢复。在维护窗口关闭所有请求入口、停止全部服务实例，确认在途事务结束或任务租约过期，再离线运行 CLI。项目没有任务暂停环境变量；仅拦截 HTTP 流量不能阻止后台任务继续工作。
+先由运维创建独立空库并配置 ORM_DATABASE。--database 是目标确认，不会创建/切换数据库，必须与连接配置一致。支持 --env-file PATH 指定受控配置。
 
-`--confirm-backup` 和 `--confirm-writes-paused` 是操作确认，不是自动备份或自动停写功能。行锁和历史指纹用于防止覆盖与发现意外写入，不能代替维护窗口。
+InitialSchema1792713600000 创建 ota_installation、ota_applications、ota_audit_log、ota_api_keys、ota_api_key_applications、ota_messages，并由 TypeORM 在 ota_schema_history 记录执行结果。应用分表由 app prepare 或 key create --prepare-apps 准备。
 
-旧发布、v2 发布和已发布策略修改现在与迁移共用应用锁，发布取得锁后会再次核实 ready 状态；这可以阻止在迁移途中分配新 ID。草稿编辑、上传、统计上报及 Worker 尚未全部纳入此互斥，仍必须按上述流程停服务并离线迁移，不能把发布锁当作在线无停机迁移支持。
+初始化在写入迁移历史前核查目标：已有旧表/视图或未知安装标记则拒绝，保留原数据，不执行 DROP/TRUNCATE。已有本版初始化结果可以重复运行；部分 DDL 完成的中断可以在核对后重试。迁移 down 主动拒绝自动删除数据库。
 
-## 2. 全局迁移与确认映射
+服务启动要求本版安装标记、初始化历史及全局表存在，业务请求不尝试修复旧库。未来新版结构演进可以新增受控迁移，但不代表重新承诺兼容重构前数据库。
 
-1. **停止所有旧服务/消息写入进程并备份**，再使用受控写凭证执行 `yarn typeorm:run`。保留并顺序执行既有迁移历史，新增 ApiKeys1792445300000（Key/显式多应用授权及审计 actor_key_id）、ApplicationMessages1792445400000（统一消息）、RetireAdministratorAccounts1792445500000（账号退役）。后两项不是仅追加表结构，删除策略见下文。旧 Token 无效，不自动转换为 Key，见 [认证迁移](AUTHENTICATION.md)。
-2. 对历史应用先确认登记中的 `table_prefix` 与物理表完全一致。未登记时，先只读预演检查原表，再由 DBA 在受控变更中录入确认后的唯一映射，初始 `schema_version=0/status=preparing`；**目前没有自动映射导入工具**。已有映射不一致时停止，不能直接覆盖为新前缀。
-3. 用当前源码 CLI 运行 `yarn ota app prepare --app APP --database DB`，创建辅助表及准备列。已就绪应用不重复 DDL，也不降级 schema version；已有未完成迁移时拒绝 prepare，要求续跑 CLI。首次准备会填充版本 UUID/默认范围/策略修订，但不再批量改写历史上报计数、时间或正式上报字段。
-4. 保持该应用写入口关闭，执行下列预演与回填。历史版本表不存在、表引擎不是 InnoDB、应用混表或映射冲突时，工具拒绝实际迁移。
-
-未登记/未准备时只读预演仍可输出表诊断，但状态为 `blocked`，不是允许上线。CLI 不自动创建“替代历史版本表”。
-
-### 全局退役边界与空库说明
-
-- unique_id_message、user_id_message 已确认线上为空。迁移会再次检查两张表，任一非空则在新建/删除消息表之前中止，保留原数据；不能用自动清空绕过。停掉旧消息写入进程，防止检查与删除之间再次写入。
-- 新建 ota_messages，以 app_name/target_type/target_id 为复合主键，用户和设备消息统一存储并隔离；不是为无归属旧设备消息猜测应用。
-- admins 和 ota_admin_sessions 按已批准的决定全部删除，即便存在旧账号/会话。历史审计、actor_admin_id/名称快照及应用业务表保留。
-- MySQL DDL 非原子；失败后先核实已完成结构再重跑，不能删除迁移历史。消息和账号退役不提供自动 down；恢复需要升级前备份和匹配服务版本。
-- 不修改已提交的迁移历史。**全新空库**需先提供旧 AdminSecurity 迁移所需的空 admins 基线，再运行完整迁移链；它最终会被退役迁移删除。以下 SQL 仅用于新空库，不在已有库覆盖/重建账号表：
-
-```sql
-CREATE TABLE admins (
-  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  username VARCHAR(255) NOT NULL,
-  password VARCHAR(255) NOT NULL,
-  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
-```
-
-全局迁移完成后才能运行 Key CLI。新应用可在签发时使用 `--prepare-apps`，历史应用仍需确认映射并完成下述回填；业务请求不会隐式建表。示例见 [API Key 运维](AUTHENTICATION.md)。
-
-## 3. 预演与执行
-
-以下 `example-app`、`example_app`、`ota_staging`、`4500` 均为示例，替换为人工核实后的值。凭证使用 `ORM_HOST/PORT/USERNAME/PASSWORD/DATABASE`，默认加载 `.env`；可用 `--env-file` 指定配置，已有进程环境优先。不要把密码放到命令行。
-
-```bash
-# --help 不读取配置或连接数据库
-yarn migrate:app --help
-
-# 默认也是只读 dry-run；用只读凭证执行
-yarn migrate:app --app example-app --table-prefix example_app --dry-run
-
-# 显式确认数据库、备份、停写和历史已发放水位
-yarn migrate:app --app example-app --table-prefix example_app \
-  --apply --database ota_staging --issued-id 4500 \
-  --confirm-backup --confirm-writes-paused --batch-size 200
-
-# 只读核对，不切换读取模型
-yarn migrate:app --app example-app --table-prefix example_app --verify
-```
-
-输出包括各表缺列、待回填行数、总行数、最大 ID、自增值、ID/旧列 SHA-256 指纹、错误聚合次数总和与字段冲突。问题只输出行 ID/字段/原因，最多每表 50 条，不打印历史正文。预检扫描全表，但按 ID 每批最多 1000 行，不全量载入内存；大表预演会保持只读一致性事务，应评估 undo 压力及维护时间。
-
-只补空缺的正式值；已经存在但与旧值冲突的正式字段会阻止迁移，不选择一边覆盖。无效版本、布尔值、时间、重复标识、异常错误次数等必须人工核实。历史热更新基础版本按“目标版本并集旧列表”固化；已存在的 v2 明确基础版本集合（包括空集合）保留，不把目标版本擅自加入。
-
-每应用的发布序号下限为：
-
-```text
-max(2000, 当前 AUTO_INCREMENT, MAX(id)+1, 已确认发放的最大 ID+1)
-```
-
-已确认水位持久化在迁移账本；重跑不能降低它。没有可靠水位证据时不要凭猜测执行 `--apply`。
-
-## 4. 分批、失败与恢复
-
-- `--batch-size` 范围 1–1000，默认 200。可加 `--max-batches 10`，执行 10 个非空批次后持久化为 `paused`，退出码 3。
-- 每批锁定实际行、再次校验，用同一事务提交正式字段与进度；失败时该批同时回滚，前面已提交批次保留。
-- MySQL DDL 会独立提交，**不是全流程原子回滚**；重跑通过已存在列/索引继续，不能删除账本“重新开始”。
-- 直接以相同应用、前缀和确认参数再次 `--apply` 续跑（去掉或增大 `--max-batches`）。已有 UUID 不重新生成、ID 不重排、已有错误次数不归零。
-- 失败标记为 `failed`；paused/failed 应用阻止重新 prepare/新发布。其他就绪应用不受应用级锁影响。异常退出可能保留 `running`，下次从最后已提交批次继续。
-- 如果两次运行间旧数据指纹变化，会停止并要求核实；不能通过清空进度绕过。修复数据应以备份和业务记录为依据，再制定受控恢复方案。
-- 完成的迁移可以再运行：对当前数据重新预检，用于检查新双写记录或稍后切换。重复运行可能增加目录修订，但不会改变历史编号或重新分配 UUID。
-- 退出码：0=预演通过/验证通过/迁移完成，1=参数或执行错误，2=阻止迁移/验证未完成，3=按批次上限暂停。`--verify` 验证数据与结构，不代表备份、外部契约或生产验收已经完成。
-
-## 5. 显式读取切换
-
-迁移成功默认仍为 `compatible`。完成业务契约验证、确认所有写入都维护新旧列之后，再在同样停写条件下执行：
-
-```bash
-yarn migrate:app --app example-app --table-prefix example_app \
-  --apply --database ota_staging --issued-id 4500 \
-  --confirm-backup --confirm-writes-paused --activate-formal
-```
-
-仅在完整回填和对账通过后，才在同一最终事务中设为 `ready/schema_version>=2/read_model=formal` 并递增目录修订。正式读取缺字段或值不合法会报错，不静默退回旧值。尚未完整移除 `legacyPayload`/兼容 Repository；此开关切换的是目录映射，不代表兼容层可以删除。
-
-恢复流量前重启进程清空旧缓存，执行 HTTP 检查、订阅补发、公开/私有名单及统计业务回归，再恢复写入和任务。回滚保持旧列与迁移账本，见 [回滚手册](ROLLBACK.md)。
-
-## 6. 隔离 MySQL 回归
-
-默认 Jest 不连接数据库。真实测试要求显式设置 `OTA_MIGRATION_TEST_SOCKET`，只接受 `/private/tmp/ota-migration-mysql.<随机字符>/mysql.sock`（或 `/tmp/`）：
-
-```bash
-OTA_MIGRATION_TEST_SOCKET=/private/tmp/ota-migration-mysql.EXAMPLE/mysql.sock \
-  yarn test --runInBand --watchman=false application-data-migrator.mysql
-
-# 同一隔离实例也可运行发布竞争、回滚与集中双写验收
-OTA_MIGRATION_TEST_SOCKET=/private/tmp/ota-migration-mysql.EXAMPLE/mysql.sock \
-  yarn test --runInBand --watchman=false release-publication.mysql
-
-# 上报并发、幂等冲突、历史记录原位更新、HTTP/SQL 与统计读取
-OTA_MIGRATION_TEST_SOCKET=/private/tmp/ota-migration-mysql.EXAMPLE/mysql.sock \
-  yarn test --runInBand --watchman=false telemetry-write.mysql
-```
-
-应使用 `mktemp -d /private/tmp/ota-migration-mysql.XXXXXX` 创建全新私有目录，再用 `mysqld --no-defaults --initialize-insecure --datadir=<目录>/data` 初始化；启动时同样使用 `--no-defaults`，显式指定 datadir/socket/pid/log，并启用 `--skip-networking --mysqlx=0 --skip-log-bin`。仅在这种独立、无网络、无业务数据的实例使用无密码 root；不要把生产 socket 传给测试。测试只创建并删除自身随机命名的 `ota_migration_test_*` 数据库，不读取项目 `.env`。结束后停止这个独立实例。
-
-历史基线曾在本机 MySQL 26.7.0 上运行 82 项真实数据库测试（本批新增 Key/CLI/消息测试见 [最新进度](REFACTOR_PROGRESS.md)）：9 项迁移、27 项发布/策略审计、20 项草稿创建/编辑审计、8 项任务、18 项检查/上报测试。覆盖迁移互斥、历史/正式写入事务、名单 50 段完整性和失败回滚；草稿新增创建并发幂等、JSON 键顺序、失败重试、并发编辑、存储不一致拒绝和提交响应丢失不误报。真实 HTTP 测试验证旧检查结果、正式上报、旧写路由退出和 JSON 类型。历史写入实现已移至测试夹具，仅用于验证迁移，不再注册旧发布/上报 API。任务测试仍非进程 kill/重启，目标 MySQL 与实际 Socket.IO 客户端验收仍须单独执行；没有执行生产迁移。
-
-草稿审计与接口切换不增加表列；复用现有审计字段和唯一键，不补造历史操作。仅保留旧检查兼容并不免除历史数据迁移：新版仍需读取原应用发布、有效基础版本集合、ID 水位和已有统计。旧列是否停止双写或删除，按实际读取依赖与回滚窗口另行受控处理。
-
-发布操作失败审计复用现有应用 `audit_log` 字段及唯一键；本批不新增列、不重写历史记录，也不回填没有证据的历史失败。已有应用仍需先完成原有 schema 准备。数据库/审计表不可用或提交结果未知时按 [管理员说明](ADMIN_API.md#发布操作失败审计) 核实，不把运行日志中的失败提示当成已落库的审计。
-
-名单分段复用 `change_detail/change_summary/part_no`，没有新增列或历史数据迁移。旧审计只有人数时不反推名单历史，也不补造分段。部署前只读核对存量名单：超过 5,000 人的名单/范围修改将被拒绝，需受控处理或评审调整限额，不能自动截断或清空；停用接口不受名单差异数量限制。管理员消费规则见 [完整差异说明](ADMIN_API.md#名单完整差异与分段读取)。
-
-任务进度功能沿用已准备的执行日志列，没有新增字段、没有回写历史日志。历史 `skip_summary/release_summary` 为空表示未采集，不应补成空对象并声称零跳过；旧统计语义与展示限制见 [管理员接口](ADMIN_API.md)。
-
-统计写入拆分也没有新增字段，不会批量改写旧上报 ID、计数、创建时间或指纹。运行请求只写当前事件/原错误记录，结构缺失时返回冲突而不隐式执行 DDL；未登记/未就绪应用需先完成受控准备及迁移。迁移停写要求仍适用于所有上报、管理和任务入口，不能把新的事务校验当成在线迁移保证。
+完整操作顺序见 [部署手册](DEPLOYMENT.md)，独立 MySQL 回归见 [测试说明](../test/README.md)。

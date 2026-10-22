@@ -28,11 +28,11 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
 | `/api/v1/manage/apps/:appName/tasks/:taskId` | 单个任务及最后一次执行记录 | 不带分页/时间筛选 |
 | `/api/v1/manage/apps/:appName/tasks/:taskId/logs` | 每次执行、重试、租约过期记录 | `status` |
 | `/api/v1/manage/apps/:appName/releases/:releaseId/delivery` | 该发布触发的任务及各任务最后一次执行摘要 | 通用分页/时间参数 |
-| `/api/v1/manage/apps/:appName/audit-logs` | 应用发布、名单、启停等管理审计 | `action`、`result`、`actorKeyId`（历史记录仍可用 actorAdminId）、`requestId`、`operationId`、`releaseId`、`taskId` |
+| `/api/v1/manage/apps/:appName/audit-logs` | 应用发布、名单、启停等管理审计 | `action`、`result`、`actorKeyId`、`requestId`、`operationId`、`releaseId`、`taskId` |
 
 任务状态为 `pending/running/retry_wait/succeeded/failed`；执行日志状态为 `running/succeeded/failed/lease_expired`。平台为 `ios/android/windows/linux/macos`。筛选值按精确值匹配。
 
-应用查询先解析已登记的应用表前缀，所有数据落在对应应用的表内。任务或发布 ID 只在路径指定的应用内查找，找不到返回 `404`。应用未准备或查询表不存在返回 `409`，需要先完成迁移及本地 CLI `yarn ota app prepare --app APP --database DB`。全局审计表由全局迁移准备。
+应用查询先解析已登记的应用表前缀，所有数据落在对应应用的表内。任务或发布 ID 只在路径指定的应用内查找，找不到返回 `404`。应用未准备或查询表不存在返回 `409`，需要先初始化空库并运行本地 CLI `yarn ota app prepare --app APP --database DB`。全局审计表由 db:init 初始化。
 
 ## 分页与时间范围
 
@@ -82,21 +82,21 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
 }
 ```
 
-`successCount/errorCount` 保持上报记录次数的含义，不是去重用户数；旧失败记录按 ID 更新不会新增一条记录。发送尝试和普通消息 ACK 不属于安装成功上报。
+`successCount/errorCount` 保持上报记录次数的含义，不是去重用户数；无键失败记录按 ID 更新不会新增一条记录。发送尝试和普通消息 ACK 不属于安装成功上报。
 
-统计写入使用独立上报服务与双写存储端口；管理员 GET 查询和认证不变。客户端通过正式 v2 POST 上报，使用 `versionCode/releaseSequence/reportedUsername`，不再调用 `/version/success|error|app-error`。可选 `reportId` 同内容重试只产生一条记录，不同内容复用键返回 `409`；无键逐次计数，`recordId` 更新不改变条数和原发布关联。完整规则见 [SDK 上报说明](SDK_INTEGRATION.md#上报重试与错误记录更新)。公开 POST 不能查询统计或日志；这些 GET 仍需管理员 Token。
+统计写入使用独立上报服务与规范字段存储端口；管理员 GET 查询采用 API Key 认证。客户端通过正式 /api/v1/app POST 上报，使用 `versionCode/releaseSequence/reportedUsername`，不再调用 `/version/success|error|app-error`。可选 `reportId` 同内容重试只产生一条记录，不同内容复用键返回 `409`；无键逐次计数，`recordId` 更新不改变条数和原发布关联。完整规则见 [SDK 上报说明](SDK_INTEGRATION.md#安装与错误上报)。公开 POST 不能查询统计或日志；这些 GET 仍需按应用授权的 API Key。
 
-客户端错误表保存的是聚合记录。`telemetry/app-errors` 的 `total` 是符合条件的错误组数；每组的 `reportCount` 是该组累计次数，不能解读为查询窗口内发生次数。响应通过 `windowBasis: "lastSeenAt"` 和 `reportCountSemantics` 明确这一点。由于历史表没有逐次错误事件，当前无法精确还原每个时间段的错误次数。
+客户端错误表保存的是聚合记录。`telemetry/app-errors` 的 `total` 是符合条件的错误组数；每组的 `reportCount` 是该组累计次数，不能解读为查询窗口内发生次数。响应通过 `windowBasis: "lastSeenAt"` 和 `reportCountSemantics` 明确这一点。由于错误表只保存聚合，不保存逐次事件，当前无法精确还原每个时间段的错误次数。
 
-`delivery` 返回 `tasks` 分页列表及各任务的 `latestLog`。任务可能因统一重算向不同连接下发其他适用版本，所以执行计数属于应用分发尝试，不能全部归为触发版本的接收人数。`receiveConfirmationAvailable: false` 表示旧协议没有 OTA 接收确认。`metrics_complete: 0` 的执行记录必须展示为不完整统计。
+`delivery` 返回 `tasks` 分页列表及各任务的 `latestLog`。任务可能因统一重算向不同连接下发其他适用版本，所以执行计数属于应用分发尝试，不能全部归为触发版本的接收人数。`receiveConfirmationAvailable: false` 表示当前协议没有 OTA 接收确认。`metrics_complete: 0` 的执行记录必须展示为不完整统计。
 
-日志响应中的 `historyNotice` 说明本服务永久保存任务、执行记录和审计；迁移前未采集或在新策略生效前已删除的记录仍可能缺失。没有记录不表示操作从未发生。当前审计写入仍有缺口，详见 [完成度报告](REFACTOR_PROGRESS.md)。其他消息 TTL、内存缓存及外部清理边界见 [数据保存核对](DATA_LIFECYCLE.md)。
+日志响应中的 `historyNotice` 说明本服务永久保存任务、执行记录和审计；不导入旧系统数据，也不补造从未采集的记录。没有记录不表示操作从未发生。当前审计写入仍有缺口，详见 [完成度报告](REFACTOR_PROGRESS.md)。其他消息 TTL、内存缓存及外部清理边界见 [数据保存核对](DATA_LIFECYCLE.md)。
 
 ## 发布操作失败审计
 
-现有 `GET /api/v1/manage/apps/:appName/audit-logs?result=failed` 可查询新增失败记录，仍要求管理员 Bearer Token；支持按 `requestId`、`operationId`、`releaseId` 和时间范围筛选。发布/草稿请求沿用 HTTP 请求 ID 与已认证管理员身份。
+现有 `GET /api/v1/manage/apps/:appName/audit-logs?result=failed` 可查询新增失败记录，仍要求按应用授权的 API Key；支持按 `requestId`、`operationId`、`releaseId` 和时间范围筛选。发布/草稿请求沿用 HTTP 请求 ID 与已认证 API Key 身份。
 
-覆盖已进入应用写入边界的 v2 发布、启用/停用、已发布名单替换/范围修改、重新分发，以及草稿创建/编辑/名单修改。非法应用/平台标识返回 `400` 并记录固定错误分类，不将完整名单或异常正文写入失败摘要。成功审计与业务变更、修订及任务同事务提交。
+覆盖已进入应用写入边界的发布、启用/停用、已发布名单替换/范围修改、重新分发，以及草稿创建/编辑/名单修改。非法应用/平台标识返回 `400` 并记录固定错误分类，不将完整名单或异常正文写入失败摘要。成功审计与业务变更、修订及任务同事务提交。
 
 - 业务确认回滚后，用独立连接/事务追加 `result=failed`；`task_id`、`revision_before`、`revision_after` 为空，不关联已回滚的任务，也不声称修订已生效。`release_id/target_id` 是尝试操作的对象，可能不存在（包括发布回滚和跨应用 ID 请求）。
 - `change_summary` 只保留允许的意图字段：启用状态、范围、人数、重推标记或入口来源。它不是已生效的差异；失败审计不保存请求正文、URL、名单、SQL、原始异常或堆栈。
@@ -112,7 +112,7 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
 
 ## 名单完整差异与分段读取
 
-v2 首次发布、已发布名单替换/范围修改、草稿创建和普通 PATCH，以及草稿 `users/scope` 接口均记录完整新增/移除标识。此前未采集的历史草稿编辑不补造记录，不能据新记录推断完整历史。
+首次发布、已发布名单替换/范围修改、草稿创建和普通 PATCH，以及草稿 `users/scope` 接口均记录完整新增/移除标识。
 
 `change_detail.addedUserIds` 和 `change_detail.removedUserIds` 保存该段的完整 `userId`；同一段两组之和最多 200 个。每段的 `change_summary.audience` 重复保存本次操作的总摘要：
 
@@ -130,16 +130,16 @@ v2 首次发布、已发布名单替换/范围修改、草稿创建和普通 PAT
 
 - 相同 `(operation_id, request_id)` 的记录为一组，`part_no` 从 1 连续递增至 `partCount`；任务、修订和发生时间相同。所有段与名单变更、修订、任务同事务提交，后续段失败会回滚前面已插入的段。
 - 按 `operationId`、`result=succeeded` 和正确时间范围查询原 `audit-logs` 接口，可使用 `pageSize=100`。默认分页按时间/审计 ID 排序，不保证分段顺序；读取所有页后按 `part_no` 排序。`total` 是审计记录/分段数，不是管理操作次数。
-- 只有分段编号齐全、每段摘要一致，且两组累计数分别等于 `addedCount/removedCount`，才能展示为完整差异。缺页、清理造成的缺段或旧记录缺少 `audience` 元数据都应标为“不完整/当时未采集”，不能补成空名单。
+- 只有分段编号齐全、每段摘要一致，且两组累计数分别等于 `addedCount/removedCount`，才能展示为完整差异。缺页或记录缺少 `audience` 元数据都应标为“不完整/当时未采集”，不能补成空名单。
 - 初次发布的 `scopeBefore=null`，将发布时名单全部记为新增；切换公共范围时记录被清空的全部标识。无成员变化也写一段空数组，范围变更仍由 `scopeBefore/scopeAfter` 说明。替换已发布名单本身不改变范围；公共版本中预置名单仍不限制公共分发。
-- 请求去重前最多 5,000 个标识，每个最多 191 字符；5,000 人全部替换为另 5,000 人最多产生 50 段。旧 JSON/multipart 和 v2 共用上限，重复 ID 不能绕过限额。HTTP 请求体/网关大小限制仍独立生效。
-- 旧存储名单超过 5,000 人时，名单/范围修改返回 `409`，不截断差异、不部分修改。应先受控核对；需要立即停止推送时可使用停用接口，它不修改名单。失败审计不保存成功差异，`change_detail` 仍为空。
+- 请求去重前最多 5,000 个标识，每个最多 191 字符；5,000 人全部替换为另 5,000 人最多产生 50 段。正文使用 JSON 数组，重复 ID 不能绕过限额。HTTP 请求体/网关大小限制仍独立生效。
+- 已存名单异常超过 5,000 人时，名单/范围修改返回 `409`，不截断差异、不部分修改。应先受控核对；需要立即停止推送时可使用停用接口，它不修改名单。失败审计不保存成功差异，`change_detail` 仍为空。
 
 完整差异写入受管理员认证保护的数据库审计；新增差异计算和审计 helper 不输出名单到运行日志。所有段使用现有 `change_summary/change_detail/part_no` 字段，无新增表列，也不为历史审计补造差异。
 
 ## 发布任务运行进度
 
-管理员可轮询 `GET /api/v1/manage/apps/:appName/tasks/:taskId` 的 `data.latestLog`，或使用 `GET /api/v1/manage/apps/:appName/tasks/:taskId/logs` 查看各次执行。认证沿用管理员 Bearer Token；本轮未新增公开日志入口。运行中每检查 100 个连接保存一次聚合进度，执行前和最后不足一批也保存；数据库写入与续租同事务，不按连接插入明细日志。
+管理员可轮询 `GET /api/v1/manage/apps/:appName/tasks/:taskId` 的 `data.latestLog`，或使用 `GET /api/v1/manage/apps/:appName/tasks/:taskId/logs` 查看各次执行。认证使用按应用授权的 API Key；本轮未新增公开日志入口。运行中每检查 100 个连接保存一次聚合进度，执行前和最后不足一批也保存；数据库写入与续租同事务，不按连接插入明细日志。
 
 | 日志字段 | 含义 |
 | --- | --- |
@@ -172,7 +172,7 @@ v2 首次发布、已发布名单替换/范围修改、草稿创建和普通 PAT
 
 即时发送错误会令本轮进入重试；重试可能再次发送，因此不能将不同执行记录累加为独立接收人数。修订变化或进程异常后保留最后已提交 checkpoint，未提交的末批可能缺失。过期接管建立新的执行记录，旧执行者不能覆盖新结果。零目标可以成功完成，仍不代表客户端安装成功。
 
-本轮没有变更表结构，也不补造历史计数。旧日志的 `skip_summary/release_summary` 为 null 时表示未采集，不是空结果；旧实现的 `eligible_count` 曾等于更新发送计数，不能据此推断历史资格分布。错误摘要采用固定脱敏分类，不通过管理 API 暴露原 SQL/传输异常中的业务数据。
+日志的 `skip_summary/release_summary` 为 null 时表示未采集，不是空结果；错误摘要采用固定脱敏分类，不通过管理 API 暴露原 SQL/传输异常中的业务数据。
 
 ## 调用示例
 
@@ -180,19 +180,19 @@ v2 首次发布、已发布名单替换/范围修改、草稿创建和普通 PAT
 
 ```bash
 curl --get 'https://ota.example.com/api/v1/manage/apps/eagleway-network/statistics/summary' \
-  -H "Authorization: Bearer $OTA_ADMIN_TOKEN" \
+  -H "Authorization: Bearer $OTA_ACCESS_KEY" \
   --data-urlencode 'platform=windows' \
   --data-urlencode 'releaseSequence=2000' \
   --data-urlencode 'from=2026-10-01T00:00:00Z' \
   --data-urlencode 'to=2026-10-20T00:00:00Z'
 ```
 
-任务日志、应用审计及全局审计用相同的认证和分页参数。诊断某次管理请求时，可以通过 `requestId` 查询已有审计记录。
+任务日志和应用审计用相同的认证和分页参数；全局运维审计只通过本地 CLI。诊断某次管理请求时，可以通过 `requestId` 查询已有审计记录。
 
 ## 日志范围与验证
 
-当前 API 提供数据库中的客户端错误、发布任务执行日志、应用审计和全局审计。服务端标准输出/PM2 文件日志尚无持久化查询后端，因此不在这组接口中；也不提供读取任意服务器日志文件的接口。
+当前 API 提供数据库中的客户端错误、发布任务执行日志和应用审计；全局运维审计只通过本地 CLI。服务端标准输出/PM2 文件日志尚无持久化查询后端，因此不在这组接口中；也不提供读取任意服务器日志文件的接口。
 
 自动化测试通过本机真实 HTTP 请求验证认证、参数、响应、应用路由隔离和 TypeORM 生成的参数化 SQL，该 HTTP 套件的数据库返回使用测试替身。另有独立 MySQL 任务套件，验证管理查询能读到运行中进度、租约接管及失败回滚；Socket 发送使用内存替身。目标 MySQL 的时间精度、索引执行计划、查询负载、真实网络和现有数据结构仍需在目标测试环境验证。
 
-统计写入套件另以真实本地 HTTP + 隔离 MySQL 验证旧上报响应及成功/失败汇总，并验证管理员明细和错误聚合查询保留 JSON 标量类型。没有连接生产库、OSS 或真实外部 SDK。
+统计写入套件另以真实本地 HTTP + 隔离 MySQL 验证规范检查和上报响应及成功/失败汇总，并验证管理员明细和错误聚合查询保留 JSON 标量类型。没有连接生产库、OSS 或真实外部 SDK。
