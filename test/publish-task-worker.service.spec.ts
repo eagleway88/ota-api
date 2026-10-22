@@ -108,7 +108,11 @@ function fixture(snapshotRevision = 42, revisionAfterClaim = 42) {
   )
   const worker = new PublishTaskWorkerService(
     source as unknown as DataSource,
-    { get: () => undefined } as unknown as ConfigService,
+    {
+      get: () => {
+        throw new Error('Executing a task must not read a pause switch')
+      }
+    } as unknown as ConfigService,
     {} as ApplicationRegistryService,
     ws
   )
@@ -116,6 +120,35 @@ function fixture(snapshotRevision = 42, revisionAfterClaim = 42) {
 }
 
 describe('PublishTaskWorkerService snapshot revision', () => {
+  it('starts polling automatically and reads only the polling interval configuration', async () => {
+    jest.useFakeTimers()
+    const applications = { listReady: jest.fn().mockResolvedValue([]) }
+    const source = { createQueryRunner: jest.fn() }
+    const get = jest.fn((key: string) => {
+      if (key !== 'PUBLISH_TASK_POLL_MS')
+        throw new Error('Unexpected worker configuration')
+      return 50
+    })
+    const worker = new PublishTaskWorkerService(
+      source as unknown as DataSource,
+      { get } as unknown as ConfigService,
+      applications as unknown as ApplicationRegistryService,
+      {} as RealtimeGateway
+    )
+    try {
+      worker.onModuleInit()
+      await jest.advanceTimersByTimeAsync(150)
+      expect(applications.listReady).toHaveBeenCalledTimes(4)
+      expect(get.mock.calls).toEqual([['PUBLISH_TASK_POLL_MS']])
+      expect(source.createQueryRunner).not.toHaveBeenCalled()
+      expect(jest.getTimerCount()).toBe(1)
+    } finally {
+      worker.onModuleDestroy()
+      expect(jest.getTimerCount()).toBe(0)
+      jest.useRealTimers()
+    }
+  })
+
   it('completes an empty batch with the revision actually used by dispatch', async () => {
     const f = fixture()
     await expect(

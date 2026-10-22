@@ -48,6 +48,8 @@ Swagger 管理分组显式扫描只读管理聚合，避免库的单层嵌套扫
 
 `AppApiModule` 装配公开上报，`ManageApiModule` 装配管理员操作和查询。`AdministrationModule` 可独立装配认证与只读查询，不启动推送 Worker。`JobsModule` 仅装配发布任务 Worker，不包含历史清理服务。上传、发布各有独立 Controller；应用准备与 Key 管理仅通过本地 CLI；核心 `ReleasesModule`、`TelemetryWritesModule` 不注册 HTTP Controller。Realtime ACK DTO 不依赖管理 HTTP 层。
 
+Worker 启动即轮询和恢复任务，不提供环境暂停开关；离线迁移须停服务。独立 CLI 与服务统一通过数据库 host/port 连接，不增加运维专用 socket 配置。
+
 运行时无管理员模型、登录/会话接口或平台超级 Key。每次管理请求验证 Key 的精确应用授权与路由权限，未标注权限默认拒绝。full 只覆盖明确授权应用的业务操作。CLI 与运行时隔离，业务请求仅 requireReady，不做 DDL。
 
 用户和设备消息统一存到 ota_messages，复合主键为 app_name/target_type/target_id；设备订阅、事件和 ACK 必须带应用范围。历史管理员账户/会话删除，但审计中的旧身份快照保留。

@@ -11,6 +11,7 @@ import { ManageReleasesModule } from '@/manage/releases/releases.module'
 import { ReleaseWriteRepository } from '@/releases/ports/release-write.repository'
 import { DualWriteReleaseRepository } from '@/infrastructure/persistence/legacy/dual-write-release.repository'
 import { LegacyUpdateCheckController } from '@/compat/legacy/update-check.controller'
+import { ApplicationRegistryService } from '@/applications/application-registry.service'
 
 const database = {
   options: { type: 'mysql' },
@@ -48,13 +49,15 @@ describe('release module wiring', () => {
     })
       .overrideProvider(ConfigService)
       .useValue({
-        get: (key: string) =>
-          key === 'PUBLISH_TASKS_PAUSED' ? 'true' : undefined
+        get: () => undefined
       })
       .overrideProvider(ReleaseWriteRepository)
       .useValue(repository)
       .compile()
     try {
+      jest
+        .spyOn(module.get(ApplicationRegistryService), 'listReady')
+        .mockResolvedValue([])
       await module.init()
       expect(module.get(ReleaseWriteRepository)).toBe(repository)
       expect(() => module.get(ReleaseManagementController)).toThrow()
@@ -63,7 +66,7 @@ describe('release module wiring', () => {
       await module.close()
     }
   })
-  it('assembles legacy and manage endpoints with one paused task worker', async () => {
+  it('assembles legacy and manage endpoints with one active task worker', async () => {
     const module = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -78,12 +81,14 @@ describe('release module wiring', () => {
     })
       .overrideProvider(ConfigService)
       .useValue({
-        get: (key: string) =>
-          key === 'PUBLISH_TASKS_PAUSED' ? 'true' : undefined
+        get: () => undefined
       })
       .compile()
 
     try {
+      jest
+        .spyOn(module.get(ApplicationRegistryService), 'listReady')
+        .mockResolvedValue([])
       await module.init()
       expect(module.get(ReleaseManagementController)).toBeDefined()
       expect(module.get(ReleaseWriteRepository)).toBe(

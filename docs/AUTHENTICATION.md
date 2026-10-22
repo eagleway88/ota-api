@@ -47,7 +47,7 @@ yarn ota app prepare --app app-a --database ota_staging
 yarn ota audit list
 ```
 
-每个命令可加 `--env-file /absolute/path/operations.env`，默认加载 `.env`，进程环境优先。CLI 只需要 ORM_HOST/PORT/USERNAME/PASSWORD/DATABASE；可额外配置仅 CLI 使用的 ORM_SOCKET。密码不放在命令行。写命令必须用 `--database` 与环境配置进行精确确认；不存在或不匹配时在连接/写入前失败。
+每个命令可加 `--env-file /absolute/path/operations.env`，默认加载 `.env`，进程环境优先。CLI 与业务服务统一使用 ORM_HOST/PORT/USERNAME/PASSWORD/DATABASE，不提供独立 socket 配置。密码不放在命令行。写命令必须用 `--database` 与环境配置进行精确确认；不存在或不匹配时在连接/写入前失败。
 
 创建输出是 JSON `{ database, result: { keyId, accessKey, name, preset, applications, expiresAt } }`。明文 `accessKey` 只在创建成功时输出一次；list/inspect 不含明文或散列。不要让 CI 收集创建输出，也不要贴到工单、日志或聊天。数据库仅存随机 secret 的 SHA-256 散列，不可找回明文；遗失时重新创建并撤销旧 Key。
 

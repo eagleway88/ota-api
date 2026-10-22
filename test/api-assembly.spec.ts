@@ -39,8 +39,7 @@ describe('App/Manage API assembly and documentation', () => {
     })
       .overrideProvider(ConfigService)
       .useValue({
-        get: (key: string) =>
-          key === 'PUBLISH_TASKS_PAUSED' ? 'true' : undefined
+        get: () => undefined
       })
       .compile()
     const app = module.createNestApplication({ logger: false })

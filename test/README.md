@@ -14,3 +14,5 @@
 MySQL 仅接受 `/private/tmp/ota-migration-mysql.<随机字符>/mysql.sock` 或 `/tmp/` 下同名路径。按 [迁移手册](../docs/MIGRATION.md#6-隔离-mysql-回归) 创建新的临时数据目录，以 `--no-defaults --skip-networking --mysqlx=0 --skip-log-bin` 启动；测试结束后停止该实例。测试只创建/删除自身随机命名的数据库，不可传入业务数据库 socket。
 
 API Key 回归覆盖权限预设、显式多应用授权、撤销/过期、默认拒绝和真实 HTTP/SQL。application-messages.mysql 验证旧表非空拒绝、空表退役、消息隔离及历史管理员删除；ota-cli.mysql 使用真实子进程、临时 DB 专用账号，验证签发时准备应用、一次性凭证、撤销与审计失败回滚。CLI 测试不读取项目 .env，不启动业务 HTTP/OSS/Worker。
+
+生产 CLI 仅支持正常数据库 host/port。CLI MySQL 子进程测试显式预加载 test/fixtures/mysql-socket-preload.cjs，将驱动连接注入到已校验的临时 socket，并限制为自身生成的测试数据库；夹具不在生产源码中引用、不进入部署构建。Worker 装配测试用空应用列表隔离数据库，不依赖暂停开关；单元测试验证启动即轮询、仅读取轮询间隔并正确释放定时器。

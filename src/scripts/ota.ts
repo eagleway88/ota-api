@@ -33,9 +33,6 @@ async function main() {
     username: required('ORM_USERNAME'),
     password: required('ORM_PASSWORD'),
     database,
-    extra: process.env.ORM_SOCKET
-      ? { socketPath: process.env.ORM_SOCKET }
-      : undefined,
     logging: false,
     synchronize: false,
     dateStrings: true

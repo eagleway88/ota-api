@@ -66,9 +66,6 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
     taskId: string,
     requestId?: string
   ) {
-    if (this.configService.get('PUBLISH_TASKS_PAUSED') === 'true') {
-      return false
-    }
     const executionRequestId = requestId?.slice(0, 64) || randomUUID()
     const claimed = await this.claimTask(
       application,
@@ -499,9 +496,6 @@ export class PublishTaskWorkerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async recoverTasks() {
-    if (this.configService.get('PUBLISH_TASKS_PAUSED') === 'true') {
-      return
-    }
     if (this.recoveringTasks) {
       return
     }

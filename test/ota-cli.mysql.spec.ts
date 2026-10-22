@@ -37,6 +37,8 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
           'ts-node/register',
           '-r',
           'tsconfig-paths/register',
+          '-r',
+          './test/fixtures/mysql-socket-preload.cjs',
           '--',
           'src/scripts/ota.ts',
           ...args,
@@ -52,8 +54,7 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
             ORM_PORT: '3306',
             ORM_USERNAME: user,
             ORM_PASSWORD: password,
-            ORM_DATABASE: database,
-            ORM_SOCKET: socketPath
+            ORM_DATABASE: database
           }
         },
         (error, stdout, stderr) => done({ stdout, stderr, code: error ? 1 : 0 })
