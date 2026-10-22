@@ -90,7 +90,7 @@ Authorization: Bearer <JWT>
 
 `successCount/errorCount` 保持上报记录次数的含义，不是去重用户数；旧失败记录按 ID 更新不会新增一条记录。发送尝试和普通消息 ACK 不属于安装成功上报。
 
-统计写入现在通过独立上报服务与双写存储端口处理；这些管理员查询路径和认证不变。可选 `reportId` 的同内容重试只产生一条记录，不同内容复用键返回 `409`；无键请求仍逐次计数，旧错误 ID 更新不改变总条数和原发布关联。完整规则见 [SDK 上报说明](SDK_INTEGRATION.md#上报重试与错误记录更新)。JSON 扩展字段保留业务键和标量字符串类型，不将 `"123"` 二次解析为数字。
+统计写入使用独立上报服务与双写存储端口；管理员 GET 查询和认证不变。客户端通过正式 v2 POST 上报，使用 `versionCode/releaseSequence/reportedUsername`，不再调用 `/version/success|error|app-error`。可选 `reportId` 同内容重试只产生一条记录，不同内容复用键返回 `409`；无键逐次计数，`recordId` 更新不改变条数和原发布关联。完整规则见 [SDK 上报说明](SDK_INTEGRATION.md#上报重试与错误记录更新)。公开 POST 不能查询统计或日志；这些 GET 仍需管理员 Token。
 
 客户端错误表保存的是聚合记录。`telemetry/app-errors` 的 `total` 是符合条件的错误组数；每组的 `reportCount` 是该组累计次数，不能解读为查询窗口内发生次数。响应通过 `windowBasis: "lastSeenAt"` 和 `reportCountSemantics` 明确这一点。由于历史表没有逐次错误事件，当前无法精确还原每个时间段的错误次数。
 
@@ -100,9 +100,9 @@ Authorization: Bearer <JWT>
 
 ## 发布操作失败审计
 
-现有 `GET /api/v2/apps/:appName/audit-logs?result=failed` 可查询新增失败记录，仍要求管理员 Bearer Token；支持按 `requestId`、`operationId`、`releaseId` 和时间范围筛选，不新增公开入口。旧发布现在沿用 HTTP 的请求 ID 与已认证管理员身份，不另造无关联的请求 ID。
+现有 `GET /api/v2/apps/:appName/audit-logs?result=failed` 可查询新增失败记录，仍要求管理员 Bearer Token；支持按 `requestId`、`operationId`、`releaseId` 和时间范围筛选。发布/草稿请求沿用 HTTP 请求 ID 与已认证管理员身份。
 
-覆盖已进入应用写入边界的旧/v2 发布、启用/停用、已发布名单替换/范围修改、重新分发和草稿名单/范围修改。名单归一化在锁定版本后执行，非法应用/平台标识返回 `400` 并记录固定错误分类，不将完整名单或异常正文写入失败摘要。成功审计仍与业务变更、修订及任务同事务提交。
+覆盖已进入应用写入边界的 v2 发布、启用/停用、已发布名单替换/范围修改、重新分发，以及草稿创建/编辑/名单修改。非法应用/平台标识返回 `400` 并记录固定错误分类，不将完整名单或异常正文写入失败摘要。成功审计与业务变更、修订及任务同事务提交。
 
 - 业务确认回滚后，用独立连接/事务追加 `result=failed`；`task_id`、`revision_before`、`revision_after` 为空，不关联已回滚的任务，也不声称修订已生效。`release_id/target_id` 是尝试操作的对象，可能不存在（包括发布回滚和跨应用 ID 请求）。
 - `change_summary` 只保留允许的意图字段：启用状态、范围、人数、重推标记或入口来源。它不是已生效的差异；失败审计不保存请求正文、URL、名单、SQL、原始异常或堆栈。
@@ -112,11 +112,13 @@ Authorization: Bearer <JWT>
 
 失败审计自身无法写入时输出 ERROR 事件 `application_failure_audit_unavailable`；提交结果未知或提交后清理异常输出 `application_operation_outcome_requires_review`（含实际追踪状态）；连接/锁清理异常还会输出 `application_write_cleanup_failed`。事件保留应用、操作、请求等关联元数据，不附加原始异常。它们是服务端运行日志，不是本接口中的数据库记录；部署方仍需配置日志采集与告警，当前没有独立的告警投递或运行日志查询后端。
 
-应用解析/准备失败、鉴权/DTO 校验等前置拒绝、旧上传 OSS 阶段、草稿创建/普通编辑及文件上传尚未由这条失败审计链路全部覆盖。应用不就绪、映射变化或审计表不可用时也不能保证失败记录落库；不会为补审计临时建表或修改映射。没有审计不能推断操作从未发生。
+应用解析/准备失败、鉴权/DTO 校验等前置拒绝及文件上传尚未由这条失败审计链路全部覆盖。应用不就绪、映射变化或审计表不可用时也不能保证失败记录落库；不会为补审计临时建表或修改映射。没有审计不能推断操作从未发生。
+
+草稿创建/编辑分别使用 `action=draft_created/draft_updated`，`target_type=release_draft`，任务与修订号为空。成功摘要的 `changedFields` 只列允许的变更字段名，URL、发布说明、幂等键和未知参数值不进入审计；名单差异按下节完整分段。创建同键同内容重放不重复成功审计，冲突返回 `409` 并关联原草稿记录失败；比较忽略 MySQL JSON 对象键顺序，数组顺序仍参与比较。普通 PATCH 暂无通用幂等键或草稿修订号，不要把空差异审计理解为自动去重。草稿行的 payload 与名单/范围列不一致时拒绝修改，须受控核对。
 
 ## 名单完整差异与分段读取
 
-旧/v2 首次发布、已发布名单替换/范围修改，以及草稿 `users/scope` 接口的成功审计现在记录完整新增/移除标识。草稿创建和普通 `PATCH releases/:releaseId` 尚未接入，不能据此重建全部草稿编辑历史。
+v2 首次发布、已发布名单替换/范围修改、草稿创建和普通 PATCH，以及草稿 `users/scope` 接口均记录完整新增/移除标识。此前未采集的历史草稿编辑不补造记录，不能据新记录推断完整历史。
 
 `change_detail.addedUserIds` 和 `change_detail.removedUserIds` 保存该段的完整 `userId`；同一段两组之和最多 200 个。每段的 `change_summary.audience` 重复保存本次操作的总摘要：
 

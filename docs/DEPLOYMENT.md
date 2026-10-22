@@ -9,7 +9,7 @@
 
 ## 发布步骤
 
-1. `PUBLISH_TASKS_PAUSED=true` 部署兼容版本，执行健康检查和旧契约回归。
+1. 调用方更新上传/发布/上报及其他新版 API 用法；`PUBLISH_TASKS_PAUSED=true` 部署服务端，验证旧检查契约和新版端到端流程。旧 `/version/create`、`upload`、`list`、`success`、`error`、`app-error` 已退出，只有 `/version/check` 保留旧版本响应。
 2. 确认应用结构为 `ready`，版本 ID 水位正确。
 3. 设为 `PUBLISH_TASKS_PAUSED=false` 并滚动重启。
 4. 创建一个禁用草稿，发布后确认版本、任务和审计同事务存在。

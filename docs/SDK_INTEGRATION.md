@@ -1,25 +1,25 @@
 # SDK 与业务接入
 
-## 保持兼容的旧能力
+## 2026-10-22 接口切换
 
-- HTTP 路径、Socket.IO transport、订阅/取消订阅/ACK 事件名保持不变。
-- 更新仍通过应用名事件发送完整旧结构记录；用户和设备事件仍是普通消息信封。
-- 无更新仍为 `{ code: 0, data: null }`。
+- 唯一向后兼容承诺是 `POST /api/version/check` 的旧请求与响应：`name/platform/ver/id`、原版本字段、下载别名和 `{ code: 0, data: null }` 均保留。
+- 旧 `/api/version/create`、`upload`、`list/:name`、`success`、`error`、`app-error` 已退出注册，返回 `404`；调用方随本版更新，不提供旧方法转发。
+- 上传和发布统一使用 `POST /api/v2/apps/:appName/artifacts` → `POST /releases` 创建草稿 → `POST /releases/:releaseId/publish` 显式发布。`artifacts` 使用 multipart `file`，草稿使用正式 JSON 字段和显式发布范围；全量包也可通过 `installerSourceUrl` 引用已有安装源。
+- 管理员和普通消息接口目前的实现仍可使用，但旧调用形式、事件和 SDK 签名不再作为兼容要求，后续按新版契约调整。
 
 ## 新增可选能力
 
 - `/api/version/check` 可传完整 `userId`；不传时只返回公共版本。
-- 旧 JSON 发布可传 `releaseScope` 与 `userIds: string[]`。
-- 旧 multipart 发布把 `userIds` 编码为 JSON 字符串数组。
+- 草稿通过正式 JSON 传 `releaseScope` 与 `userIds: string[]`，文件上传不携带名单。
 - 新版成功/失败上报可传 UUID `reportId` 实现重试幂等。
 - v2 管理 API 支持资源、草稿、发布、名单、范围、启停、重推、任务和审计。
 - 外部管理后台的统计、上报和日志查询参见 [外部管理员 API](ADMIN_API.md)，使用现有管理员登录签发的 Bearer Token。
 
 ## 名单上限与审计
 
-发布、草稿和名单替换的 `userIds` 在去重前最多 5,000 项，每项最多 191 字符；旧 multipart 的 JSON 字符串数组同样受限，重复标识也计入请求上限。超限返回 `400`，不截断后发布。历史已存名单超限时，名单/范围修改会返回 `409`，需受控核对；不能通过传空名单绕过完整审计要求。请求体/网关大小限制仍单独生效。
+草稿和名单替换的 `userIds` 在去重前最多 5,000 项，每项最多 191 字符；重复标识也计入请求上限。超限返回 `400`，不截断后发布。历史已存名单超限时，名单/范围修改会返回 `409`，需受控核对；不能通过传空名单绕过完整审计要求。请求体/网关大小限制仍单独生效。
 
-名单差异可由管理员查询原审计接口，分段与完整性判断见 [名单审计说明](ADMIN_API.md#名单完整差异与分段读取)。客户端更新事件和响应字段不变。
+名单差异可由管理员查询审计接口，分段与完整性判断见 [名单审计说明](ADMIN_API.md#名单完整差异与分段读取)。旧检查响应仍按兼容格式返回。
 
 ## 客户端上下文
 
@@ -31,17 +31,19 @@
 
 ## 上报、重试与错误记录更新
 
-旧路径仍是 `POST /api/version/success`、`POST /api/version/error`、`POST /api/version/app-error`，请求继续使用 `name/ver/verId/username`，响应继续使用旧字段，不增加正式存储字段。
+新版公开客户端上报路径为 `POST /api/v2/apps/:appName/telemetry/successes`、`failures`、`app-errors`。这些 POST 不要求管理员 Token，数据按不可信客户端上报处理；同路径 GET 及统计/审计查询仍需要管理员认证。应用取自路径，IP 由服务端解析，正文伪造 `appName/sourceIp` 或其他未声明字段会被拒绝。
+
+成功/失败正文使用 `platform`（平台枚举）、`versionCode`（数值整数）、`releaseSequence`（正整数），可选 `reportedUsername`、`extras` 和 UUID `reportId`。失败额外要求 `message`，可选正整数 `recordId` 更新现有无键记录。运行错误使用 `platform/versionCode/kind/message`，可选 `reportedUsername/extras/stack`，不带 `releaseSequence/reportId`。响应为 `{ code: 0, data: ... }`，数据使用正式字段。
 
 - 没有 `reportId`：每次成功上报或新失败上报都增加一条记录，不按用户、IP 或版本去重。
-- 旧失败上报携带非零 `id`：更新本应用的原失败记录，保持记录 ID、创建时间和总条数。`id=0` 仍表示新记录。必须指向原来的 `verId`，不存在的记录/版本返回 `400`，尝试改绑发布序号返回 `409`。
+- 失败上报携带 `recordId`：更新本应用的原无键失败记录，保持记录 ID、创建时间和总条数。创建新记录时省略 `recordId`，`0` 无效。必须指向原来的 `releaseSequence`，不存在的记录/版本返回 `400`，尝试改绑发布序号返回 `409`。
 - 使用 `reportId`：同一应用、同一种上报内，相同 UUID 和相同内容的重试返回同一记录；成功/失败以及不同应用分别计数。UUID 大小写按同一键处理，新写入使用小写。
-- 重放核对 `verId/ver/platform/username/extras`，失败上报还核对 `message`。JSON 对象键顺序不影响比较，数组顺序保留；IP 与服务端接收时间不属于幂等内容。相同键用于不同内容返回 `409`，不再静默返回另一事件的记录。
-- 已绑定 `reportId` 的记录不可通过错误 `id` 修改内容；精确重放仍可成功。新事件使用新 `reportId`，旧无键记录不能事后绑定该键。旧客户端不传键时的按 ID 更新能力保留。
+- 重放核对 `releaseSequence/versionCode/platform/reportedUsername/extras`，失败上报还核对 `message`。JSON 对象键顺序不影响比较，数组顺序保留；IP 与服务端接收时间不属于幂等内容。相同键用于不同内容返回 `409`。
+- 已绑定 `reportId` 的记录不可通过 `recordId` 修改内容；精确重放仍可成功。新事件使用新 `reportId`，旧无键记录不能事后绑定该键。
 
 运行错误保留原 MD5 分组规则（应用/平台/版本/类型/消息/堆栈，规范化换行及两端空白），不是按用户去重；每次上报增加该组次数。详情与次数在同一事务更新。旧分隔符导致不同字段组合得到相同指纹、历史重复组或非法计数时返回 `409`，由运维核对，不自动合并或重置历史次数。
 
-`extras` 继续支持 JSON 编码字符串和普通文本。正式存储及管理员查询保留任意业务键；旧响应仍保留原有下划线键转驼峰行为。JSON 标量字符串只解码一次，例如 `"123"` 不再误变为数值 `123`。
+`extras` 直接传 JSON 值：对象、数组、字符串、数字、布尔或 null。不要先把对象编码成字符串；正文中的 `"extras": "123"` 或 `"extras": "{\"key\":1}"` 都保存为字符串。存储、上报响应及管理员查询保留业务键和值类型，不做下划线转驼峰或二次解析。
 
 应用需先登记、准备好现有上报列；未就绪或缺列返回 `409`。客户端请求不会建表或回填旧数据，本次拆分没有新增表字段。历史数据迁移仍按 [迁移手册](MIGRATION.md) 单独预演、备份、停写及执行。
 
@@ -49,4 +51,4 @@
 
 旧 `POST /api/message/send-ota-name` 路径仅保留为普通应用消息入口，服务端不会根据任意 `data.id` 猜测它是版本记录。调用方不得通过该路径直接广播原始 OTA 版本数据。
 
-需要重新发送已发布版本时，调用 `POST /api/v2/apps/:appName/releases/:releaseId/redispatch`。服务端会重新读取真实版本、当前发布范围和白名单，通过统一决策后向符合条件的连接发送完整旧协议记录。
+需要重新发送已发布版本时，调用 `POST /api/v2/apps/:appName/releases/:releaseId/redispatch`。服务端重新读取真实版本、当前发布范围和白名单，通过统一决策后向符合条件的连接发送完整适用版本。
