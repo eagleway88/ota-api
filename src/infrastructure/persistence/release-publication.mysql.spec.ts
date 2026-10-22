@@ -14,7 +14,7 @@ import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service
 import { ReleaseDraftService } from '@/releases/release-draft.service'
 import { ReleaseManagementService } from '@/releases/release-management.service'
 import { PublishTaskWorkerService } from '@/infrastructure/tasks/publish-task-worker.service'
-import { VersionService } from '@/compat/legacy/http/version/version.service'
+import { VersionService } from '@/compat/legacy/tests/fixtures/legacy-version.service'
 import { OtaVersionQueryService } from '@/compat/legacy/http/version/ota-version-query.service'
 import {
   PlatformType,

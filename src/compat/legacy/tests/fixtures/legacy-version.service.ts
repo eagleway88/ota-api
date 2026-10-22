@@ -6,13 +6,25 @@ import { randomUUID } from 'crypto'
 import { apiUtil } from '@/utils/api'
 import { ConfigService } from '@nestjs/config'
 import { OssArtifactStorage } from '@/artifacts/oss-artifact.storage'
-import { OtaVersionQueryService } from './ota-version-query.service'
+import { OtaVersionQueryService } from '@/compat/legacy/http/version/ota-version-query.service'
 import { createVersionTable } from '@/utils/version'
 import { normalizeVersionValue } from '@/utils/version'
 import { fetchIP, isRequestIpAllowed, underlineToHump } from '@/utils'
-import { AppErrorLogDto, CheckDto, CreateDto } from './version.dto'
-import { ErrorDto, SuccessDto, UpdateType, UploadDto } from './version.dto'
-import { VersionListItemDto, VersionListQueryDto } from './version.dto'
+import {
+  AppErrorLogDto,
+  CheckDto,
+  CreateDto
+} from '@/compat/legacy/http/version/version.dto'
+import {
+  ErrorDto,
+  SuccessDto,
+  UpdateType,
+  UploadDto
+} from '@/compat/legacy/http/version/version.dto'
+import {
+  VersionListItemDto,
+  VersionListQueryDto
+} from '@/compat/legacy/http/version/version.dto'
 import { otaUploadMaxBytes, validateOtaUpload } from '@/artifacts/upload-policy'
 import { userIdMatchesContext } from '@/contracts/user-id'
 import { ReleaseOperationContext } from '@/contracts/release-operation'
@@ -29,8 +41,9 @@ import {
   legacyFailureReport,
   legacyApplicationError,
   serializeLegacyReport
-} from './telemetry.mapper'
+} from '@/compat/legacy/http/version/telemetry.mapper'
 
+/** Historical writer for migration regressions only; never register in the application. */
 @Injectable()
 export class VersionService {
   private updater?: OssArtifactStorage

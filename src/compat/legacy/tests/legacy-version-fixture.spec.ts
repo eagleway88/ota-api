@@ -2,7 +2,7 @@ import { ConfigService } from '@nestjs/config'
 import { DataSource, QueryRunner } from 'typeorm'
 import { createErrorTable, createSuccessTable } from '@/utils/version'
 import { createVersionTable } from '@/utils/version'
-import { VersionService } from './version.service'
+import { VersionService } from './fixtures/legacy-version.service'
 import type { Request } from 'express'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 

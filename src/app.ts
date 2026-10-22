@@ -8,6 +8,9 @@ import { validateRuntimeConfig } from './infrastructure/config/validate-config'
 import { LegacyCompatibilityModule } from './compat/legacy/legacy.module'
 import { AuthModule } from './auth/auth.module'
 import { AdministrationModule } from './admin/administration.module'
+import { TelemetryWritesModule } from './telemetry/telemetry-writes.module'
+import { AdminModule } from './compat/legacy/http/admin/admin.module'
+import { MessageModule } from './compat/legacy/http/message/message.module'
 
 @Module({
   imports: [
@@ -32,6 +35,9 @@ import { AdministrationModule } from './admin/administration.module'
     }),
     AuthModule,
     AdministrationModule,
+    TelemetryWritesModule,
+    AdminModule,
+    MessageModule,
     LegacyCompatibilityModule,
     ReleasesModule
   ],

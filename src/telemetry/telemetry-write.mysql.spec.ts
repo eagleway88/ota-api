@@ -1,7 +1,6 @@
 import 'reflect-metadata'
 import { randomUUID } from 'crypto'
 import { DataSource } from 'typeorm'
-import { ConfigService } from '@nestjs/config'
 import { Test } from '@nestjs/testing'
 import { ValidationPipe } from '@nestjs/common'
 import { Server } from 'http'
@@ -15,8 +14,11 @@ import { AdminReadRepository } from '@/infrastructure/persistence/admin-read.rep
 import { withApplicationWrite } from '@/infrastructure/persistence/application-write-transaction'
 import { DualWriteReleaseRepository } from '@/compat/legacy/persistence/dual-write-release.repository'
 import { DualWriteTelemetryRepository } from '@/compat/legacy/persistence/dual-write-telemetry.repository'
-import { VersionService } from '@/compat/legacy/http/version/version.service'
 import { VersionController } from '@/compat/legacy/http/version/version.controller'
+import { VersionCheckService } from '@/compat/legacy/http/version/version-check.service'
+import { OtaVersionQueryService } from '@/compat/legacy/http/version/ota-version-query.service'
+import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
+import { TelemetryWriteController } from './telemetry-write.controller'
 import { RefactoringFoundation1792444800000 } from '@/migrations/1792444800000-RefactoringFoundation'
 import { ApplicationDataMigration1792445100000 } from '@/migrations/1792445100000-ApplicationDataMigration'
 import { ExceptionFilter } from '@/middleware/exception-filter'
@@ -33,7 +35,6 @@ mysql('telemetry writes on isolated MySQL', () => {
   let applications: ApplicationRegistryService
   let app: RegisteredApplication
   let writes: TelemetryWriteService
-  let legacy: VersionService
   const appName = 'telemetry-app'
   const connection = {
     type: 'mysql' as const,
@@ -74,6 +75,7 @@ mysql('telemetry writes on isolated MySQL', () => {
         enabled: true,
         mandatory: false,
         showUpdateDialog: true,
+        installerSourceUrl: 'https://example.test/installer.exe',
         createdAt: new Date()
       })
     )
@@ -113,15 +115,6 @@ mysql('telemetry writes on isolated MySQL', () => {
     writes = new TelemetryWriteService(
       new DualWriteTelemetryRepository(source, applications)
     )
-    legacy = new VersionService(
-      {} as never,
-      { get: jest.fn() } as unknown as ConfigService,
-      source,
-      applications,
-      undefined,
-      undefined,
-      writes
-    )
   })
   afterEach(async () => {
     if (source?.isInitialized) await source.destroy()
@@ -132,10 +125,19 @@ mysql('telemetry writes on isolated MySQL', () => {
     if (control?.isInitialized) await control.destroy()
   })
 
-  it('serves legacy report paths and responses through real HTTP and SQL without exposing formal fields', async () => {
+  it('keeps the old check contract while serving formal v2 reports and rejecting retired version routes', async () => {
     const module = await Test.createTestingModule({
-      controllers: [VersionController],
-      providers: [{ provide: VersionService, useValue: legacy }]
+      controllers: [VersionController, TelemetryWriteController],
+      providers: [
+        VersionCheckService,
+        {
+          provide: OtaVersionQueryService,
+          useValue: new OtaVersionQueryService(
+            new ReleaseCatalogService(source, applications)
+          )
+        },
+        { provide: TelemetryWriteService, useValue: writes }
+      ]
     }).compile()
     const http = module.createNestApplication<
       import('@nestjs/common').INestApplication<Server>
@@ -145,54 +147,119 @@ mysql('telemetry writes on isolated MySQL', () => {
     http.useGlobalFilters(new ExceptionFilter())
     await http.listen(0, '127.0.0.1')
     try {
-      const body = {
-        name: appName,
-        platform: 'windows',
-        ver: 110,
-        verId: 2000,
-        username: 'reporter',
-        extras: '{"device_id":"one","innerCamel":{"nested_key":1}}'
+      for (const ver of [100, '1.0.0']) {
+        const check = await request(http.getHttpServer())
+          .post('/api/version/check')
+          .send({ name: appName, platform: 'windows', ver, id: 0 })
+          .expect(201)
+        expect(check.body).toMatchObject({
+          code: 0,
+          data: {
+            id: 2000,
+            ver: 110,
+            name: appName,
+            enable: 1,
+            type: 1,
+            downloadUrl: 'https://example.test/installer.exe',
+            installUrl: 'https://example.test/installer.exe',
+            mandatory: 0,
+            isMandatory: 0,
+            showDialog: 1
+          }
+        })
+        expect((check.body as { data: unknown }).data).not.toHaveProperty(
+          'releaseSequence'
+        )
       }
+      const noUpdate = await request(http.getHttpServer())
+        .post('/api/version/check')
+        .send({ name: appName, platform: 'windows', ver: 110, id: 2000 })
+        .expect(201)
+      expect(noUpdate.body).toEqual({ code: 0, data: null })
+      for (const path of [
+        'create',
+        'upload',
+        'list/app',
+        'success',
+        'error',
+        'app-error'
+      ]) {
+        await request(http.getHttpServer())
+          .post('/api/version/' + path)
+          .send({})
+          .expect(404)
+      }
+      const base = '/api/v2/apps/' + appName + '/telemetry/'
+      const body = {
+        platform: 'windows',
+        versionCode: 110,
+        releaseSequence: 2000,
+        reportedUsername: 'reporter',
+        extras: { device_id: 'one', innerCamel: { nested_key: 1 } }
+      }
+      await request(http.getHttpServer())
+        .post(base + 'successes')
+        .send({ ...body, appName: 'forged-app', sourceIp: 'forged-ip' })
+        .expect(400)
       const success = await request(http.getHttpServer())
-        .post('/api/version/success')
-        .send({ ...body, id: 888, releaseSequence: 999 })
+        .post(base + 'successes')
+        .send(body)
         .expect(201)
       expect(success.body).toMatchObject({
         code: 0,
         data: {
           id: 1,
-          verId: 2000,
-          name: appName,
-          username: 'reporter',
-          extras: { deviceId: 'one', innerCamel: { nestedKey: 1 } }
+          appName,
+          versionCode: 110,
+          releaseSequence: 2000,
+          reportedUsername: 'reporter',
+          extras: body.extras
         }
       })
       expect((success.body as { data: unknown }).data).not.toHaveProperty(
-        'releaseSequence'
+        'verId'
       )
+      for (const extras of [
+        '123',
+        '{"device_id":"text-not-an-object"}',
+        null
+      ]) {
+        const scalar = await request(http.getHttpServer())
+          .post(base + 'app-errors')
+          .send({
+            platform: 'windows',
+            versionCode: 110,
+            kind: 'scalar-test',
+            message: 'type preservation',
+            extras
+          })
+          .expect(201)
+        expect(
+          (scalar.body as { data: { extras: unknown } }).data.extras
+        ).toEqual(extras)
+      }
       const error = await request(http.getHttpServer())
-        .post('/api/version/error')
+        .post(base + 'failures')
         .send({ ...body, message: 'first' })
         .expect(201)
       const updated = await request(http.getHttpServer())
-        .post('/api/version/error')
+        .post(base + 'failures')
         .send({
           ...body,
-          id: (error.body as { data: { id: number } }).data.id,
+          recordId: (error.body as { data: { id: number } }).data.id,
           message: 'updated'
         })
         .expect(201)
       expect((updated.body as { data: unknown }).data).toMatchObject({
         id: 1,
         message: 'updated',
-        verId: 2000
+        releaseSequence: 2000
       })
       const crash = await request(http.getHttpServer())
-        .post('/api/version/app-error')
+        .post(base + 'app-errors')
         .send({
-          name: appName,
           platform: 'windows',
-          ver: 110,
+          versionCode: 110,
           kind: 'crash',
           message: 'crash'
         })
@@ -202,8 +269,12 @@ mysql('telemetry writes on isolated MySQL', () => {
         kind: 'crash'
       })
       await request(http.getHttpServer())
-        .post('/api/version/success')
-        .send({ ...body, verId: 9999 })
+        .post(base + 'successes')
+        .send({ ...body, releaseSequence: 9999 })
+        .expect(400)
+      await request(http.getHttpServer())
+        .post(base + 'successes')
+        .send({ ...body, versionCode: '110' })
         .expect(400)
       const summary = await new TelemetryQueryService(
         new AdminReadRepository(source, applications)
@@ -213,10 +284,8 @@ mysql('telemetry writes on isolated MySQL', () => {
       })
       expect(summary.data).toMatchObject({ successCount: 1, errorCount: 1 })
       expect((await rows('success'))[0]).toMatchObject({
-        ver_id: 2000,
+        name: appName,
         release_sequence: 2000,
-        username: 'reporter',
-        reported_username: 'reporter',
         extras: report().extras
       })
       expect(app.tablePrefix).toBe('telemetry_123a')
