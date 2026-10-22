@@ -112,7 +112,34 @@ Authorization: Bearer <JWT>
 
 失败审计自身无法写入时输出 ERROR 事件 `application_failure_audit_unavailable`；提交结果未知或提交后清理异常输出 `application_operation_outcome_requires_review`（含实际追踪状态）；连接/锁清理异常还会输出 `application_write_cleanup_failed`。事件保留应用、操作、请求等关联元数据，不附加原始异常。它们是服务端运行日志，不是本接口中的数据库记录；部署方仍需配置日志采集与告警，当前没有独立的告警投递或运行日志查询后端。
 
-应用解析/准备失败、鉴权/DTO 校验等前置拒绝、旧上传 OSS 阶段、草稿创建/普通编辑、文件上传和完整名单差异尚未由这条失败审计链路全部覆盖。应用不就绪、映射变化或审计表不可用时也不能保证失败记录落库；不会为补审计临时建表或修改映射。没有审计不能推断操作从未发生。
+应用解析/准备失败、鉴权/DTO 校验等前置拒绝、旧上传 OSS 阶段、草稿创建/普通编辑及文件上传尚未由这条失败审计链路全部覆盖。应用不就绪、映射变化或审计表不可用时也不能保证失败记录落库；不会为补审计临时建表或修改映射。没有审计不能推断操作从未发生。
+
+## 名单完整差异与分段读取
+
+旧/v2 首次发布、已发布名单替换/范围修改，以及草稿 `users/scope` 接口的成功审计现在记录完整新增/移除标识。草稿创建和普通 `PATCH releases/:releaseId` 尚未接入，不能据此重建全部草稿编辑历史。
+
+`change_detail.addedUserIds` 和 `change_detail.removedUserIds` 保存该段的完整 `userId`；同一段两组之和最多 200 个。每段的 `change_summary.audience` 重复保存本次操作的总摘要：
+
+```json
+{
+  "scopeBefore": "allowlist",
+  "scopeAfter": "allowlist",
+  "userCountBefore": 300,
+  "userCountAfter": 400,
+  "addedCount": 200,
+  "removedCount": 100,
+  "partCount": 2
+}
+```
+
+- 相同 `(operation_id, request_id)` 的记录为一组，`part_no` 从 1 连续递增至 `partCount`；任务、修订和发生时间相同。所有段与名单变更、修订、任务同事务提交，后续段失败会回滚前面已插入的段。
+- 按 `operationId`、`result=succeeded` 和正确时间范围查询原 `audit-logs` 接口，可使用 `pageSize=100`。默认分页按时间/审计 ID 排序，不保证分段顺序；读取所有页后按 `part_no` 排序。`total` 是审计记录/分段数，不是管理操作次数。
+- 只有分段编号齐全、每段摘要一致，且两组累计数分别等于 `addedCount/removedCount`，才能展示为完整差异。缺页、清理造成的缺段或旧记录缺少 `audience` 元数据都应标为“不完整/当时未采集”，不能补成空名单。
+- 初次发布的 `scopeBefore=null`，将发布时名单全部记为新增；切换公共范围时记录被清空的全部标识。无成员变化也写一段空数组，范围变更仍由 `scopeBefore/scopeAfter` 说明。替换已发布名单本身不改变范围；公共版本中预置名单仍不限制公共分发。
+- 请求去重前最多 5,000 个标识，每个最多 191 字符；5,000 人全部替换为另 5,000 人最多产生 50 段。旧 JSON/multipart 和 v2 共用上限，重复 ID 不能绕过限额。HTTP 请求体/网关大小限制仍独立生效。
+- 旧存储名单超过 5,000 人时，名单/范围修改返回 `409`，不截断差异、不部分修改。应先受控核对；需要立即停止推送时可使用停用接口，它不修改名单。失败审计不保存成功差异，`change_detail` 仍为空。
+
+完整差异写入受管理员认证保护的数据库审计；新增差异计算和审计 helper 不输出名单到运行日志。所有段使用现有 `change_summary/change_detail/part_no` 字段，无新增表列，也不为历史审计补造差异。
 
 ## 发布任务运行进度
 
