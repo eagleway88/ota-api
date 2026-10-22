@@ -13,12 +13,18 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
-    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "lint": "eslint \"{src,test,scripts}/**/*.ts\"",
     "typeorm:gen": "npx typeorm-ts-node-commonjs migration:generate ./src/migrations/migration -d ./src/typeorm.ts",
     "typeorm:run": "npx typeorm-ts-node-commonjs migration:run -d ./src/typeorm.ts",
     "audit:db": "ts-node -r tsconfig-paths/register scripts/audit-database.ts",
     "migrate:app": "ts-node -r tsconfig-paths/register scripts/migrate-application.ts",
-    "pm2": "yarn build && pm2 startOrReload ecosystem.config.js --update-env"
+    "pm2": "yarn build && pm2 startOrReload ecosystem.config.js --update-env",
+    "typecheck": "tsc --noEmit --incremental false",
+    "lint:fix": "eslint \"{src,test,scripts}/**/*.ts\" --fix",
+    "test:unit": "jest --runInBand --watchman=false --testPathIgnorePatterns=\"[.](mysql|http)[.]spec[.]ts$\"",
+    "test:http": "jest --runInBand --watchman=false --testPathPatterns=\"[.]http[.]spec[.]ts$\"",
+    "test:mysql": "node test/run-mysql.cjs",
+    "test:verify": "yarn typecheck && yarn lint && yarn build && yarn test --runInBand --watchman=false"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -71,25 +77,5 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "moduleNameMapper": {
-      "^@/(.*)$": "<rootDir>/$1"
-    },
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.(t|j)s"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
   }
 }
