@@ -31,19 +31,6 @@ export function fetchIP(req: Request) {
   return normalizeIpAddress(req.ip)
 }
 
-export function isRequestIpAllowed(req: Request, ips?: string) {
-  if (!ips?.trim()) return true
-
-  const requestIp = fetchIP(req)
-  if (!requestIp) return false
-
-  return ips
-    .split(',')
-    .map(normalizeIpAddress)
-    .filter(Boolean)
-    .includes(requestIp)
-}
-
 /**
  * @param { Promise } promise
  * @param { Object= } errorExt - Additional Information you can pass to the err object

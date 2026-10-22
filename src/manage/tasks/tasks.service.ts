@@ -140,9 +140,7 @@ export class TaskQueryService {
       .where('task.task_id = :taskId', { taskId })
       .getRawOne<Record<string, unknown>>()
     if (!task)
-      throw new NotFoundException(
-        'Task does not exist in this application or is past retention'
-      )
+      throw new NotFoundException('Task does not exist in this application')
     return task
   }
 
@@ -178,7 +176,7 @@ export class TaskQueryService {
   private history() {
     return {
       historyNotice:
-        'Records before migration may not have been collected; records beyond retention may have been removed.'
+        'Records are retained indefinitely by this service. Older records may be unavailable if never collected or removed before this policy.'
     }
   }
 }

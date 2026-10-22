@@ -149,7 +149,8 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
       )
     }
     messages = new LastMessageService(source.getRepository(ApplicationMessage))
-    const config = new ConfigService({})
+    // A stale, non-matching IP allowlist must no longer restrict authorized callers.
+    const config = new ConfigService({ IPS: '198.51.100.77' })
     const module = await Test.createTestingModule({
       imports: [
         {

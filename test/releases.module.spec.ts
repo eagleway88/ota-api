@@ -27,6 +27,12 @@ const database = {
 class TestPersistenceModule {}
 
 describe('release module wiring', () => {
+  it('registers only the publish worker, without a record-retention cleanup job', () => {
+    expect(Reflect.getMetadata('providers', JobsModule)).toEqual([
+      PublishTaskWorkerService
+    ])
+  })
+
   it('can replace the publication write port without loading legacy HTTP routes', async () => {
     const repository = { insert: jest.fn(), setEnabled: jest.fn() }
     const module = await Test.createTestingModule({

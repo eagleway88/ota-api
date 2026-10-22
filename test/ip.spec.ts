@@ -1,5 +1,5 @@
 import type { Request } from 'express'
-import { fetchIP, isRequestIpAllowed } from '@/utils'
+import { fetchIP } from '@/utils'
 
 describe('trusted request IP', () => {
   it('uses the Express-computed address instead of raw forwarding headers', () => {
@@ -12,8 +12,6 @@ describe('trusted request IP', () => {
     } as unknown as Request
 
     expect(fetchIP(request)).toBe('203.0.113.5')
-    expect(isRequestIpAllowed(request, '203.0.113.5')).toBe(true)
-    expect(isRequestIpAllowed(request, '198.51.100.1')).toBe(false)
   })
 
   it('normalizes local and IPv4-mapped addresses', () => {

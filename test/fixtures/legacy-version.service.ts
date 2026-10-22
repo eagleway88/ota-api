@@ -9,7 +9,7 @@ import { OssArtifactStorage } from '@/infrastructure/oss/oss-artifact.storage'
 import { UpdateQueryService } from '@/updates/update-query.service'
 import { createVersionTable } from '@/utils/version'
 import { normalizeVersionValue } from '@/utils/version'
-import { fetchIP, isRequestIpAllowed, underlineToHump } from '@/utils'
+import { fetchIP, underlineToHump } from '@/utils'
 import { AppErrorLogDto, CheckDto, CreateDto } from './legacy-version.dto'
 import {
   ErrorDto,
@@ -58,11 +58,7 @@ export class VersionService {
     this.updater = new OssArtifactStorage(this.configService)
   }
 
-  async list(req: Request, name: string, query: VersionListQueryDto) {
-    if (!isRequestIpAllowed(req, this.configService.get<string>('IPS'))) {
-      return apiUtil.error('Permission denied')
-    }
-
+  async list(_req: Request, name: string, query: VersionListQueryDto) {
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
 

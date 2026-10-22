@@ -3,11 +3,10 @@ import { ConfigModule } from '@nestjs/config'
 import { ApplicationsModule } from '@/applications/applications.module'
 import { RealtimeModule } from '@/realtime'
 import { PublishTaskWorkerService } from '@/jobs/publish/publish-task-worker.service'
-import { RetentionService } from '@/jobs/retention/retention.service'
 
 @Module({
   imports: [ConfigModule, ApplicationsModule, RealtimeModule],
-  providers: [PublishTaskWorkerService, RetentionService],
+  providers: [PublishTaskWorkerService],
   exports: [PublishTaskWorkerService]
 })
 export class JobsModule {}

@@ -305,6 +305,33 @@ describe('external application APIs with access keys', () => {
     )
   })
 
+  it.each(['tasks', 'tasks/task-a/logs', 'audit-logs'])(
+    'keeps %s readable for historical periods and reports permanent retention',
+    async path => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/manage/apps/app-a/' + path)
+        .set('Authorization', `Bearer ${token}`)
+        .query({ from: '2020-01-01T00:00:00Z', to: '2020-02-01T00:00:00Z' })
+        .expect(200)
+      expect(response.body).toMatchObject({
+        data: {
+          historyNotice: expect.stringContaining(
+            'retained indefinitely'
+          ) as unknown
+        }
+      })
+      expect(JSON.stringify(response.body)).not.toContain('beyond retention')
+      expect(sql.every(call => /^SELECT/.test(call.query))).toBe(true)
+      expect(
+        sql.some(call =>
+          call.parameters.some(
+            value => value instanceof Date && value.getUTCFullYear() === 2020
+          )
+        )
+      ).toBe(true)
+    }
+  )
+
   it('preserves incomplete task execution metrics and task status filters', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/v1/manage/apps/app-a/tasks/task-a/logs')

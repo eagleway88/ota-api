@@ -69,7 +69,7 @@ export class AuditQueryService {
     )
     return adminPage(rows, total, window, {
       historyNotice:
-        'Records before migration may not have been collected; records beyond retention may have been removed.'
+        'Records are retained indefinitely by this service. Older records may be unavailable if never collected or removed before this policy.'
     })
   }
 }

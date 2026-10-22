@@ -27,6 +27,22 @@ describe('validateRuntimeConfig', () => {
     expect(() => validateRuntimeConfig(valid)).not.toThrow()
   })
 
+  it('has no retention defaults or active validation for retired retention settings', () => {
+    const config = validateRuntimeConfig(valid)
+    expect(config).not.toHaveProperty('TASK_RETENTION_DAYS')
+    expect(config).not.toHaveProperty('AUDIT_RETENTION_DAYS')
+    expect(config).not.toHaveProperty('IPS')
+    // Stale deployment variables cannot reactivate a removed job or IP restriction.
+    expect(() =>
+      validateRuntimeConfig({
+        ...valid,
+        TASK_RETENTION_DAYS: '0',
+        AUDIT_RETENTION_DAYS: 'invalid',
+        IPS: '198.51.100.1'
+      })
+    ).not.toThrow()
+  })
+
   it('rejects missing secrets and invalid limits', () => {
     expect(() => validateRuntimeConfig({ ...valid, ORM_PASSWORD: '' })).toThrow(
       'ORM_PASSWORD is required'

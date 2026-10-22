@@ -68,11 +68,7 @@ describe('application-scoped message HTTP contracts', () => {
       .set('Authorization', 'Bearer active')
       .send(body)
       .expect(201)
-    expect(service.sendApplication).toHaveBeenCalledWith(
-      expect.any(Object),
-      'app-a',
-      body
-    )
+    expect(service.sendApplication).toHaveBeenCalledWith('app-a', body)
     for (const field of ['appName', 'otaName'])
       await request(app.getHttpServer())
         .post(path + 'application')
@@ -92,11 +88,9 @@ describe('application-scoped message HTTP contracts', () => {
         .set('Authorization', 'Bearer active')
         .send({ data })
         .expect(201)
-      expect(service.sendApplication).toHaveBeenLastCalledWith(
-        expect.any(Object),
-        'app-a',
-        { data }
-      )
+      expect(service.sendApplication).toHaveBeenLastCalledWith('app-a', {
+        data
+      })
     }
   })
   it('requires boolean resend flags and bounded identities', async () => {
@@ -116,10 +110,7 @@ describe('application-scoped message HTTP contracts', () => {
       .query({ appName: 'app-b' })
       .set('Authorization', 'Bearer active')
       .expect(200)
-    expect(service.listSubscribedUserIds).toHaveBeenCalledWith(
-      expect.any(Object),
-      'app-a'
-    )
+    expect(service.listSubscribedUserIds).toHaveBeenCalledWith('app-a')
     await request(app.getHttpServer())
       .get('/api/v1/manage/apps/app-b/messages/user-id-subscriptions')
       .set('Authorization', 'Bearer active')

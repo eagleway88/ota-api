@@ -16,7 +16,7 @@ src/
     common/                 无 Worker 的只读管理装配
   auth/                     API Key 校验、权限预设、CLI 专用签发/撤销
   config/                   环境校验、HTTP、Swagger、TypeORM CLI
-  jobs/                     发布 Worker、保留期清理
+  jobs/                     发布 Worker、租约接管与重试（无历史清理）
   applications/、releases/   应用和发布领域服务、DTO、写入端口
   telemetry/、audit/         上报领域及审计写入边界
   messaging/                统一 ota_messages、应用隔离、ACK 与 TTL 存储
@@ -46,11 +46,13 @@ test/
 
 Swagger 管理分组显式扫描只读管理聚合，避免库的单层嵌套扫描漏掉统计、审计及任务日志。装配测试核对全量接口恰好分入 App/Manage/Legacy 三组。构建禁用增量缓存，输出入口及非运行时文件排除由 `test/verify-build.cjs` 自动验证。
 
-`AppApiModule` 装配公开上报，`ManageApiModule` 装配管理员操作和查询。`AdministrationModule` 可独立装配认证与只读查询，不启动推送 Worker。`JobsModule` 集中装配任务和保留期服务。上传、发布各有独立 Controller；应用准备与 Key 管理仅通过本地 CLI；核心 `ReleasesModule`、`TelemetryWritesModule` 不注册 HTTP Controller。Realtime ACK DTO 不依赖管理 HTTP 层。
+`AppApiModule` 装配公开上报，`ManageApiModule` 装配管理员操作和查询。`AdministrationModule` 可独立装配认证与只读查询，不启动推送 Worker。`JobsModule` 仅装配发布任务 Worker，不包含历史清理服务。上传、发布各有独立 Controller；应用准备与 Key 管理仅通过本地 CLI；核心 `ReleasesModule`、`TelemetryWritesModule` 不注册 HTTP Controller。Realtime ACK DTO 不依赖管理 HTTP 层。
 
 运行时无管理员模型、登录/会话接口或平台超级 Key。每次管理请求验证 Key 的精确应用授权与路由权限，未标注权限默认拒绝。full 只覆盖明确授权应用的业务操作。CLI 与运行时隔离，业务请求仅 requireReady，不做 DDL。
 
 用户和设备消息统一存到 ota_messages，复合主键为 app_name/target_type/target_id；设备订阅、事件和 ACK 必须带应用范围。历史管理员账户/会话删除，但审计中的旧身份快照保留。
+
+任务、执行记录及应用/全局审计永久保存，无按时间清理任务或保留天数配置。消息管理接口不再使用 IPS 允许列表。普通消息 TTL/ACK、内存缓存和连接状态的不同生命周期见 [数据保存核对](DATA_LIFECYCLE.md)。
 
 ## 数据与事务
 

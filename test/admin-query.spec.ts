@@ -28,6 +28,18 @@ describe('administrator query bounds', () => {
     expect(() => normalizeAdminQuery(query)).toThrow()
   })
 
+  it('can query historical periods years ago without a retention cutoff', () => {
+    expect(
+      normalizeAdminQuery(
+        { from: '2020-01-01T00:00:00Z', to: '2020-02-01T00:00:00Z' },
+        new Date('2026-10-23T00:00:00Z')
+      )
+    ).toMatchObject({
+      from: new Date('2020-01-01T00:00:00Z'),
+      to: new Date('2020-02-01T00:00:00Z')
+    })
+  })
+
   it('reads legacy and dual-written report timestamps without runtime DDL', () => {
     const table = new Table({
       name: 'app_success',

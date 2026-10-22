@@ -73,6 +73,8 @@ Authorization: Bearer ota_ak_<keyId>.<secret>
 
 新操作审计使用 `actorType=api_key`、`actorKeyId` 及名称快照。保留旧 `actor_admin_id` 仅用于解释历史记录，不代表仍有管理员账户。最后使用时间至多每分钟更新一次，不等同于完整访问日志。
 
+消息管理接口的 IPS 来源 IP 限制已移除；旧 IPS 环境变量不再生效，所有调用仍须满足 API Key 的精确应用授权和消息权限。任务、执行记录及应用/全局审计永久保存；详见 [数据保存核对](DATA_LIFECYCLE.md)。
+
 ## 从旧认证和消息结构升级
 
 停掉旧实例与所有写入口、备份并验证可恢复，再运行全局迁移：

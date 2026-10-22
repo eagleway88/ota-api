@@ -63,16 +63,6 @@ export function validateRuntimeConfig(config: RuntimeConfig) {
       config.PUBLISH_TASK_POLL_MS,
       'PUBLISH_TASK_POLL_MS',
       5000
-    ),
-    TASK_RETENTION_DAYS: positiveInteger(
-      config.TASK_RETENTION_DAYS,
-      'TASK_RETENTION_DAYS',
-      90
-    ),
-    AUDIT_RETENTION_DAYS: positiveInteger(
-      config.AUDIT_RETENTION_DAYS,
-      'AUDIT_RETENTION_DAYS',
-      180
     )
   }
 }
