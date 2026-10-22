@@ -6,6 +6,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config'
 import { JwtModule } from '@nestjs/jwt'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { Admin } from '@/entities/admin.entity'
+import { AdministratorService } from './administrator.service'
+import { PasswordHasher } from './password-hasher'
 
 @Module({
   imports: [
@@ -14,20 +16,20 @@ import { Admin } from '@/entities/admin.entity'
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
-        global: true,
-        secret: configService.get('JWT_SECRET'),
-        signOptions: { expiresIn: '1y' }
+        secret: configService.get('JWT_SECRET')
       }),
       inject: [ConfigService]
     })
   ],
   providers: [
     AuthService,
+    AdministratorService,
+    PasswordHasher,
     {
       provide: APP_GUARD,
       useClass: AuthGuard
     }
   ],
-  exports: [AuthService]
+  exports: [AuthService, AdministratorService]
 })
 export class AuthModule {}

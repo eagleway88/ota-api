@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common'
 import { AdministrationModule } from './common/administration.module'
-import { AdminModule } from './auth/auth.module'
+import { ManageAuthModule } from './auth/auth.module'
 import { MessageModule } from './messages/messages.module'
 import { ManageReleasesModule } from './releases/releases.module'
 import { ManageArtifactsModule } from './artifacts/artifacts.module'
@@ -10,7 +10,7 @@ import { ReleasesModule } from '@/releases/releases.module'
 @Module({
   imports: [
     AdministrationModule,
-    AdminModule,
+    ManageAuthModule,
     MessageModule,
     ManageReleasesModule,
     ManageArtifactsModule,

@@ -9,6 +9,9 @@ import { ApplicationRegistryService } from '@/applications/application-registry.
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
 import { configureHttp } from '@/config/http'
 import { AdministrationModule } from '@/manage/common/administration.module'
+import { administratorJwtOptions } from '@/auth/auth.service'
+
+const sessionId = '2f9d717d-5267-448d-8e81-f9df3c5c3410'
 
 const sql: Array<{ query: string; parameters: unknown[] }> = []
 const sqlSource = new DataSource({ type: 'mysql', database: 'test' })
@@ -116,6 +119,12 @@ function createQueryRunner() {
         options: { type: 'mysql' },
         entityMetadatas: [],
         getRepository: () => repository,
+        query: (_sql: string, parameters: unknown[]) =>
+          Promise.resolve(
+            parameters[0] === sessionId && parameters[1] === 1
+              ? [{ id: 1, username: 'admin' }]
+              : []
+          ),
         createQueryRunner
       }
     }
@@ -170,7 +179,10 @@ describe('external administrator HTTP APIs', () => {
     configureHttp(app)
     await app.listen(0, '127.0.0.1')
     jwt = module.get(JwtService)
-    token = await jwt.signAsync({ sub: 1 })
+    token = await jwt.signAsync(
+      { sub: '1', sid: sessionId, tokenType: 'admin-access' },
+      { ...administratorJwtOptions, expiresIn: 3600 }
+    )
   })
 
   beforeEach(() => {
@@ -215,12 +227,16 @@ describe('external administrator HTTP APIs', () => {
     expect(sql).toHaveLength(0)
   })
 
-  it('accepts old username-only administrator tokens and parameterizes audit filters', async () => {
+  it('rejects old username-only tokens, and parameterizes filters for active sessions', async () => {
     const oldToken = await jwt.signAsync({ username: 'admin' })
-    const action = "publish' OR 1=1 --"
     await request(app.getHttpServer())
       .get('/api/v1/manage/audit-logs')
       .set('Authorization', `Bearer ${oldToken}`)
+      .expect(401)
+    const action = "publish' OR 1=1 --"
+    await request(app.getHttpServer())
+      .get('/api/v1/manage/audit-logs')
+      .set('Authorization', `Bearer ${token}`)
       .query({ ...range, action, result: 'failed', actorAdminId: '1' })
       .expect(200)
     expect(sql.some(call => call.parameters.includes(action))).toBe(true)

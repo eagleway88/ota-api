@@ -10,13 +10,13 @@
 { "username": "admin", "password": "<管理员密码>" }
 ```
 
-成功响应保持 `{ "code": 0, "data": "<JWT>" }`。后续请求携带：
+成功 HTTP 200，响应为 `{ "code": 0, "data": { "accessToken": "<JWT>", "tokenType": "Bearer", "expiresIn": 3600, "administrator": { "id": 1, "username": "admin" } } }`。后续请求携带：
 
 ```http
 Authorization: Bearer <JWT>
 ```
 
-每次受保护请求均验证 Token 签名、有效期以及对应管理员账号是否仍存在。保留旧的仅含 `username` 的管理员 Token 兼容。无效、过期、缺失身份或账号不存在返回 `401`。身份认证独立于旧协议模块装配。
+每次受保护请求均验证 JWT 和数据库会话，账号不存在、会话已注销/过期及旧 Token 均返回 `401`。默认有效期一小时，提供 `me/logout/logout-all`，不提供刷新令牌。初始化与新增迁移步骤见 [管理员认证](AUTHENTICATION.md)。身份认证独立于旧协议模块装配。
 
 当前管理员是 OTA 全局管理员，可以查看所有应用；尚未实现按应用授予管理员角色。业务客户端自报的 `userId` 和设备 `uniqueId` 不能访问管理接口。新查询接口按管理员身份授权，不使用旧消息接口的 `IPS` 白名单替代认证。
 

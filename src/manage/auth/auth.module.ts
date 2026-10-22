@@ -1,14 +1,9 @@
 import { Module } from '@nestjs/common'
-import { TypeOrmModule } from '@nestjs/typeorm'
-import { AdminController } from '@/manage/auth/auth.controller'
+import { AuthController } from '@/manage/auth/auth.controller'
 import { AuthModule } from '@/auth/auth.module'
-import { Admin } from '@/entities/admin.entity'
-import { AdminService } from '@/auth/administrator.service'
-import { PasswordHasher } from '@/auth/password-hasher'
 
 @Module({
-  imports: [AuthModule, TypeOrmModule.forFeature([Admin])],
-  controllers: [AdminController],
-  providers: [AdminService, PasswordHasher]
+  imports: [AuthModule],
+  controllers: [AuthController]
 })
-export class AdminModule {}
+export class ManageAuthModule {}

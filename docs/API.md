@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | 旧检查（公开） | `POST /api/version/check` | 仅保留旧版本检查请求和返回 |
 | 客户端（公开） | `POST /api/v1/app/apps/:appName/telemetry/{successes,failures,app-errors}` | 正式客户端上报 |
-| 认证 | `/api/v1/manage/auth/*` | 管理员初始化和登录 |
+| 认证 | `/api/v1/manage/auth/*` | initialize、login、me、logout、logout-all |
 | 应用 | `POST /api/v1/manage/apps/:appName/prepare` | 显式准备应用表结构 |
 | 文件 | `POST /api/v1/manage/apps/:appName/artifacts` | multipart `file` 上传 |
 | 发布 | `/api/v1/manage/apps/:appName/releases` | 草稿列表、创建、详情、编辑及显式发布 |
@@ -21,3 +21,5 @@
 Swagger：`/api/docs`（全部）、`/api/docs/app`、`/api/docs/manage`、`/api/docs/legacy`。参数、方法和模型以当前 Controller 生成的文档为准。
 
 旧 `/api/admin/*`、`/api/message/*`、`/api/v2/*` 及 `/api/version/*` 中除 check 外的入口不再保留；调用方须随本版更新。详见 [管理员接口](ADMIN_API.md)、[SDK 接入](SDK_INTEGRATION.md)。
+
+认证已改为有时效、可注销的数据库会话，旧 Token 无效。先执行新增迁移并更新管理端登录解析，见 [认证与迁移](AUTHENTICATION.md)。

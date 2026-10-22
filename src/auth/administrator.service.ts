@@ -1,7 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common'
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  UnauthorizedException
+} from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
-import { AdminDto } from '@/auth/auth.dto'
+import { LoginDto } from '@/auth/auth.dto'
 import { apiUtil } from '@/utils/api'
 import { Admin } from '@/entities/admin.entity'
 import { AuthService } from '@/auth/auth.service'
@@ -12,8 +17,9 @@ import { GlobalAuditContext, insertGlobalAudit } from '@/audit/global-audit'
 import { randomUUID } from 'crypto'
 
 @Injectable()
-export class AdminService {
-  private readonly logger = new Logger(AdminService.name)
+export class AdministratorService {
+  private readonly logger = new Logger(AdministratorService.name)
+  private missingAccountHash?: Promise<string>
 
   constructor(
     private readonly authService: AuthService,
@@ -23,11 +29,12 @@ export class AdminService {
     private readonly admin: Repository<Admin>
   ) {}
 
-  async create(body: AdminDto, context: GlobalAuditContext) {
+  async create(body: LoginDto, context: GlobalAuditContext) {
     const queryRunner = this.dataSource.createQueryRunner()
     const operationId = randomUUID()
     await queryRunner.connect()
     let lockAcquired = false
+    let commitAttempted = false
     try {
       const lockRows = (await queryRunner.query(
         "SELECT GET_LOCK('ota_admin_initialization', 10) AS acquired"
@@ -39,15 +46,9 @@ export class AdminService {
       await queryRunner.startTransaction()
       const count = await queryRunner.manager.count(Admin)
       if (count) {
-        await queryRunner.rollbackTransaction()
-        await this.auditFailedCreate(
-          queryRunner,
-          context,
-          operationId,
-          body.username,
-          'ADMIN_ALREADY_EXISTS'
+        throw new ConflictException(
+          'Administrator has already been initialized'
         )
-        return apiUtil.error('Account already exists')
       }
       const entity = queryRunner.manager.create(Admin, {
         username: body.username,
@@ -64,27 +65,56 @@ export class AdminService {
         changeSummary: { username: saved.username },
         result: 'succeeded'
       })
+      commitAttempted = true
       await queryRunner.commitTransaction()
       return apiUtil.data(this.publicAdmin(saved))
     } catch (error) {
-      if (queryRunner.isTransactionActive) {
-        await queryRunner.rollbackTransaction()
+      let rollbackConfirmed = !queryRunner.isTransactionActive
+      try {
+        if (queryRunner.isTransactionActive) {
+          await queryRunner.rollbackTransaction()
+          rollbackConfirmed = true
+        }
+      } catch {
+        this.logger.error(
+          `Administrator initialization rollback unconfirmed requestId=${context.requestId}`
+        )
       }
-      await this.auditFailedCreate(
-        queryRunner,
-        context,
-        operationId,
-        body.username,
-        'ADMIN_CREATE_FAILED'
-      )
+      if (!commitAttempted && rollbackConfirmed) {
+        await this.auditFailedCreate(
+          queryRunner,
+          context,
+          operationId,
+          body.username,
+          error instanceof ConflictException
+            ? 'ADMIN_ALREADY_EXISTS'
+            : 'ADMIN_CREATE_FAILED'
+        )
+      } else {
+        this.logger.error(
+          `Administrator initialization outcome requires verification requestId=${context.requestId}`
+        )
+      }
       throw error
     } finally {
       if (lockAcquired) {
-        await queryRunner.query(
-          "SELECT RELEASE_LOCK('ota_admin_initialization')"
+        try {
+          await queryRunner.query(
+            "SELECT RELEASE_LOCK('ota_admin_initialization')"
+          )
+        } catch {
+          this.logger.error(
+            `Administrator initialization lock cleanup failed requestId=${context.requestId}`
+          )
+        }
+      }
+      try {
+        await queryRunner.release()
+      } catch {
+        this.logger.error(
+          `Administrator initialization connection cleanup failed requestId=${context.requestId}`
         )
       }
-      await queryRunner.release()
     }
   }
 
@@ -115,31 +145,33 @@ export class AdminService {
     }
   }
 
-  async login(body: AdminDto) {
+  async login(body: LoginDto, context: GlobalAuditContext) {
     const user = await this.admin
       .createQueryBuilder('admin')
       .addSelect('admin.password')
       .where('admin.username = :username', { username: body.username })
       .getOne()
-    if (!user) return apiUtil.error('Account does not exist')
+    if (!user) {
+      this.missingAccountHash ??= this.passwordHasher.hash(randomUUID())
+      await this.passwordHasher.verify(
+        body.password,
+        await this.missingAccountHash
+      )
+      throw new UnauthorizedException('Invalid administrator credentials')
+    }
     const verification = await this.passwordHasher.verify(
       body.password,
       user.password
     )
     if (!verification.valid) {
-      return apiUtil.error('Incorrect password')
+      throw new UnauthorizedException('Invalid administrator credentials')
     }
     if (verification.needsRehash) {
       await this.admin.update(user.id, {
         password: await this.passwordHasher.hash(body.password)
       })
     }
-    const token = await this.authService.signAsync({
-      sub: user.id,
-      uid: user.id,
-      username: user.username
-    })
-    return apiUtil.data(token)
+    return apiUtil.data(await this.authService.createSession(user, context))
   }
 
   private publicAdmin(admin: Admin) {

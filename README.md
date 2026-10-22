@@ -52,6 +52,7 @@ MySQL 发布/迁移集成测试默认跳过，只有显式配置独立临时 soc
 - [性能验证](docs/PERFORMANCE.md)
 - [外部管理员 API](docs/ADMIN_API.md)
 - [统一 API 索引](docs/API.md)
+- [管理员认证与会话迁移](docs/AUTHENTICATION.md)
 - [目录与模块边界](docs/ARCHITECTURE.md)
 
 ## 关键约束

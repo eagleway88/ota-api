@@ -24,6 +24,26 @@ describe('validateRuntimeConfig', () => {
     )
   })
 
+  it('bounds administrator token lifetime and initialization secrets', () => {
+    expect(validateRuntimeConfig(valid).ADMIN_ACCESS_TOKEN_TTL_SECONDS).toBe(
+      3600
+    )
+    for (const seconds of [0, 59, 86401, 1.5]) {
+      expect(() =>
+        validateRuntimeConfig({
+          ...valid,
+          ADMIN_ACCESS_TOKEN_TTL_SECONDS: seconds
+        })
+      ).toThrow('ADMIN_ACCESS_TOKEN_TTL_SECONDS')
+    }
+    expect(() =>
+      validateRuntimeConfig({ ...valid, ADMIN_INITIALIZATION_TOKEN: 'short' })
+    ).toThrow('ADMIN_INITIALIZATION_TOKEN')
+    expect(() =>
+      validateRuntimeConfig({ ...valid, ADMIN_INITIALIZATION_TOKEN: '' })
+    ).not.toThrow()
+  })
+
   it('rejects missing secrets and invalid limits', () => {
     expect(() => validateRuntimeConfig({ ...valid, JWT_SECRET: '' })).toThrow(
       'JWT_SECRET is required'

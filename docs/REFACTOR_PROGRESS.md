@@ -2,6 +2,8 @@
 
 ## 2026-10-22 新目录与接口交付
 
+认证追加交付：管理员登录改为默认一小时的 HS256 JWT + 持久化会话，提供 me/logout/logout-all；旧 username/uid/sub-only Token 不再接受。初始化由部署密钥保护、并发互斥，旧存储密码在登录时散列迁移。新增会话表迁移只追加，不改旧账号及应用数据；登录/注销与成功审计原子提交。41 套件 / 322 项（含 101 项隔离 MySQL）通过，typecheck/build/lint 通过；未操作生产环境。见 [认证手册](AUTHENTICATION.md)。
+
 测试已集中根目录 `test/`，运维 CLI 放在 `src/scripts/` 且不进入生产构建。参照 eagleway-network-api 建立 `app/`、`manage/`、`config/`、`jobs/`、`infrastructure/oss/` 和统一 `realtime/`；上传、应用准备与发布 Controller 分离。管理员、消息及历史存储适配已移出旧 HTTP 兼容目录。
 
 正式路由统一 `/api/v1/app/*`、`/api/v1/manage/*`，只有 `/api/version/check` 保留旧协议。运行时与真实 HTTP 测试共用前缀、版本、请求 ID 和校验配置。39 套件 / 298 项（含 82 项隔离 MySQL）通过，typecheck、build、lint 通过。
