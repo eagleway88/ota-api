@@ -12,7 +12,7 @@ const validation = new ValidationPipe({
   forbidNonWhitelisted: true
 })
 
-@ApiTags('audit')
+@ApiTags('manage/audit')
 @ApiBearerAuth()
 @Controller('manage')
 export class AuditController {

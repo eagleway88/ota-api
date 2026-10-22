@@ -18,6 +18,8 @@
 
 发布流程：准备应用 → 上传文件 → 创建草稿 → 显式 publish → 查询 task/logs。上传不隐式发布。
 
+普通应用消息正文使用 `{ "appName": "应用名", "data": ... }`；订阅查询使用 `?appName=...`。定向消息仍用 `userId` 或 `uniqueId`，`resend` 必须是 JSON 布尔值，不接受字符串。`data` 业务 JSON 键和值类型原样保留。
+
 Swagger：`/api/docs`（全部）、`/api/docs/app`、`/api/docs/manage`、`/api/docs/legacy`。参数、方法和模型以当前 Controller 生成的文档为准。
 
 旧 `/api/admin/*`、`/api/message/*`、`/api/v2/*` 及 `/api/version/*` 中除 check 外的入口不再保留；调用方须随本版更新。详见 [管理员接口](ADMIN_API.md)、[SDK 接入](SDK_INTEGRATION.md)。

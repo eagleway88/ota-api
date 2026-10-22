@@ -16,13 +16,21 @@ export class SendGlobalDto {
   data?: unknown
 }
 
-export class SendOtaNameDto {
+export class SendApplicationDto {
   @IsString()
   @IsNotEmpty()
-  otaName: string
+  @MaxLength(128)
+  appName: string
 
   @Allow()
   data?: unknown
+}
+
+export class MessageSubscriptionsQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  appName?: string
 }
 
 export class SendUserIdDto {

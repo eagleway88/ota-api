@@ -7,6 +7,7 @@
 - `OTA_MIGRATION_TEST_SOCKET=... yarn test:mysql`：真实 MySQL 事务与迁移回归，必须显式提供隔离临时 socket；缺少参数会失败，不会以全部跳过冒充通过。
 - `yarn test --runInBand --watchman=false`：所有套件；没有隔离 socket 时 MySQL 套件明确跳过。
 - `yarn test:verify`：类型检查、只读 lint、构建和全部测试。要覆盖数据库套件，仍需设置隔离 socket。
+- `yarn build` 构建后调用 `test/verify-build.cjs`，核对生产入口存在、测试/夹具/运维 CLI 未混入部署目录。生产构建禁用增量缓存，避免清空 dist 后被旧缓存跳过输出。
 
 单独运行可加过滤条件，例如 `yarn test --runInBand --watchman=false release-draft.mysql`。
 

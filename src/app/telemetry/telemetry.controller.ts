@@ -24,7 +24,7 @@ const validation = new ValidationPipe({
   forbidNonWhitelisted: true
 })
 
-@ApiTags('client-reports')
+@ApiTags('app/telemetry')
 @Controller('app/apps/:appName/telemetry')
 export class TelemetryWriteController {
   constructor(private readonly service: TelemetryWriteService) {}

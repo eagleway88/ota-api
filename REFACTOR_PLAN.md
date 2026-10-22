@@ -28,7 +28,7 @@
 8. 保留现有全局、应用、用户、设备消息，以及在线用户订阅查询。
 9. 保留按应用名称分表，包括版本、白名单和更新上报；既有应用继续使用已确认的实际表名。
 10. 允许重命名语义不清的内部字段和数据库列；旧检查接口字段及其含义由集中适配层保持兼容，其他 API 使用正式字段。
-11. 所有旧协议、旧字段、旧存储格式的兼容代码集中在 `src/compat/legacy/`，方便后续统一移除。
+11. 旧检查协议集中在 `src/compat/legacy/`；历史存储解释和双写单独位于 infrastructure/persistence/legacy，迁移历史只追加，方便分层清理。
 12. 按阶段交付，先修正推送与决策，再升级各应用表结构。
 13. 版本表新发布序号起点至少为 `2000`，同时高于该应用已经发放的最大版本 ID；历史记录不重新编号。
 
@@ -90,38 +90,44 @@ compat/legacy/ 统一兼容模块          正式接口模块
               应用表路由 + MySQL / OSS / Socket.IO
 ```
 
-建议目录结构如下。它是目标结构，不要求第一阶段一次性移动全部文件。
+2026-10-22 目录调整：参照 eagleway-network-api 统一 App/Manage、认证、配置、任务和测试入口。当前结构如下，详细依赖见 [目录边界](docs/ARCHITECTURE.md)：
 
 ```text
 src/
-  applications/              应用登记、表前缀映射、配置
-  releases/                  发布记录、白名单、发布生命周期
-  updates/
-    decision/                不访问数据库的适配与版本选择函数
-    catalog/                 候选版本和白名单的批量加载与缓存
-  realtime/
-    subscriptions/           连接状态、用户与应用订阅索引
-    dispatch/                定向发送、重算、撤销、去重
-  messaging/                 普通全局/应用/用户/设备消息
-  telemetry/                 成功、失败和运行错误上报
-  admin/                     管理员登录、权限、审计
-  artifacts/                 更新包和 OSS 适配
-  contracts/                 正式内部类型与新接口契约
-  compat/
-    legacy/
-      legacy.module.ts       全部兼容能力的单一装配入口
-      http/                  旧 Controller、DTO、响应和异常包装
-      websocket/             旧事件绑定、参数、ACK 和推送序列化
-      mappers/               旧字段、版本编码、列表、数值标志转换
-      persistence/           旧列读写、过渡双写、历史记录归一化
-      auth/                  过渡期管理员密码和 Token 兼容
-      tests/                 旧 SDK、旧接口和旧存储契约测试
+  app.ts                    根模块：数据库、App、Manage、Jobs、旧检查
+  app/                      客户端 API（AppApiModule）：telemetry
+  manage/                   管理员 API（ManageApiModule）
+    auth/                   管理员初始化和登录
+    applications/           应用准备
+    artifacts/              文件上传
+    releases/               草稿、发布、名单、策略
+    statistics/             统计和客户端上报明细
+    tasks/                  发布任务和执行日志
+    audit/                  应用/全局管理审计
+    messages/               普通消息发送、订阅查询
+    common/                 无 Worker 的只读管理装配
+  auth/                     身份、密码、认证服务
+  config/                   环境校验、HTTP、Swagger、TypeORM CLI
+  jobs/                     发布 Worker、保留期清理
+  applications/、releases/   应用和发布领域服务、DTO、写入端口
+  telemetry/、audit/         上报领域及审计写入边界
+  messaging/                最后消息、ACK 与 TTL 存储
+  updates/                  共用查询、catalog 快照和纯 decision
+  realtime/                 Gateway、协议 DTO、连接索引、分发指标
   infrastructure/
-    persistence/             应用表路由、正式分表 Repository
-    tasks/                   持久化任务、重试、任务租约
-    config/                  配置校验
-    observability/           日志、指标、健康检查
-  migrations/                显式结构及数据迁移
+    oss/                    文件校验、OSS 适配及待发布引用
+    persistence/            表路由、事务、读写适配器
+      legacy/               历史存储解释和双写（非旧操作 API）
+    migrations/             数据迁移器、预检、断点账本
+  compat/legacy/            唯一旧 HTTP 检查入口、参数及返回适配
+  migrations/               只追加的数据库迁移历史
+  scripts/                  独立运维 CLI，不进入部署构建
+  contracts/                共用契约和值类型
+  guards/、middleware/       访问检查、异常、请求上下文
+test/
+  *.spec.ts                 全部单元、真实 HTTP、MySQL 集成测试
+  fixtures/                 历史写入夹具，不进入运行时
+  run-mysql.cjs              隔离 socket 校验和数据库测试入口
 ```
 
 设计约束：
@@ -140,11 +146,11 @@ src/
 
 | 兼容职责 | 集中位置 | 对正式业务模块的输出 |
 | --- | --- | --- |
-| 旧检查 HTTP 路径、参数和结果包装 | `compat/legacy/http/` | 正式更新查询与旧检查响应 |
+| 旧检查 HTTP 路径、参数和结果包装 | `compat/legacy/` | 正式更新查询与旧检查响应 |
 | 新版 WebSocket 订阅、消息及 ACK | `realtime/`、`messaging/` | 正式订阅状态、消息命令及推送结果，不承担旧事件兼容义务 |
-| `name/ver/id` 等旧字段和数值标志 | `compat/legacy/mappers/` | 语义明确的应用、基础版本、发布序号与布尔值 |
-| 旧表列、历史多值字段、回滚窗口双写 | `compat/legacy/persistence/` | 正式领域对象；实现相同 Repository 端口 |
-| 旧管理员凭证的过渡读取和校验 | `compat/legacy/auth/` | 正式管理员认证结果 |
+| `name/ver/id` 等旧字段和数值标志 | `compat/legacy/` | 语义明确的应用、基础版本、发布序号与布尔值 |
+| 旧表列、历史多值字段、回滚窗口双写 | `infrastructure/persistence/legacy/` | 正式领域对象；实现相同 Repository 端口 |
+| 历史管理员密码的过渡读取和校验 | `auth/password-hasher.ts` | 正式管理员认证结果 |
 
 普通消息服务、更新决策、发布服务只处理正式类型。同一版本的兼容规则只有一处实现，HTTP 检查、订阅补发和实时推送复用同一转换结果。
 
@@ -379,7 +385,7 @@ resolveUpdate(
 
 明确提供 `baseVersions` 的新热更新发布，应以显式基础版本列表为准。示例：发布 `ver=110, baseVersions=110` 时，不向 `ver=100` 客户端发送；发布 `ver=110, baseVersions=100,110` 时，可以向符合其他条件的 `ver=100` 客户端发送。
 
-历史记录目前采用 `ver 相同 OR baseVersions 包含` 的逻辑。迁移时保留来源信息，由 `compat/legacy/persistence/` 把旧逻辑转换为正式的有效基础版本集合；原始列表仍可供旧出口恢复响应。新发布直接使用明确的基础版本集合。决策模块只处理归一化后的条件，不内置旧字段分支，HTTP 与 WebSocket 也不会各自维护规则。经核对固化历史有效集合后，运行时旧记录转换即可随兼容层移除。
+历史记录目前采用 `ver 相同 OR baseVersions 包含` 的逻辑。迁移时保留来源信息，由 `infrastructure/persistence/legacy/` 把旧逻辑转换为正式的有效基础版本集合；原始列表仍可供旧出口恢复响应。新发布直接使用明确的基础版本集合。决策模块只处理归一化后的条件，不内置旧字段分支，HTTP 与 WebSocket 也不会各自维护规则。经核对固化历史有效集合后，运行时旧记录转换即可随兼容层移除。
 
 旧检查接口继续接受历史合法请求；新管理接口和发布工具使用明确的 `compatibleBaseVersionCodes`。历史包如需补全基础版本，必须依据原发布资料确认，不根据版本数字推测运行时兼容性。
 
@@ -515,32 +521,32 @@ Socket.IO 默认不为断线客户端持久化服务端遗漏消息，应用需�
 
 ## 9. 发布管理接口和接入改造
 
-新增能力使用独立管理接口，并保留现有发布入口：
+正式管理接口统一使用 /api/v1/manage；旧发布入口不保留，只有旧检查继续兼容：
 
 | 方法及路径 | 用途 |
 | --- | --- |
-| `POST /api/v2/apps/:appName/artifacts` | 上传待引用资源，返回文件标识及校验信息 |
-| `POST /api/v2/apps/:appName/releases` | 创建全量或引用资源的热更新草稿，包含发布范围和名单 |
-| `GET /api/v2/apps/:appName/releases` | 查询该应用版本和草稿；分页、状态和总数定义一致 |
-| `GET /api/v2/apps/:appName/releases/:releaseId` | 查询版本或草稿详情 |
-| `PATCH /api/v2/apps/:appName/releases/:releaseId` | 编辑草稿；已发布记录只允许明确列出的描述和展示策略字段 |
-| `GET /api/v2/apps/:appName/releases/:releaseId/users` | 分页读取白名单；草稿读取待发布名单 |
-| `PUT /api/v2/apps/:appName/releases/:releaseId/users` | 原子替换名单，支持策略修订校验 |
-| `PATCH /api/v2/apps/:appName/releases/:releaseId/scope` | 显式切换 public/allowlist |
-| `POST /api/v2/apps/:appName/releases/:releaseId/publish` | 发布已准备好的记录 |
-| `POST /api/v2/apps/:appName/releases/:releaseId/disable` | 停用并生成撤销/重算任务 |
-| `POST /api/v2/apps/:appName/releases/:releaseId/enable` | 重新启用已发布记录并按当前策略重算 |
-| `POST /api/v2/apps/:appName/releases/:releaseId/redispatch` | 按当前规则重推 |
-| `GET /api/v2/apps/:appName/releases/:releaseId/delivery` | 查询任务和发送统计，不伪装成安装统计 |
-| `GET /api/v2/apps/:appName/tasks` | 分页查询该应用发布任务，按状态、版本、时间筛选 |
-| `GET /api/v2/apps/:appName/tasks/:taskId` | 查询任务状态、触发操作及最新执行摘要 |
-| `GET /api/v2/apps/:appName/tasks/:taskId/logs` | 分页查询各次执行、耗时、计数和失败摘要 |
-| `GET /api/v2/apps/:appName/audit-logs` | 查询该应用发布、名单、启停及配置的管理审计 |
-| `GET /api/v2/admin/audit-logs` | 查询管理员与全局配置的管理审计 |
-| `GET /api/v2/apps/:appName/statistics/summary` | 按时间、平台和发布序号查询成功/失败上报次数 |
-| `GET /api/v2/apps/:appName/telemetry/successes` | 分页查询安装成功上报明细 |
-| `GET /api/v2/apps/:appName/telemetry/failures` | 分页查询更新失败上报明细 |
-| `GET /api/v2/apps/:appName/telemetry/app-errors` | 按最后发生时间查询客户端运行错误/崩溃聚合 |
+| `POST /api/v1/manage/apps/:appName/artifacts` | 上传待引用资源，返回文件标识及校验信息 |
+| `POST /api/v1/manage/apps/:appName/releases` | 创建全量或引用资源的热更新草稿，包含发布范围和名单 |
+| `GET /api/v1/manage/apps/:appName/releases` | 查询该应用版本和草稿；分页、状态和总数定义一致 |
+| `GET /api/v1/manage/apps/:appName/releases/:releaseId` | 查询版本或草稿详情 |
+| `PATCH /api/v1/manage/apps/:appName/releases/:releaseId` | 编辑草稿；已发布记录只允许明确列出的描述和展示策略字段 |
+| `GET /api/v1/manage/apps/:appName/releases/:releaseId/users` | 分页读取白名单；草稿读取待发布名单 |
+| `PUT /api/v1/manage/apps/:appName/releases/:releaseId/users` | 原子替换名单，支持策略修订校验 |
+| `PATCH /api/v1/manage/apps/:appName/releases/:releaseId/scope` | 显式切换 public/allowlist |
+| `POST /api/v1/manage/apps/:appName/releases/:releaseId/publish` | 发布已准备好的记录 |
+| `POST /api/v1/manage/apps/:appName/releases/:releaseId/disable` | 停用并生成撤销/重算任务 |
+| `POST /api/v1/manage/apps/:appName/releases/:releaseId/enable` | 重新启用已发布记录并按当前策略重算 |
+| `POST /api/v1/manage/apps/:appName/releases/:releaseId/redispatch` | 按当前规则重推 |
+| `GET /api/v1/manage/apps/:appName/releases/:releaseId/delivery` | 查询任务和发送统计，不伪装成安装统计 |
+| `GET /api/v1/manage/apps/:appName/tasks` | 分页查询该应用发布任务，按状态、版本、时间筛选 |
+| `GET /api/v1/manage/apps/:appName/tasks/:taskId` | 查询任务状态、触发操作及最新执行摘要 |
+| `GET /api/v1/manage/apps/:appName/tasks/:taskId/logs` | 分页查询各次执行、耗时、计数和失败摘要 |
+| `GET /api/v1/manage/apps/:appName/audit-logs` | 查询该应用发布、名单、启停及配置的管理审计 |
+| `GET /api/v1/manage/audit-logs` | 查询管理员与全局配置的管理审计 |
+| `GET /api/v1/manage/apps/:appName/statistics/summary` | 按时间、平台和发布序号查询成功/失败上报次数 |
+| `GET /api/v1/manage/apps/:appName/telemetry/successes` | 分页查询安装成功上报明细 |
+| `GET /api/v1/manage/apps/:appName/telemetry/failures` | 分页查询更新失败上报明细 |
+| `GET /api/v1/manage/apps/:appName/telemetry/app-errors` | 按最后发生时间查询客户端运行错误/崩溃聚合 |
 
 外部管理员查询的认证、分页、90 天时间区间上限和统计含义见 [管理员 API 文档](docs/ADMIN_API.md)；实际目录职责见 [模块边界](docs/ARCHITECTURE.md)。
 
@@ -634,7 +640,7 @@ eagleway-erp → eagleway_erp
 
 版本表保留数值主键 `id`，新增唯一 `release_id`。白名单表使用 `UNIQUE(release_id, user_id)` 和 `INDEX(user_id, release_id)`；使用支持精确字符串比较的排序规则，保证完整 `userId` 与 WebSocket 匹配一致。表长度、字符集和索引大小按生产数据库验证。
 
-正式列按照第 4.4 节调整。兼容期先加列、不删旧列，旧列转换与双写统一在 `compat/legacy/persistence/`。列表字段在正式模型中统一为数组，正式存储可使用经验证的 JSON 列；迁移前明确 `NULL`、空列表、历史通配和基础版本逻辑，保留旧出口需要的原始值。
+正式列按照第 4.4 节调整。兼容期先加列、不删旧列，旧列转换与双写统一在 `infrastructure/persistence/legacy/`。列表字段在正式模型中统一为数组，正式存储可使用经验证的 JSON 列；迁移前明确 `NULL`、空列表、历史通配和基础版本逻辑，保留旧出口需要的原始值。
 
 按每应用的真实查询规划启用状态、类型和版本排序索引；使用实际执行计划确认效果。`release_id` 关系、报告关联、文件引用和发布幂等键都限定在当前应用内，禁止只凭数值 ID 跨应用关联。
 
@@ -826,8 +832,8 @@ pending → running → succeeded
 
 - 管理员是唯一 OTA 账号类型；业务系统通过完整外部 `userId` 对接定向更新。
 - 将现有直接保存、比较的管理员密码迁移为密码散列；不返回密码字段。
-- 管理员首次初始化增加并发保护，避免并发请求创建多个初始化账号。
-- 管理登录按新版认证契约实现；Token 轮换、失效和密码迁移应有部署说明，不要求兼容旧响应。
+- 管理员首次初始化由部署密钥保护并使用数据库命名锁，避免未授权初始化和并发创建。
+- 管理登录使用默认一小时的 JWT + 数据库会话，提供身份查询、注销和注销全部会话；旧 Token 失效，不兼容旧登录响应。追加会话表迁移和旧存储密码登录散列迁移，见 [认证手册](docs/AUTHENTICATION.md)。
 - 保留现有 IP 限制的业务用途，按可信反向代理配置解析来源地址，不能任意信任请求伪造的转发头。
 - 启动时验证数据库、OSS、JWT、端口和上传限制等配置；日志不打印密码、Token 和密钥。
 - 统一新版异常、请求 ID、必要的限流和资源上限；旧检查接口单独保留所需包装。
@@ -966,12 +972,12 @@ P2 的数据扩展要为后续白名单预留安全兼容读取能力。P3 的�
 
 以下链接指向本次核对的本地源码。该方案不把源码行为等同于未经验证的生产行为。
 
-- [当前 OTA 实时广播与订阅](/Users/zhuwenbo/Documents/GitHub/ota-api/src/ws/ws.service.ts)
-- [当前 OTA 版本查询](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/http/version/ota-version-query.service.ts)
-- [旧检查更新适配](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/http/version/version-check.service.ts)
-- [统计写入事务与集中双写](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/persistence/dual-write-telemetry.repository.ts)
+- [当前 OTA 实时广播与订阅](/Users/zhuwenbo/Documents/GitHub/ota-api/src/realtime/gateway/realtime.gateway.ts)
+- [当前 OTA 版本查询](/Users/zhuwenbo/Documents/GitHub/ota-api/src/updates/update-query.service.ts)
+- [旧检查更新适配](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/update-check.service.ts)
+- [统计写入事务与集中双写](/Users/zhuwenbo/Documents/GitHub/ota-api/src/infrastructure/persistence/legacy/dual-write-telemetry.repository.ts)
 - [当前动态表与版本编码](/Users/zhuwenbo/Documents/GitHub/ota-api/src/utils/version.ts)
-- [当前普通消息与 TTL 入口](/Users/zhuwenbo/Documents/GitHub/ota-api/src/compat/legacy/http/message/message.service.ts)
+- [当前普通消息与 TTL 入口](/Users/zhuwenbo/Documents/GitHub/ota-api/src/manage/messages/messages.service.ts)
 - [当前最后一条消息与 ACK 存储](/Users/zhuwenbo/Documents/GitHub/ota-api/src/messaging/last-message.service.ts)
 - [业务后端 OTA 适配器](/Users/zhuwenbo/Documents/Eagleway/eagleway-network-api/src/infrastructure/ota/ota.adapter.ts)
 - [业务后端发布服务](/Users/zhuwenbo/Documents/Eagleway/eagleway-network-api/src/manage/ota/ota.service.ts)

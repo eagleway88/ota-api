@@ -18,7 +18,7 @@
 
 ## 2. 全局迁移与确认映射
 
-1. 使用受控写凭证执行 `yarn typeorm:run`，包含新增的 `ApplicationDataMigration1792445100000`，建立 `ota_application_migrations` 和默认值为 `compatible` 的 `ota_applications.read_model`。
+1. 使用受控写凭证执行 `yarn typeorm:run`，包含 `ApplicationDataMigration1792445100000`（迁移账本及 `read_model`）和新增 `AdministratorSessions1792445200000`（会话表）。必须在新版认证启动前完成；旧账号保留，旧 Token 需重新登录，见 [认证迁移](AUTHENTICATION.md)。
 2. 对历史应用先确认登记中的 `table_prefix` 与物理表完全一致。未登记时，先只读预演检查原表，再由 DBA 在受控变更中录入确认后的唯一映射，初始 `schema_version=0/status=preparing`；**目前没有自动映射导入工具**。已有映射不一致时停止，不能直接覆盖为新前缀。
 3. 用当前版本调用 `POST /api/v1/manage/apps/:appName/prepare`，创建辅助表及准备列。已就绪应用不重复 DDL，也不降级 schema version；已有未完成迁移时拒绝 prepare，要求续跑 CLI。首次准备会填充版本 UUID/默认范围/策略修订，但不再批量改写历史上报计数、时间或正式上报字段。
 4. 保持该应用写入口关闭，执行下列预演与回填。历史版本表不存在、表引擎不是 InnoDB、应用混表或映射冲突时，工具拒绝实际迁移。

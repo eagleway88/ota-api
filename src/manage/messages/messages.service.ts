@@ -3,7 +3,7 @@ import { apiUtil } from '@/utils/api'
 import { RealtimeGateway } from '@/realtime/gateway/realtime.gateway'
 import {
   SendGlobalDto,
-  SendOtaNameDto,
+  SendApplicationDto,
   TargetedMessageEnvelope
 } from '@/manage/messages/messages.dto'
 import { SendUserIdDto, SendUniqueIdDto } from '@/manage/messages/messages.dto'
@@ -58,15 +58,15 @@ export class MessageService {
     return apiUtil.data(await this.wsService.getSubscribedUserIds(name))
   }
 
-  async sendOtaName(req: Request, body: SendOtaNameDto) {
+  async sendApplication(req: Request, body: SendApplicationDto) {
     if (!this.checkPermission(req)) {
       return apiUtil.error('Permission denied')
     }
     const bool = await this.wsService.sendApplicationMessage(
-      body.otaName,
+      body.appName,
       body.data
     )
-    return bool ? apiUtil.data(body.otaName) : apiUtil.error('Send failed')
+    return bool ? apiUtil.data(body.appName) : apiUtil.error('Send failed')
   }
 
   async sendUserId(req: Request, body: SendUserIdDto) {

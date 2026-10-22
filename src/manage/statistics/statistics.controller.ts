@@ -12,7 +12,7 @@ const queryValidation = new ValidationPipe({
   forbidNonWhitelisted: true
 })
 
-@ApiTags('telemetry')
+@ApiTags('manage/statistics')
 @ApiBearerAuth()
 @Controller('manage/apps/:appName')
 export class TelemetryController {

@@ -46,6 +46,8 @@ test/
 
 `config/http.ts` 同时用于运行时与 HTTP 测试，统一前缀、版本、请求 ID、严格 DTO 校验和异常处理。旧检查单独使用宽松旧校验。Swagger 分为 `/api/docs`、`/api/docs/app`、`/api/docs/manage`、`/api/docs/legacy`。
 
+Swagger 管理分组显式扫描只读管理聚合，避免库的单层嵌套扫描漏掉统计、审计及任务日志。装配测试核对全量接口恰好分入 App/Manage/Legacy 三组。构建禁用增量缓存，输出入口及非运行时文件排除由 `test/verify-build.cjs` 自动验证。
+
 `AppApiModule` 装配公开上报，`ManageApiModule` 装配管理员操作和查询。`AdministrationModule` 可独立装配认证与只读查询，不启动推送 Worker。`JobsModule` 集中装配任务和保留期服务。上传、应用准备、发布各有独立 Controller；核心 `ReleasesModule`、`TelemetryWritesModule` 不注册 HTTP Controller。Realtime ACK DTO 不依赖管理 HTTP 层。
 
 ## 数据与事务

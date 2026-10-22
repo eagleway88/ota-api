@@ -49,6 +49,6 @@
 
 ## 普通应用消息与 OTA 重推
 
-`POST /api/v1/manage/messages/applications` 只发送普通应用消息，正文暂用 `otaName` 指定应用。服务端不会根据任意 `data.id` 猜测它是版本记录。调用方不得通过该路径直接广播原始 OTA 版本数据。
+`POST /api/v1/manage/messages/applications` 只发送普通应用消息，正文为 `{ "appName": "应用名", "data": ... }`，不再接受 `otaName`。在线订阅查询为 `GET /api/v1/manage/messages/user-id-subscriptions?appName=应用名`。服务端不会根据任意 `data.id` 猜测它是版本记录，调用方不得直接广播原始 OTA 版本数据。
 
 需要重新发送已发布版本时，调用 `POST /api/v1/manage/apps/:appName/releases/:releaseId/redispatch`。服务端重新读取真实版本、当前发布范围和白名单，通过统一决策后向符合条件的连接发送完整适用版本。

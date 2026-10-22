@@ -10,7 +10,7 @@ const validation = new ValidationPipe({
   forbidNonWhitelisted: true
 })
 
-@ApiTags('publish-tasks')
+@ApiTags('manage/tasks')
 @ApiBearerAuth()
 @Controller('manage/apps/:appName')
 export class TaskQueryController {

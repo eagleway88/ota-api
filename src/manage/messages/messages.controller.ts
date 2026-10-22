@@ -10,12 +10,16 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { ApiResult } from '@/decorators'
 import { MessageService } from '@/manage/messages/messages.service'
-import { SendGlobalDto, SendOtaNameDto } from '@/manage/messages/messages.dto'
+import {
+  MessageSubscriptionsQueryDto,
+  SendGlobalDto,
+  SendApplicationDto
+} from '@/manage/messages/messages.dto'
 import { SendUserIdDto, SendUniqueIdDto } from '@/manage/messages/messages.dto'
 import { SendUserIdRes, SendUniqueIdRes } from '@/manage/messages/messages.dto'
 import type { Request } from 'express'
 
-@ApiTags('message')
+@ApiTags('manage/messages')
 @ApiBearerAuth()
 @Controller('manage/messages')
 export class MessageController {
@@ -23,10 +27,13 @@ export class MessageController {
 
   @Get('user-id-subscriptions')
   @ApiOperation({ summary: '获取所有userId订阅' })
-  @ApiQuery({ name: 'name', required: false, type: String })
+  @ApiQuery({ name: 'appName', required: false, type: String })
   @ApiResult({ type: [String], status: HttpStatus.OK })
-  listSubscribedUserIds(@Req() req: Request, @Query('name') name?: string) {
-    return this.service.listSubscribedUserIds(req, name)
+  listSubscribedUserIds(
+    @Req() req: Request,
+    @Query() query: MessageSubscriptionsQueryDto
+  ) {
+    return this.service.listSubscribedUserIds(req, query.appName)
   }
 
   @Post('global')
@@ -39,8 +46,8 @@ export class MessageController {
   @Post('applications')
   @ApiOperation({ summary: '发送普通应用消息' })
   @ApiResult({ type: String })
-  sendOtaName(@Req() req: Request, @Body() body: SendOtaNameDto) {
-    return this.service.sendOtaName(req, body)
+  sendApplication(@Req() req: Request, @Body() body: SendApplicationDto) {
+    return this.service.sendApplication(req, body)
   }
 
   @Post('users')
