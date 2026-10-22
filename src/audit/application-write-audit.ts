@@ -20,6 +20,8 @@ export type ApplicationWriteAudit = {
     | 'disable'
     | 'audience_changed'
     | 'draft_audience_changed'
+    | 'draft_created'
+    | 'draft_updated'
     | 'redispatch'
   targetType: 'release' | 'release_draft'
   changeSummary?: {

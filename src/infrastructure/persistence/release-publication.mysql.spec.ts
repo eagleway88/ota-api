@@ -252,7 +252,9 @@ mysql('publication transactions on isolated MySQL', () => {
       await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
     ).toHaveLength(1)
     expect(
-      await query(`SELECT audit_id FROM \`${application.tables.auditLog}\``)
+      await query(
+        `SELECT audit_id FROM \`${application.tables.auditLog}\` WHERE action = 'publish'`
+      )
     ).toHaveLength(1)
   })
 
@@ -373,7 +375,7 @@ mysql('publication transactions on isolated MySQL', () => {
     )
   const auditRows = () =>
     query(
-      `SELECT * FROM \`${application.tables.auditLog}\` ORDER BY created_at, audit_id`
+      `SELECT * FROM \`${application.tables.auditLog}\` WHERE action NOT IN ('draft_created', 'draft_updated') ORDER BY created_at, audit_id`
     )
 
   it.each(['legacy', 'v2'] as const)(

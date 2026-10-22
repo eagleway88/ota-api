@@ -5,7 +5,7 @@ import {
   NotFoundException
 } from '@nestjs/common'
 import { InjectDataSource } from '@nestjs/typeorm'
-import { createHash, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import { DataSource, QueryRunner } from 'typeorm'
 import { apiUtil } from '@/utils/api'
 import { ReleaseScopeType, UpdateType } from '@/contracts/release-values'
@@ -16,10 +16,14 @@ import { mapStoredReleaseRecord } from './release-record.mapper'
 import { ReleaseOperationContext } from '@/contracts/release-operation'
 import { ReleaseCatalogListQueryDto } from './release-management.dto'
 import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service'
-import { withAuditedApplicationWrite } from '@/audit/application-write-audit'
+import {
+  ApplicationWriteAudit,
+  withAuditedApplicationWrite
+} from '@/audit/application-write-audit'
 import { ReleaseWriteRepository } from './ports/release-write.repository'
 import { planAudienceChange } from '@/audit/audience-change'
 import { insertReleaseSuccessAudit } from '@/audit/release-success-audit'
+import { draftChangedFields, sameDraftContent } from './draft-audit'
 import {
   CreateReleaseDraftDto,
   UpdateReleaseDraftDto
@@ -59,83 +63,83 @@ export class ReleaseDraftService {
     idempotencyKey: string | undefined,
     context: ReleaseOperationContext
   ) {
-    if (idempotencyKey && idempotencyKey.length > 191) {
-      throw new BadRequestException('Idempotency key is too long')
-    }
     const application = await this.applications.prepare(appName, context)
-    const normalized = this.normalizeDraft(appName, body)
-    const serializedPayload = JSON.stringify(normalized)
-    const queryRunner = this.dataSource.createQueryRunner()
-    await queryRunner.connect()
-    const lockName = idempotencyKey
-      ? `ota_draft_${createHash('sha256')
-          .update(`${appName}:${idempotencyKey}`)
-          .digest('hex')
-          .slice(0, 48)}`
-      : undefined
-    let lockAcquired = false
-    try {
-      if (lockName) {
-        const lockRows = (await queryRunner.query(
-          'SELECT GET_LOCK(?, 10) AS acquired',
-          [lockName]
-        )) as Array<{ acquired: number | string }>
-        lockAcquired = Number(lockRows[0]?.acquired) === 1
-        if (!lockAcquired) {
-          throw new ConflictException('Draft idempotency key is busy')
-        }
-      }
-      if (idempotencyKey) {
-        const existing = await queryRunner.manager
-          .createQueryBuilder()
-          .select('*')
-          .from(application.tables.releaseDraft, 'draft')
-          .where('draft.idempotency_key = :idempotencyKey', { idempotencyKey })
-          .getRawOne<StoredDraft>()
-        if (existing) {
-          if (
-            JSON.stringify(this.parseJson(existing.payload)) !==
-            serializedPayload
-          ) {
-            throw new ConflictException(
-              'Idempotency key was already used with different content'
-            )
-          }
-          return apiUtil.data(this.toDraft(existing))
-        }
-      }
-
-      const releaseId = randomUUID()
-      const now = new Date()
-      await queryRunner.manager
-        .createQueryBuilder()
-        .insert()
-        .into(application.tables.releaseDraft)
-        .values({
-          release_id: releaseId,
-          payload: serializedPayload,
-          release_scope: normalized.releaseScope,
-          user_ids: JSON.stringify(normalized.userIds),
-          status: 'draft',
-          idempotency_key: idempotencyKey,
-          created_at: now,
-          updated_at: now
-        })
-        .execute()
-      return apiUtil.data({
-        releaseId,
-        ...normalized,
-        status: 'draft',
-        releaseSequence: null,
-        createdAt: now,
-        updatedAt: now
-      })
-    } finally {
-      if (lockAcquired && lockName) {
-        await queryRunner.query('SELECT RELEASE_LOCK(?)', [lockName])
-      }
-      await queryRunner.release()
+    const audit: ApplicationWriteAudit = {
+      operationId: randomUUID(),
+      context,
+      releaseId: randomUUID(),
+      action: 'draft_created',
+      targetType: 'release_draft'
     }
+    return withAuditedApplicationWrite(
+      this.dataSource,
+      application,
+      audit,
+      async queryRunner => {
+        if (idempotencyKey && idempotencyKey.length > 191) {
+          throw new BadRequestException('Idempotency key is too long')
+        }
+        const normalized = this.normalizeDraft(appName, body)
+        const serializedPayload = JSON.stringify(normalized)
+        if (idempotencyKey) {
+          const existing = await queryRunner.manager
+            .createQueryBuilder()
+            .select('*')
+            .from(application.tables.releaseDraft, 'draft')
+            .where('draft.idempotency_key = :idempotencyKey', {
+              idempotencyKey
+            })
+            .setLock('pessimistic_write')
+            .getRawOne<StoredDraft>()
+          if (existing) {
+            audit.releaseId = existing.release_id
+            if (
+              !sameDraftContent(this.parseJson(existing.payload), normalized)
+            ) {
+              throw new ConflictException(
+                'Idempotency key was already used with different content'
+              )
+            }
+            return apiUtil.data(this.toDraft(existing))
+          }
+        }
+        const releaseId = audit.releaseId
+        const audience = planAudienceChange(
+          { scope: null, userIds: [] },
+          { scope: normalized.releaseScope, userIds: normalized.userIds }
+        )
+        const now = new Date()
+        await queryRunner.manager
+          .createQueryBuilder()
+          .insert()
+          .into(application.tables.releaseDraft)
+          .values({
+            release_id: releaseId,
+            payload: serializedPayload,
+            release_scope: normalized.releaseScope,
+            user_ids: JSON.stringify(normalized.userIds),
+            status: 'draft',
+            idempotency_key: idempotencyKey,
+            created_at: now,
+            updated_at: now
+          })
+          .execute()
+        await insertReleaseSuccessAudit(queryRunner, application, {
+          ...audit,
+          changeSummary: { changedFields: draftChangedFields({}, normalized) },
+          audience,
+          now
+        })
+        return apiUtil.data({
+          releaseId,
+          ...normalized,
+          status: 'draft',
+          releaseSequence: null,
+          createdAt: now,
+          updatedAt: now
+        })
+      }
+    )
   }
 
   async list(appName: string, query: ReleaseCatalogListQueryDto) {
@@ -253,45 +257,70 @@ export class ReleaseDraftService {
     context: ReleaseOperationContext
   ) {
     const application = await this.applications.prepare(appName, context)
-    const queryRunner = this.dataSource.createQueryRunner()
-    await queryRunner.connect()
-    await queryRunner.startTransaction()
-    try {
-      const draft = await this.lockDraft(queryRunner, application, releaseId)
-      if (draft.status !== 'draft') {
-        throw new ConflictException(
-          'Published releases cannot be edited as drafts'
-        )
-      }
-      const current = this.parseDraftPayload(draft.payload)
-      const normalized = this.normalizeDraft(appName, { ...current, ...body })
-      const now = new Date()
-      await queryRunner.manager
-        .createQueryBuilder()
-        .update(application.tables.releaseDraft)
-        .set({
-          payload: JSON.stringify(normalized),
-          release_scope: normalized.releaseScope,
-          user_ids: JSON.stringify(normalized.userIds),
-          updated_at: now
-        })
-        .where('release_id = :releaseId', { releaseId })
-        .execute()
-      await queryRunner.commitTransaction()
-      return apiUtil.data({
-        releaseId,
-        ...normalized,
-        status: 'draft',
-        releaseSequence: null,
-        createdAt: draft.created_at,
-        updatedAt: now
-      })
-    } catch (error) {
-      await queryRunner.rollbackTransaction()
-      throw error
-    } finally {
-      await queryRunner.release()
+    const audit: ApplicationWriteAudit = {
+      operationId: randomUUID(),
+      context,
+      releaseId,
+      action: 'draft_updated',
+      targetType: 'release_draft'
     }
+    return withAuditedApplicationWrite(
+      this.dataSource,
+      application,
+      audit,
+      async queryRunner => {
+        const draft = await this.lockDraft(queryRunner, application, releaseId)
+        if (draft.status !== 'draft') {
+          throw new ConflictException(
+            'Published releases cannot be edited as drafts'
+          )
+        }
+        const current = this.parseDraftPayload(draft.payload)
+        const currentUserIds = this.parseStoredUserIds(draft.user_ids)
+        if (
+          draft.release_scope !== String(current.releaseScope) ||
+          !sameDraftContent(currentUserIds, current.userIds)
+        ) {
+          throw new ConflictException('Stored draft audience columns disagree')
+        }
+        const normalized = this.normalizeDraft(appName, { ...current, ...body })
+        const audience = planAudienceChange(
+          {
+            scope: current.releaseScope,
+            userIds: currentUserIds
+          },
+          { scope: normalized.releaseScope, userIds: normalized.userIds }
+        )
+        const now = new Date()
+        await queryRunner.manager
+          .createQueryBuilder()
+          .update(application.tables.releaseDraft)
+          .set({
+            payload: JSON.stringify(normalized),
+            release_scope: normalized.releaseScope,
+            user_ids: JSON.stringify(normalized.userIds),
+            updated_at: now
+          })
+          .where('release_id = :releaseId', { releaseId })
+          .execute()
+        await insertReleaseSuccessAudit(queryRunner, application, {
+          ...audit,
+          changeSummary: {
+            changedFields: draftChangedFields(current, normalized)
+          },
+          audience,
+          now
+        })
+        return apiUtil.data({
+          releaseId,
+          ...normalized,
+          status: 'draft',
+          releaseSequence: null,
+          createdAt: draft.created_at,
+          updatedAt: now
+        })
+      }
+    )
   }
 
   async detail(appName: string, releaseId: string) {
@@ -479,12 +508,17 @@ export class ReleaseDraftService {
     const compatibleBaseVersionCodes = Array.from(
       new Set(body.compatibleBaseVersionCodes)
     )
-    const audience = normalizeReleaseAudience({
-      appName,
-      platforms: platforms.join(','),
-      releaseScope: body.releaseScope,
-      userIds: body.userIds
-    })
+    let audience: ReturnType<typeof normalizeReleaseAudience>
+    try {
+      audience = normalizeReleaseAudience({
+        appName,
+        platforms: platforms.join(','),
+        releaseScope: body.releaseScope,
+        userIds: body.userIds
+      })
+    } catch {
+      throw new BadRequestException('Release audience is invalid')
+    }
     if (
       body.updateType === UpdateType.Hot &&
       !compatibleBaseVersionCodes.length
@@ -597,6 +631,17 @@ export class ReleaseDraftService {
       throw new Error('Stored release draft payload is invalid')
     }
     return parsed as unknown as CreateReleaseDraftDto
+  }
+
+  private parseStoredUserIds(value: unknown): string[] {
+    const parsed = this.parseJson(value)
+    if (
+      !Array.isArray(parsed) ||
+      !parsed.every((id: unknown) => typeof id === 'string')
+    ) {
+      throw new ConflictException('Stored draft audience is invalid')
+    }
+    return parsed
   }
 
   private parseJson(value: unknown): unknown {
