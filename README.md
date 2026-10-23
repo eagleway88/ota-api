@@ -18,7 +18,7 @@ db:init 初始化全局表；key create --prepare-apps 准备应用分表并签�
 
 ## 功能
 
-- 按应用授权 API Key，一个 Key 可显式授权多个应用，提供 publisher / observer / messenger / full 权限预设。
+- 按应用授权 API Key，一个 Key 可显式授权多个应用，提供 publisher / observer / messenger / full 权限预设；CLI 可追加/移除应用授权，无需更换 Key。
 - 上传 ZIP、创建与编辑草稿、显式发布、定向名单、启停、重新分发。
 - 公开更新检查、安装结果上报与应用错误聚合；外部后台可查询统计、任务执行记录及审计。
 - 按平台、架构、渠道、原生基础版本和名单判断更新；HTTP 检查与 Socket 分发使用同一决策逻辑。

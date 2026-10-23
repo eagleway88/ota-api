@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto'
 import { userInfo } from 'os'
 import { DataSource } from 'typeorm'
 import { ApiKeyManagementService } from '@/auth/api-key-management.service'
+import { MAX_API_KEY_APPLICATIONS } from '@/auth/api-key.policy'
 import { parseOtaArguments, otaHelp } from './ota-options'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
@@ -88,15 +89,17 @@ async function main() {
       source,
       new ApplicationTableResolver()
     )
+    const prepareRequestedApplications = async () => {
+      if (!options.prepareApplications) return
+      for (const app of options.applications!) {
+        await applications.prepare(app, context)
+        process.stderr.write(`Application prepared: ${app}\n`)
+      }
+    }
     let result: unknown
     switch (options.command) {
       case 'key:create':
-        if (options.prepareApplications) {
-          for (const app of options.applications!) {
-            await applications.prepare(app, context)
-            process.stderr.write(`Application prepared: ${app}\n`)
-          }
-        }
+        await prepareRequestedApplications()
         result = await keys.create(
           {
             name: options.name!,
@@ -115,6 +118,37 @@ async function main() {
         break
       case 'key:revoke':
         result = await keys.revoke(options.keyId!, context)
+        break
+      case 'key:grant': {
+        // Reject invalid targets/oversized grants before independent application DDL.
+        if (options.prepareApplications) {
+          const key = await keys.inspect(options.keyId!)
+          if (key.status !== 'active')
+            throw new Error(
+              'Cannot change applications for a revoked or expired key'
+            )
+          if (
+            new Set([...key.applications, ...options.applications!]).size >
+            MAX_API_KEY_APPLICATIONS
+          )
+            throw new Error(
+              `A key can have at most ${MAX_API_KEY_APPLICATIONS} application grants`
+            )
+        }
+        await prepareRequestedApplications()
+        result = await keys.grantApplications(
+          options.keyId!,
+          options.applications!,
+          context
+        )
+        break
+      }
+      case 'key:ungrant':
+        result = await keys.ungrantApplications(
+          options.keyId!,
+          options.applications!,
+          context
+        )
         break
       case 'app:prepare':
         result = await applications.prepare(options.app!, context)

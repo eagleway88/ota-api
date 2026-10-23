@@ -1,7 +1,8 @@
 import {
   isApiKeyPreset,
   ApiKeyPreset,
-  validApiKeyName
+  validApiKeyName,
+  MAX_API_KEY_APPLICATIONS
 } from '@/auth/api-key.policy'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
 import { keyIdPattern } from '@/auth/api-key.service'
@@ -13,6 +14,8 @@ export type OtaCommand = {
     | 'key:list'
     | 'key:inspect'
     | 'key:revoke'
+    | 'key:grant'
+    | 'key:ungrant'
     | 'app:prepare'
     | 'audit:list'
   envFile: string
@@ -40,6 +43,8 @@ export function parseOtaArguments(args: string[]): OtaCommand {
     'key:list': ['app'],
     'key:inspect': ['id'],
     'key:revoke': ['id'],
+    'key:grant': ['id', 'apps', 'prepare-apps'],
+    'key:ungrant': ['id', 'apps'],
     'app:prepare': ['app'],
     'audit:list': []
   }
@@ -67,18 +72,36 @@ export function parseOtaArguments(args: string[]): OtaCommand {
     return v
   }
   const database = get('database')
-  if (['db:init', 'key:create', 'key:revoke', 'app:prepare'].includes(command))
+  if (
+    [
+      'db:init',
+      'key:create',
+      'key:revoke',
+      'key:grant',
+      'key:ungrant',
+      'app:prepare'
+    ].includes(command)
+  )
     required('database')
   const result: OtaCommand = {
     command,
     envFile: get('env-file') ?? '.env',
     database
   }
-  if (command === 'key:create') {
+  if (['key:create', 'key:grant', 'key:ungrant'].includes(command)) {
     const apps = required('apps').split(',')
-    if (apps.length > 100 || new Set(apps).size !== apps.length)
-      throw new Error('Grant 1–100 distinct application names')
+    if (
+      apps.length > MAX_API_KEY_APPLICATIONS ||
+      new Set(apps).size !== apps.length
+    )
+      throw new Error(
+        `Grant 1–${MAX_API_KEY_APPLICATIONS} distinct application names`
+      )
     for (const app of apps) new ApplicationTableResolver().validateAppName(app)
+    result.applications = apps
+    result.prepareApplications = values.has('prepare-apps')
+  }
+  if (command === 'key:create') {
     const preset = required('preset')
     if (!isApiKeyPreset(preset))
       throw new Error('Preset must be publisher, observer, messenger or full')
@@ -97,11 +120,9 @@ export function parseOtaArguments(args: string[]): OtaCommand {
     )
       throw new Error('Expiry must be a future UTC ISO timestamp')
     Object.assign(result, {
-      applications: apps,
       name,
       preset,
-      expiresAt: expiry ? new Date(expiry) : null,
-      prepareApplications: values.has('prepare-apps')
+      expiresAt: expiry ? new Date(expiry) : null
     })
   }
   if (values.has('app')) {
@@ -109,7 +130,9 @@ export function parseOtaArguments(args: string[]): OtaCommand {
     new ApplicationTableResolver().validateAppName(result.app!)
   }
   if (command === 'app:prepare') required('app')
-  if (command === 'key:inspect' || command === 'key:revoke') {
+  if (
+    ['key:inspect', 'key:revoke', 'key:grant', 'key:ungrant'].includes(command)
+  ) {
     result.keyId = required('id')
     if (!keyIdPattern.test(result.keyId)) throw new Error('Invalid key ID')
   }
@@ -122,9 +145,13 @@ key create --apps app-a,app-b --name LABEL --preset publisher|observer|messenger
 key list [--app APP]
 key inspect --id KEY_ID
 key revoke --id KEY_ID --database CONFIRMED_DATABASE
+key grant --id KEY_ID --apps app-c,app-d [--prepare-apps] --database CONFIRMED_DATABASE
+key ungrant --id KEY_ID --apps app-b --database CONFIRMED_DATABASE
 app prepare --app APP --database CONFIRMED_DATABASE
 audit list
 All commands accept --env-file PATH (default .env). Mutations require a matching --database.
 Only key create displays accessKey, once. Never place it in arguments or logs.
 full covers explicitly granted applications, not wildcard access or platform administration.
+grant/ungrant update application scope without rotating the key (max 100 total grants).
+ungrant does not delete applications or data; a key with no grants cannot access any application.
 Initialize a fresh database first. No HTTP, OSS or background workers are started.`

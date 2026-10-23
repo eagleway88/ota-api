@@ -8,7 +8,7 @@
 - yarn test --runInBand --watchman=false：全部套件；无隔离 socket 时数据库套件明确跳过，不能当作完整通过。
 - yarn test:verify：类型、lint、构建和全部测试；数据库覆盖仍需传入测试 socket。
 
-集成测试覆盖空库初始化/应用准备后重复初始化（保留应用与 Key）、规范列、Key 多应用/预设/过期撤销、CLI 真实子进程、HTTP 认证、发布提交顺序和幂等、审计回滚、任务接管/checkpoint、错误聚合、JSON 类型、消息隔离/ACK/TTL。
+集成测试覆盖空库初始化/应用准备后重复初始化（保留应用与 Key）、规范列、Key 多应用/预设/过期撤销、授权追加/移除/空授权、并发修改及授权总数上限、CLI 真实子进程、HTTP 即时授权校验、发布提交顺序和幂等、审计回滚、任务接管/checkpoint、错误聚合、JSON 类型、消息隔离/ACK/TTL。
 
 ## 隔离 MySQL
 

@@ -32,6 +32,8 @@ yarn ota key create --apps app-a,app-b --name "dashboard" --preset observer --no
 
 明文 Key 只在创建成功时输出一次，分别安全交付给调用方。full 只覆盖显式授权应用，不具有平台运维权限。使用独立运维账号执行 DDL，运行账号仅授予业务所需权限。
 
+新增应用后，可用 yarn ota key grant --id KEY_UUID --apps app-c --prepare-apps --database ota 追加给已有 Key，无需更换调用方凭证。移除应用授权用 key ungrant，撤销整个 Key 用 key revoke。详见 [授权管理](AUTHENTICATION.md#调整已有-key-的应用授权)。
+
 ## 3. 验证与启动
 
 ~~~bash
@@ -49,7 +51,7 @@ yarn start:prod
 
 - 上传 → 草稿 → 显式发布 → HTTP 检查 → Socket 更新 → 实际安装报告。
 - 平台/架构/渠道/基础版本和 public/allowlist 过滤。
-- observer/full 查询自己的统计、任务和审计；跨应用拒绝；撤销 Key 立即影响后续认证。
+- observer/full 查询自己的统计、任务和审计；跨应用拒绝；追加/移除授权及撤销 Key 立即影响后续请求。
 - 待确认消息跨应用隔离、断线补发、TTL 及 ACK。
 - 真实 OSS、下载源、客户端、CI 与第三方后台联调。
 - 目标规模下的连接/重连、连续发布、进程恢复、任务积压、磁盘与查询容量。

@@ -40,7 +40,28 @@ yarn ota key revoke --id KEY_UUID --database ota_new
 yarn ota audit list
 ~~~
 
-永久 Key 用 --no-expiry；临时 Key 改用 --expires-at 未来的UTC时间，例如 2030-01-01T00:00:00Z，两者必须择一。当前不在线修改授权/预设，变更时创建替代 Key、更新调用方并验证，再撤销被替换的 Key。
+永久 Key 用 --no-expiry；临时 Key 改用 --expires-at 未来的UTC时间，例如 2030-01-01T00:00:00Z，两者必须择一。修改权限预设或有效期时，创建替代 Key、更新调用方并验证，再撤销被替换的 Key。
+
+## 调整已有 Key 的应用授权
+
+无需更换 Key 或让调用方更新凭证。例如已有 Key 授权 ota_a、ota_b，后续添加 ota_c：
+
+~~~bash
+# 准备新应用并追加到现有 Key；KEY_UUID 来自创建输出或 key list
+yarn ota key grant --id KEY_UUID --apps ota_c --prepare-apps --database ota
+# 已准备好的应用不需要 --prepare-apps；一次可追加多个
+yarn ota key grant --id KEY_UUID --apps ota_d,ota_e --database ota
+# 仅移除该 Key 对 ota_b 的授权，不删除应用、分表、数据或其它 Key 的授权
+yarn ota key ungrant --id KEY_UUID --apps ota_b --database ota
+~~~
+
+grant 是追加，不是替换；ungrant 是移除指定应用。原 accessKey、权限预设、有效期保持不变。单次显式指定 1–100 个不同应用；单个 Key 最多同时授权 100 个应用，大小写精确匹配，不支持通配符。新增应用仍不会自动授权，即使预设是 full。
+
+命令只输出 keyId、变更后的 applications、addedApplications 和 removedApplications，不输出明文或散列。重复追加已有授权、移除不存在的授权均无副作用，也不重复写成功审计；已撤销、已到期或不存在的 Key 不可调整授权。key revoke 仍表示撤销整个凭证。
+
+可以移除全部应用：Key 本身仍有效，但所有应用级请求返回 403；后续可用 grant 恢复指定应用的访问。应用授权变更在事务提交后的后续请求生效，无需重启，不取消已在处理的请求。
+
+授权增删与包含变更前后列表的全局审计同事务，失败时回滚，并发调整同一个 Key 不覆盖彼此。--prepare-apps 仅用于 grant；不带它时，所有追加应用必须已登记且结构准备完成。准备应用属于独立 DDL 操作：命令会先检查 Key 状态和授权总数，但如果准备后授权或审计失败（含并发撤销），已准备的应用表仍保留，可排查后重试。此功能不需要修改数据库结构，也不提供 HTTP 授权管理接口。
 
 ## 校验与审计
 

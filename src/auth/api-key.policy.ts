@@ -17,6 +17,7 @@ export const apiKeyPresets = {
   full: apiPermissions
 } as const satisfies Record<string, readonly ApiPermission[]>
 export type ApiKeyPreset = keyof typeof apiKeyPresets
+export const MAX_API_KEY_APPLICATIONS = 100
 export const API_PERMISSION = 'ota:apiPermission'
 export const RequirePermission = (permission: ApiPermission) =>
   SetMetadata(API_PERMISSION, permission)

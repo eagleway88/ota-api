@@ -11,7 +11,7 @@ yarn db:init --database ota
 yarn ota app prepare --app app-a --database ota
 ~~~
 
---database 是目标确认，必须与配置一致，不负责创建或切换数据库。所有 CLI 支持 --env-file PATH。key create --prepare-apps 可以在签发时准备应用表。
+--database 是目标确认，必须与配置一致，不负责创建或切换数据库。所有 CLI 支持 --env-file PATH。key create / key grant --prepare-apps 可以在签发或追加授权时准备应用表。
 
 db:init 使用 TypeORM 结构版本记录与 CREATE TABLE IF NOT EXISTS；重复运行不重置业务数据。MySQL DDL 不是整套原子回滚，中断后核对执行结果再重试。down 不自动删除数据库。
 
@@ -21,7 +21,7 @@ db:init 使用 TypeORM 结构版本记录与 CREATE TABLE IF NOT EXISTS；重复
 | --- | --- |
 | ota_applications | 应用名、表前缀、结构状态、目录修订 |
 | ota_api_keys | 凭证元数据、secret 散列、到期与撤销状态 |
-| ota_api_key_applications | Key 与显式授权应用 |
+| ota_api_key_applications | Key 与显式授权应用，可通过 CLI grant / ungrant 调整 |
 | ota_audit_log | CLI 运维审计 |
 | ota_messages | 按应用/目标类型/目标 ID 隔离的待确认消息 |
 | ota_schema_history | 结构初始化执行记录 |

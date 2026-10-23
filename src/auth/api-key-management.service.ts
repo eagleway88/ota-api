@@ -1,6 +1,11 @@
 import { DataSource } from 'typeorm'
 import { randomUUID } from 'crypto'
-import { ApiKeyPreset, isApiKeyPreset, validApiKeyName } from './api-key.policy'
+import {
+  ApiKeyPreset,
+  isApiKeyPreset,
+  validApiKeyName,
+  MAX_API_KEY_APPLICATIONS
+} from './api-key.policy'
 import { generateApiKey, keyIdPattern } from './api-key.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
 import { GlobalAuditContext, insertGlobalAudit } from '@/audit/global-audit'
@@ -12,6 +17,17 @@ export type CreateApiKey = {
   expiresAt: Date | null
 }
 
+type ApiKeyMetadata = {
+  keyId: string
+  name: string
+  preset: ApiKeyPreset
+  createdAt: string
+  expiresAt: string | null
+  revokedAt: string | null
+  lastUsedAt: string | null
+  status: 'active' | 'revoked' | 'expired'
+}
+
 /** CLI-only capability: not registered as an HTTP provider/controller. */
 export class ApiKeyManagementService {
   constructor(private readonly source: DataSource) {}
@@ -19,17 +35,7 @@ export class ApiKeyManagementService {
   async create(input: CreateApiKey, context: GlobalAuditContext) {
     if (!validApiKeyName(input.name)) throw new Error('Invalid key name')
     if (!isApiKeyPreset(input.preset)) throw new Error('Unknown key preset')
-    if (
-      !Array.isArray(input.applications) ||
-      !input.applications.length ||
-      input.applications.length > 100
-    )
-      throw new Error('Explicitly grant between 1 and 100 applications')
-    const resolver = new ApplicationTableResolver()
-    for (const app of input.applications) resolver.validateAppName(app)
-    const apps = [...new Set(input.applications)].sort()
-    if (apps.length !== input.applications.length)
-      throw new Error('Duplicate application grants')
+    const apps = this.validateApplications(input.applications)
     if (
       input.expiresAt !== null &&
       (!(input.expiresAt instanceof Date) ||
@@ -44,7 +50,8 @@ export class ApiKeyManagementService {
       await runner.startTransaction()
       const registered = (await runner.query(
         `SELECT app_name FROM ota_applications
-        WHERE app_name IN (${apps.map(() => '?').join(',')}) AND status = 'ready' ORDER BY app_name FOR UPDATE`,
+        WHERE app_name IN (${apps.map(() => '?').join(',')}) AND status = 'ready'
+          AND schema_version >= 1 ORDER BY app_name FOR UPDATE`,
         apps
       )) as Array<{ app_name: string }>
       if (
@@ -104,9 +111,7 @@ export class ApiKeyManagementService {
   async list(appName?: string) {
     if (appName !== undefined)
       new ApplicationTableResolver().validateAppName(appName)
-    const rows = await this.source.query<
-      Array<Record<string, unknown> & { keyId: string }>
-    >(
+    const rows = await this.source.query<ApiKeyMetadata[]>(
       `SELECT k.key_id AS keyId, k.name, k.preset,
       DATE_FORMAT(k.created_at, '%Y-%m-%dT%H:%i:%s.%fZ') AS createdAt,
       DATE_FORMAT(k.expires_at, '%Y-%m-%dT%H:%i:%s.%fZ') AS expiresAt,
@@ -135,6 +140,147 @@ export class ApiKeyManagementService {
     const key = (await this.list()).find(row => row.keyId === keyId)
     if (!key) throw new Error('Access key not found')
     return key
+  }
+
+  async grantApplications(
+    keyId: string,
+    applications: readonly string[],
+    context: GlobalAuditContext
+  ) {
+    return this.changeApplications(keyId, applications, 'grant', context)
+  }
+
+  async ungrantApplications(
+    keyId: string,
+    applications: readonly string[],
+    context: GlobalAuditContext
+  ) {
+    return this.changeApplications(keyId, applications, 'ungrant', context)
+  }
+
+  private validateApplications(applications: readonly string[]): string[] {
+    if (
+      !Array.isArray(applications) ||
+      !applications.length ||
+      applications.length > MAX_API_KEY_APPLICATIONS
+    )
+      throw new Error(
+        `Explicitly grant between 1 and ${MAX_API_KEY_APPLICATIONS} applications`
+      )
+    const resolver = new ApplicationTableResolver()
+    const apps = applications
+      .map((app: unknown) => {
+        if (typeof app !== 'string') throw new Error('Invalid application name')
+        resolver.validateAppName(app)
+        return app
+      })
+      .sort()
+    if (new Set(apps).size !== apps.length)
+      throw new Error('Duplicate application grants')
+    return apps
+  }
+
+  private async changeApplications(
+    keyId: string,
+    applications: readonly string[],
+    action: 'grant' | 'ungrant',
+    context: GlobalAuditContext
+  ) {
+    if (!keyIdPattern.test(keyId)) throw new Error('Invalid key ID')
+    const apps = this.validateApplications(applications)
+    const runner = this.source.createQueryRunner()
+    await runner.connect()
+    try {
+      await runner.startTransaction()
+      // Serialize scope changes and revocation on the same credential.
+      const keys = (await runner.query(
+        `SELECT (revoked_at IS NULL AND
+          (expires_at IS NULL OR expires_at > UTC_TIMESTAMP(3))) AS active
+        FROM ota_api_keys WHERE key_id = ? FOR UPDATE`,
+        [keyId]
+      )) as Array<{ active: number | string }>
+      if (!keys.length) throw new Error('Access key not found')
+      if (Number(keys[0].active) !== 1)
+        throw new Error(
+          'Cannot change applications for a revoked or expired key'
+        )
+      const grants = (await runner.query(
+        `SELECT app_name FROM ota_api_key_applications
+        WHERE key_id = ? ORDER BY app_name FOR UPDATE`,
+        [keyId]
+      )) as Array<{ app_name: string }>
+      const before = grants.map(row => row.app_name)
+      const added =
+        action === 'grant' ? apps.filter(app => !before.includes(app)) : []
+      const removed =
+        action === 'ungrant' ? before.filter(app => apps.includes(app)) : []
+      const after = [
+        ...before.filter(app => !removed.includes(app)),
+        ...added
+      ].sort()
+      if (after.length > MAX_API_KEY_APPLICATIONS)
+        throw new Error(
+          `A key can have at most ${MAX_API_KEY_APPLICATIONS} application grants`
+        )
+      if (action === 'grant') {
+        const registered = (await runner.query(
+          `SELECT app_name FROM ota_applications
+          WHERE app_name IN (${apps.map(() => '?').join(',')})
+            AND status = 'ready' AND schema_version >= 1
+          ORDER BY app_name FOR UPDATE`,
+          apps
+        )) as Array<{ app_name: string }>
+        if (
+          registered.length !== apps.length ||
+          apps.some(app => !registered.some(row => row.app_name === app))
+        )
+          throw new Error(
+            'Every granted application must be registered and ready; prepare it with the CLI first'
+          )
+      }
+      if (added.length)
+        await runner.query(
+          `INSERT INTO ota_api_key_applications (key_id, app_name)
+          VALUES ${added.map(() => '(?, ?)').join(',')}`,
+          added.flatMap(app => [keyId, app])
+        )
+      if (removed.length)
+        await runner.query(
+          `DELETE FROM ota_api_key_applications
+          WHERE key_id = ? AND app_name IN (${removed.map(() => '?').join(',')})`,
+          [keyId, ...removed]
+        )
+      if (added.length || removed.length)
+        await insertGlobalAudit(runner, {
+          context,
+          actorType: 'operator',
+          action:
+            action === 'grant'
+              ? 'api_key_applications_granted'
+              : 'api_key_applications_ungranted',
+          targetType: 'api_key',
+          targetId: keyId,
+          result: 'succeeded',
+          changeSummary: {
+            applicationsBefore: before,
+            applicationsAfter: after,
+            addedApplications: added,
+            removedApplications: removed
+          }
+        })
+      await runner.commitTransaction()
+      return {
+        keyId,
+        applications: after,
+        addedApplications: added,
+        removedApplications: removed
+      }
+    } catch (error) {
+      if (runner.isTransactionActive) await runner.rollbackTransaction()
+      throw error
+    } finally {
+      await runner.release()
+    }
   }
 
   async revoke(keyId: string, context: GlobalAuditContext) {

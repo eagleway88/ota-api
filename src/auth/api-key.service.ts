@@ -34,13 +34,13 @@ export class ApiKeyService {
         name: string
         secret_hash: string
         preset: string
-        app_name: string
+        app_name: string | null
       }>
     >(
       `
-      SELECT k.key_id, k.name, k.secret_hash, k.preset, g.app_name
-      FROM ota_api_keys k JOIN ota_api_key_applications g ON g.key_id = k.key_id
-      JOIN ota_applications a ON a.app_name = g.app_name
+      SELECT k.key_id, k.name, k.secret_hash, k.preset, a.app_name
+      FROM ota_api_keys k LEFT JOIN ota_api_key_applications g ON g.key_id = k.key_id
+      LEFT JOIN ota_applications a ON a.app_name = g.app_name
       WHERE k.key_id = ? AND k.revoked_at IS NULL
         AND (k.expires_at IS NULL OR k.expires_at > UTC_TIMESTAMP(3))`,
       [parsed[1]]
@@ -62,7 +62,11 @@ export class ApiKeyService {
       keyId: key.key_id,
       name: key.name,
       preset: key.preset,
-      applications: [...new Set(rows.map(row => row.app_name))]
+      applications: [
+        ...new Set(
+          rows.flatMap(row => (row.app_name === null ? [] : [row.app_name]))
+        )
+      ]
     }
   }
 

@@ -26,4 +26,23 @@ describe('API key authentication boundary', () => {
       key.accessKey.split('.')[1]
     )
   })
+  it('recognizes a valid credential with no application grants without granting access', async () => {
+    const key = generateApiKey()
+    const source = {
+      query: jest.fn().mockResolvedValue([
+        {
+          key_id: key.keyId,
+          name: 'CI',
+          secret_hash: key.secretHash,
+          preset: 'full',
+          app_name: null
+        }
+      ])
+    }
+    expect(
+      await new ApiKeyService(source as unknown as DataSource).authenticate(
+        key.accessKey
+      )
+    ).toMatchObject({ keyId: key.keyId, applications: [] })
+  })
 })

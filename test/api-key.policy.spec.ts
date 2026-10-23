@@ -102,4 +102,64 @@ describe('API key scope and CLI contracts', () => {
       parseOtaArguments([...create, '--expires-at', '2099-01-01T00:00:00Z'])
     ).toThrow('Choose')
   })
+  const id = generateApiKey().keyId
+  const change = (action: string) => [
+    'key',
+    action,
+    '--id',
+    id,
+    '--apps',
+    'app-a,app-b',
+    '--database',
+    'test'
+  ]
+  it.each(['grant', 'ungrant'])(
+    'parses explicit %s scopes without credential rotation options',
+    action => {
+      expect(parseOtaArguments(change(action))).toMatchObject({
+        command: 'key:' + action,
+        keyId: id,
+        applications: ['app-a', 'app-b'],
+        database: 'test'
+      })
+      for (const option of ['--id', '--apps', '--database']) {
+        const args = change(action)
+        args.splice(args.indexOf(option), 2)
+        expect(() => parseOtaArguments(args)).toThrow('Required option')
+      }
+      for (const extra of [
+        ['--preset', 'full'],
+        ['--no-expiry'],
+        ['--secret', 'x']
+      ])
+        expect(() => parseOtaArguments([...change(action), ...extra])).toThrow(
+          'Unknown'
+        )
+    }
+  )
+  it.each([
+    ['--apps', '*'],
+    ['--apps', 'app-a,app-a'],
+    ['--apps', 'app-a,'],
+    ['--id', 'invalid'],
+    ['--apps', Array.from({ length: 101 }, (_, i) => 'app-' + i).join(',')]
+  ])(
+    'rejects invalid scope change %s=%s before connecting',
+    (option, value) => {
+      for (const action of ['grant', 'ungrant']) {
+        const args = change(action)
+        args[args.indexOf(option) + 1] = value
+        expect(() => parseOtaArguments(args)).toThrow()
+      }
+    }
+  )
+  it('prepares applications only on grant, never on ungrant', () => {
+    expect(
+      parseOtaArguments([...change('grant'), '--prepare-apps'])
+        .prepareApplications
+    ).toBe(true)
+    expect(() =>
+      parseOtaArguments([...change('ungrant'), '--prepare-apps'])
+    ).toThrow('Unknown')
+  })
 })

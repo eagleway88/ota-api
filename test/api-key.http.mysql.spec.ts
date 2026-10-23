@@ -242,6 +242,8 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
   it('keeps credential and application provisioning in the operational CLI', async () => {
     for (const path of [
       '/api/v1/manage/api-keys',
+      '/api/v1/manage/api-keys/' + tokens.full.keyId + '/grant',
+      '/api/v1/manage/api-keys/' + tokens.full.keyId + '/ungrant',
       '/api/v1/manage/applications',
       '/api/v1/manage/apps/app-a/prepare'
     ]) {
@@ -255,6 +257,33 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
       .get('/api/v1/manage/audit-logs')
       .set('Authorization', 'Bearer ' + tokens.full.accessKey)
       .expect(404)
+  })
+  it('applies scope changes to the next request with the same key and no restart', async () => {
+    await get('app-c/statistics/summary').expect(403)
+    await keys.grantApplications(tokens.full.keyId, ['app-c'], context)
+    await get('app-c/statistics/summary').expect(200)
+    await keys.ungrantApplications(tokens.full.keyId, ['app-b'], context)
+    await get('app-b/statistics/summary').expect(403)
+    await get('app-a/statistics/summary').expect(200)
+    await get('app-c/statistics/summary').expect(200)
+  })
+  it('does not broaden preset permissions when granting another application', async () => {
+    await keys.grantApplications(tokens.observer.keyId, ['app-c'], context)
+    await get('app-c/statistics/summary', 'observer').expect(200)
+    await post('app-c/releases/release-a/disable', {}, 'observer').expect(403)
+    expect(releases.setEnabled).not.toHaveBeenCalled()
+  })
+  it('denies every scoped request after all grants are removed and supports regranting', async () => {
+    await keys.ungrantApplications(
+      tokens.full.keyId,
+      ['app-a', 'app-b'],
+      context
+    )
+    for (const app of ['app-a', 'app-b', 'app-c'])
+      await get(app + '/statistics/summary').expect(403)
+    await keys.grantApplications(tokens.full.keyId, ['app-a'], context)
+    await get('app-a/statistics/summary').expect(200)
+    await get('app-b/statistics/summary').expect(403)
   })
   it('fails closed for endpoints with no explicit permission policy', async () => {
     await get('app-a/unconfigured').expect(403)
