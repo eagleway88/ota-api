@@ -11,34 +11,23 @@ import {
 import { QueryRunner } from 'typeorm'
 import { RegisteredApplication } from '@/applications/application-registry.service'
 describe('canonical release storage', () => {
-  it('round trips modern fields without old aliases or injected identifiers', () => {
+  it('round trips release fields and ignores injected storage identifiers', () => {
     const values = releaseWriteValues({
       ...releaseInput,
-      id: 1
+      release_sequence: 999
     } as typeof releaseInput)
-    expect(values).not.toHaveProperty('id')
-    expect(values).not.toHaveProperty('ver')
-    expect(values).not.toHaveProperty('name')
+    expect(values).not.toHaveProperty('release_sequence')
     const release = serializeRelease(
-      mapStoredReleaseRecord({ id: 2000, ...values })
+      mapStoredReleaseRecord({ release_sequence: 1, ...values })
     )
     expect(release).toMatchObject({
       appName: 'app',
-      releaseSequence: 2000,
+      releaseSequence: 1,
       targetVersionCode: 110,
       enabled: true,
       releaseScope: 'public'
     })
-    for (const key of [
-      'scope',
-      'id',
-      'name',
-      'ver',
-      'enable',
-      'downloadUrl',
-      'type'
-    ])
-      expect(release).not.toHaveProperty(key)
+    expect(release).not.toHaveProperty('scope')
   })
   it.each([-1, 1.5, 2147483648, NaN])(
     'rejects invalid native version %s',
@@ -47,15 +36,6 @@ describe('canonical release storage', () => {
         releaseWriteValues({ ...releaseInput, targetVersionCode })
       ).toThrow()
   )
-  it('rejects old-only stored records', () =>
-    expect(() =>
-      mapStoredReleaseRecord({
-        id: 2000,
-        name: 'app',
-        ver: 110,
-        platform: 'windows'
-      })
-    ).toThrow())
   it('only updates canonical enabled state', () =>
     expect(enabledWriteValues(false)).toEqual({ is_enabled: 0 }))
   it('requires transaction ownership', async () => {

@@ -6,7 +6,7 @@
 Authorization: Bearer ota_ak_<keyId>.<secret>
 ~~~
 
-Key 存 MySQL，不是内存：ota_api_keys 存元数据及随机 secret 的 SHA-256 散列，ota_api_key_applications 存显式授权应用。明文只在创建成功时显示一次，不可找回；遗失时签发替代 Key 并撤销旧 Key。不要将 Key 下发给浏览器/客户端或写入普通日志。
+Key 存 MySQL，不是内存：ota_api_keys 存元数据及随机 secret 的 SHA-256 散列，ota_api_key_applications 存显式授权应用。明文只在创建成功时显示一次，不可找回；遗失时签发替代 Key 并撤销被替换的 Key。不要将 Key 下发给浏览器/客户端或写入普通日志。
 
 ## 权限预设
 
@@ -40,14 +40,14 @@ yarn ota key revoke --id KEY_UUID --database ota_new
 yarn ota audit list
 ~~~
 
-永久 Key 用 --no-expiry；临时 Key 改用 --expires-at 未来的UTC时间，例如 2030-01-01T00:00:00Z，两者必须择一。当前不在线修改授权/预设，变更时创建替代 Key、更新调用方并验证，再撤销旧 Key。
+永久 Key 用 --no-expiry；临时 Key 改用 --expires-at 未来的UTC时间，例如 2030-01-01T00:00:00Z，两者必须择一。当前不在线修改授权/预设，变更时创建替代 Key、更新调用方并验证，再撤销被替换的 Key。
 
 ## 校验与审计
 
 每次受保护请求查库校验凭证、撤销/到期状态、精确应用名和权限，不缓存授权结果。无效/撤销/到期返回 401；应用或权限不足返回 403；数据库失败不会放行。撤销作用于后续认证，不取消已在处理的请求。
 
-应用审计使用 actor_key_id、名称快照及 actor_type=api_key；全局运维审计存 ota_audit_log，CLI 操作为 operator。没有 actor_admin_id、admins 或 ota_admin_sessions。last_used_at 最多每分钟更新一次，不等于逐请求访问日志。
+应用审计使用 actor_key_id、名称快照及 actor_type=api_key；全局运维审计存 ota_audit_log，CLI 操作为 operator。last_used_at 最多每分钟更新一次，不等于逐请求访问日志。
 
-公开客户端检查/上报及 Socket 订阅不需要管理 Key，客户端报告是不可信输入；需要时由部署网关增加限流和下载鉴权。来源 IP 只用于审计，不再有 IPS 允许列表。
+公开客户端检查/上报及 Socket 订阅不需要管理 Key，客户端报告是不可信输入；需要时由部署网关增加限流和下载鉴权。来源 IP 用于审计记录，不代替凭证或应用权限校验。
 
 任务、执行记录与审计永久保存。Key 到期/撤销不删除其历史记录。全局 audit list 目前只读默认时间窗口第一页，尚无 CLI 分页/时间筛选。

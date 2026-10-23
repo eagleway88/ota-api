@@ -1,13 +1,13 @@
 const { spawnSync } = require('node:child_process')
 
-const socket = process.env.OTA_MIGRATION_TEST_SOCKET ?? ''
+const socket = process.env.OTA_TEST_MYSQL_SOCKET ?? ''
 if (
-  !/^\/(?:private\/)?tmp\/ota-migration-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
+  !/^\/(?:private\/)?tmp\/ota-test-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
     socket
   )
 ) {
   process.stderr.write(
-    'Set OTA_MIGRATION_TEST_SOCKET to an isolated temporary MySQL socket. See test/README.md.\n'
+    'Set OTA_TEST_MYSQL_SOCKET to an isolated temporary MySQL socket. See test/README.md.\n'
   )
   process.exit(1)
 }

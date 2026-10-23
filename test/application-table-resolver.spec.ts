@@ -5,8 +5,8 @@ describe('ApplicationTableResolver', () => {
   const resolver = new ApplicationTableResolver()
 
   it('normalizes application names without discarding digits', () => {
-    expect(resolver.resolve('eagleway-network').version).toBe(
-      'eagleway_network_version'
+    expect(resolver.resolve('sample-app-123').release).toBe(
+      'sample_app_123_release'
     )
   })
 

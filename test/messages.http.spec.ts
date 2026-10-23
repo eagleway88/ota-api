@@ -69,7 +69,7 @@ describe('application-scoped message HTTP contracts', () => {
       .send(body)
       .expect(201)
     expect(service.sendApplication).toHaveBeenCalledWith('app-a', body)
-    for (const field of ['appName', 'otaName'])
+    for (const field of ['appName', 'unexpected'])
       await request(app.getHttpServer())
         .post(path + 'application')
         .set('Authorization', 'Bearer active')

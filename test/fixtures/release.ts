@@ -4,7 +4,7 @@ export const releaseInput: ReleaseWriteInput = {
   appName: 'app',
   releaseId: '10000000-0000-4000-8000-000000000000',
   targetVersionCode: 110,
-  compatibleBaseVersionCodes: [100],
+  baseVersionCodes: [100],
   platforms: ['windows'],
   architectures: ['x64'],
   updateType: 'full',
@@ -16,5 +16,9 @@ export const releaseInput: ReleaseWriteInput = {
   installerSourceUrl: 'https://example.test/app.exe'
 }
 export function releaseRow(overrides: Record<string, unknown> = {}) {
-  return { id: 2000, ...releaseWriteValues(releaseInput), ...overrides }
+  return {
+    release_sequence: 1,
+    ...releaseWriteValues(releaseInput),
+    ...overrides
+  }
 }

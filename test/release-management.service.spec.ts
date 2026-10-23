@@ -69,7 +69,7 @@ function fixture() {
           getRawOne: () => Promise.resolve({ ...row }),
           execute: () => {
             writes.push({ table, values })
-            if (table === tables.version) Object.assign(row, values)
+            if (table === tables.release) Object.assign(row, values)
             return Promise.resolve({ affected: 1 })
           }
         }
@@ -150,13 +150,13 @@ describe('ReleaseManagementService enabled policy', () => {
     })
     expect(f.client.emit).toHaveBeenLastCalledWith(
       'app:app:update',
-      expect.objectContaining({ releaseSequence: 2000, enabled: true })
+      expect.objectContaining({ releaseSequence: 1, enabled: true })
     )
     f.client.emit.mockClear()
 
     await f.service.setEnabled('app', 'release-a', false, f.context)
     expect(f.writes).toContainEqual({
-      table: f.tables.version,
+      table: f.tables.release,
       values: { is_enabled: 0 }
     })
     expect(mapStoredReleaseRecord(f.row).enabled).toBe(false)
@@ -166,7 +166,7 @@ describe('ReleaseManagementService enabled policy', () => {
     expect(f.client.emit).toHaveBeenCalledTimes(1)
     expect(f.client.emit).toHaveBeenLastCalledWith(
       'app:app:update',
-      expect.objectContaining({ releaseSequence: 2000, enabled: false })
+      expect.objectContaining({ releaseSequence: 1, enabled: false })
     )
 
     const newcomer = { ...f.client, id: 'socket-b', emit: jest.fn() }
@@ -180,17 +180,17 @@ describe('ReleaseManagementService enabled policy', () => {
 
     await f.service.setEnabled('app', 'release-a', true, f.context)
     expect(f.writes).toContainEqual({
-      table: f.tables.version,
+      table: f.tables.release,
       values: { is_enabled: 1 }
     })
     await expect(
       f.query.findLatestAvailableVersion(f.updateQuery)
     ).resolves.toEqual(
-      expect.objectContaining({ releaseSequence: 2000, enabled: true })
+      expect.objectContaining({ releaseSequence: 1, enabled: true })
     )
     expect(f.client.emit).toHaveBeenLastCalledWith(
       'app:app:update',
-      expect.objectContaining({ releaseSequence: 2000, enabled: true })
+      expect.objectContaining({ releaseSequence: 1, enabled: true })
     )
     expect(f.runner.commitTransaction).toHaveBeenCalledTimes(2)
     expect(f.catalog.invalidate).toHaveBeenCalledTimes(2)

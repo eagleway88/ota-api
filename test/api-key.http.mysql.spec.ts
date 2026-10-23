@@ -40,7 +40,7 @@ class UnconfiguredController {
     return 'must not run'
   }
 }
-const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
+const socketPath = process.env.OTA_TEST_MYSQL_SOCKET
 const mysql = socketPath ? describe : describe.skip
 mysql('scoped API key authorization through real HTTP and MySQL', () => {
   let control: DataSource,
@@ -94,7 +94,7 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
       .send(body)
   beforeAll(async () => {
     if (
-      !/^\/(?:private\/)?tmp\/ota-migration-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
+      !/^\/(?:private\/)?tmp\/ota-test-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
         socketPath ?? ''
       )
     )
@@ -104,7 +104,7 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
   })
   beforeEach(async () => {
     jest.clearAllMocks()
-    database = 'ota_migration_test_' + randomUUID().replaceAll('-', '')
+    database = 'ota_test_' + randomUUID().replaceAll('-', '')
     await control.query(`CREATE DATABASE \`${database}\``)
     source = new DataSource({
       ...connection,
@@ -143,8 +143,7 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
       )
     }
     messages = new LastMessageService(source.getRepository(ApplicationMessage))
-    // A stale, non-matching IP allowlist must no longer restrict authorized callers.
-    const config = new ConfigService({ IPS: '198.51.100.77' })
+    const config = new ConfigService({})
     const module = await Test.createTestingModule({
       imports: [
         {
@@ -240,12 +239,10 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
       await get(app + '/statistics/summary').expect(403)
     expect(statistics.summary).toHaveBeenCalledTimes(2)
   })
-  it('does not let full keys invoke platform administration or removed login APIs', async () => {
+  it('keeps credential and application provisioning in the operational CLI', async () => {
     for (const path of [
-      '/api/v1/manage/auth/login',
-      '/api/v1/manage/auth/initialize',
-      '/api/v1/manage/auth/logout',
-      '/api/v1/manage/keys',
+      '/api/v1/manage/api-keys',
+      '/api/v1/manage/applications',
       '/api/v1/manage/apps/app-a/prepare'
     ]) {
       await request(http.getHttpServer())
@@ -262,10 +259,10 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
   it('fails closed for endpoints with no explicit permission policy', async () => {
     await get('app-a/unconfigured').expect(403)
   })
-  it('rejects missing, malformed, obsolete JWT and wrong-secret credentials before business access', async () => {
+  it('rejects missing, malformed and wrong-secret credentials before business access', async () => {
     for (const value of [
       '',
-      'Bearer old.jwt.token',
+      'Bearer invalid-credential',
       'Bearer ' + tokens.full.accessKey + 'bad'
     ]) {
       await request(http.getHttpServer())
@@ -285,7 +282,7 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
     )
     await get('app-a/releases', 'publisher').expect(401)
   })
-  it('carries the actual key identity into publication audit context and does not impersonate an administrator', async () => {
+  it('carries the authenticated key identity into publication audit context', async () => {
     await post('app-a/releases/release-a/disable')
       .set('x-request-id', 'key-audit-test')
       .expect(201)
@@ -380,10 +377,9 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
       expect.any(Object)
     )
   })
-  it('leaves the modern update check public and rejects retired contracts', async () => {
+  it('allows public update checks without an API key', async () => {
     await request(http.getHttpServer())
       .post('/api/v1/app/apps/app-a/updates/check')
-      .set('Authorization', 'Bearer old.jwt.token')
       .send({
         platform: 'windows',
         nativeVersionCode: 100,

@@ -8,8 +8,6 @@ export class ExceptionFilter implements NestExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp()
     const res = ctx.getResponse<Response>()
-    // const req = ctx.getRequest<Request>()
-    // console.error('catch', exception)
     let message: undefined | string
     if (exception instanceof HttpException) {
       const status = exception.getStatus()

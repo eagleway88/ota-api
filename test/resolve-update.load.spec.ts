@@ -9,10 +9,10 @@ describe('resolveUpdate load baseline', () => {
   it('evaluates ten thousand contexts from one immutable snapshot', () => {
     const releases: Release[] = Array.from({ length: 100 }, (_, index) => ({
       releaseId: `release-${index}`,
-      releaseSequence: 2000 + index,
+      releaseSequence: 1 + index,
       appName: 'app',
       targetVersionCode: 110,
-      compatibleBaseVersionCodes: [100],
+      baseVersionCodes: [100],
       platforms: ['windows'],
       architectures: ['x64'],
       distributionChannel: 'stable',

@@ -22,7 +22,10 @@ export class SqlReleaseRepository extends ReleaseWriteRepository {
       application,
       releaseWriteValues(input)
     )
-    return { releaseId: input.releaseId, releaseSequence: Number(stored.id) }
+    return {
+      releaseId: input.releaseId,
+      releaseSequence: Number(stored.release_sequence)
+    }
   }
 
   async setEnabled(
@@ -34,7 +37,7 @@ export class SqlReleaseRepository extends ReleaseWriteRepository {
     this.assertTransaction(runner)
     await runner.manager
       .createQueryBuilder()
-      .update(application.tables.version)
+      .update(application.tables.release)
       .set(enabledWriteValues(enabled))
       .where('release_id = :releaseId AND app_name = :appName', {
         releaseId,
@@ -56,13 +59,13 @@ export class SqlReleaseRepository extends ReleaseWriteRepository {
     await runner.manager
       .createQueryBuilder()
       .insert()
-      .into(application.tables.version)
+      .into(application.tables.release)
       .values(values)
       .execute()
     const stored = await runner.manager
       .createQueryBuilder()
       .select('*')
-      .from(application.tables.version, 'release')
+      .from(application.tables.release, 'release')
       .where(
         'release.release_id = :releaseId AND release.app_name = :appName',
         {
@@ -73,8 +76,8 @@ export class SqlReleaseRepository extends ReleaseWriteRepository {
       .getRawOne<Record<string, unknown>>()
     if (
       !stored ||
-      !Number.isSafeInteger(Number(stored.id)) ||
-      Number(stored.id) < 1
+      !Number.isSafeInteger(Number(stored.release_sequence)) ||
+      Number(stored.release_sequence) < 1
     )
       throw new Error('Release sequence allocation failed')
     return stored

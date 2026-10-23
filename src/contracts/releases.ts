@@ -17,7 +17,7 @@ export type Release = {
   releaseSequence: number
   appName: string
   targetVersionCode: number
-  compatibleBaseVersionCodes: readonly number[]
+  baseVersionCodes: readonly number[]
   platforms: readonly string[]
   architectures: readonly string[]
   distributionChannel?: string
@@ -46,12 +46,11 @@ export type AudienceSnapshot = {
 }
 
 export type ApplicationUpdatePolicy = {
-  emptyChannelMatchesAny: boolean
   macosUniversalArchitectures: ReadonlySet<string>
 }
 
 export type UpdateDecisionReason =
-  'update-available' | 'no-enabled-release' | 'no-compatible-release'
+  'update-available' | 'no-enabled-release' | 'no-applicable-release'
 
 export type UpdateSkipReason =
   | 'no_enabled_release'
@@ -73,6 +72,5 @@ export type UpdateDecision = {
 }
 
 export const defaultApplicationUpdatePolicy: ApplicationUpdatePolicy = {
-  emptyChannelMatchesAny: true,
   macosUniversalArchitectures: new Set(['arm64', 'x64'])
 }

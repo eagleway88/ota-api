@@ -29,7 +29,6 @@ export type ApplicationWriteAudit = {
     redispatch?: boolean
     releaseScope?: ReleaseScope
     userCount?: number
-    source?: 'v1'
   }
 }
 
@@ -50,9 +49,6 @@ function safeSummary(summary: ApplicationWriteAudit['changeSummary']) {
     Number.isSafeInteger(summary.userCount) &&
     summary.userCount >= 0
       ? { userCount: summary.userCount }
-      : {}),
-    ...(['v1'].includes(summary?.source ?? '')
-      ? { source: summary?.source }
       : {})
   }
 }

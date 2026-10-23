@@ -63,7 +63,11 @@ describe('App/Manage API assembly and documentation', () => {
       )
       expect(client.every(path => path.startsWith('/api/v1/app/'))).toBe(true)
       expect(client).toContain('/api/v1/app/apps/{appName}/updates/check')
-      expect(documents.has('api/docs/legacy')).toBe(false)
+      expect([...documents.keys()].sort()).toEqual([
+        'api/docs',
+        'api/docs/app',
+        'api/docs/manage'
+      ])
       for (const path of [
         '/api/v1/manage/apps/{appName}/audit-logs',
         '/api/v1/manage/apps/{appName}/statistics/summary',
@@ -75,9 +79,6 @@ describe('App/Manage API assembly and documentation', () => {
         expect(manage).toContain(path)
       }
       expect(paths('')).toEqual([...manage, ...client].sort())
-      expect(
-        paths('').some(path => /\/v2\/|\/admin\/|\/message\//.test(path))
-      ).toBe(false)
       expect(manage.some(path => /auth|prepare|keys/.test(path))).toBe(false)
       expect(database.createQueryRunner).not.toHaveBeenCalled()
     } finally {

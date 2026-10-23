@@ -6,7 +6,7 @@ export type ReleaseWriteInput = {
   appName: string
   releaseId: string
   targetVersionCode: number
-  compatibleBaseVersionCodes: readonly number[]
+  baseVersionCodes: readonly number[]
   platforms: readonly string[]
   architectures: readonly string[]
   distributionChannel?: string | null

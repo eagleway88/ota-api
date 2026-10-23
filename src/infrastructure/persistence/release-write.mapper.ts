@@ -8,7 +8,7 @@ export function releaseWriteValues(input: ReleaseWriteInput) {
     !Number.isSafeInteger(input.targetVersionCode) ||
     input.targetVersionCode < 0 ||
     input.targetVersionCode > 2147483647 ||
-    !input.compatibleBaseVersionCodes.every(
+    !input.baseVersionCodes.every(
       v => Number.isSafeInteger(v) && v >= 0 && v <= 2147483647
     )
   )
@@ -19,9 +19,7 @@ export function releaseWriteValues(input: ReleaseWriteInput) {
     release_scope: input.releaseScope,
     policy_revision: 1,
     target_version_code: input.targetVersionCode,
-    compatible_base_version_codes: JSON.stringify(
-      input.compatibleBaseVersionCodes
-    ),
+    base_version_codes: JSON.stringify(input.baseVersionCodes),
     platforms: JSON.stringify(input.platforms),
     architectures: JSON.stringify(input.architectures),
     distribution_channel: input.distributionChannel,

@@ -2,7 +2,7 @@ import { DataSource } from 'typeorm'
 import { ApiKeyService, generateApiKey } from '@/auth/api-key.service'
 
 describe('API key authentication boundary', () => {
-  it.each(['', 'old.jwt.token', 'ota_ak_invalid', 'Bearer secret'])(
+  it.each(['', 'invalid-credential', 'ota_ak_invalid', 'Bearer secret'])(
     'rejects malformed credentials without accessing storage: %s',
     async token => {
       const source = { query: jest.fn() }

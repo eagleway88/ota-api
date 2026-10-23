@@ -16,7 +16,7 @@ const input: StatusReportInput = {
   appName: 'app',
   platform: 'windows',
   versionCode: 100,
-  releaseSequence: 2000,
+  releaseSequence: 1,
   reportedUsername: 'name',
   extras: { snake_key: { innerCamel: 1 } },
   sourceIp: 'localhost'
@@ -37,7 +37,7 @@ describe('canonical telemetry mapping', () => {
       app_name: 'app',
       platform: 'windows',
       version_code: 100,
-      release_sequence: 2000,
+      release_sequence: 1,
       reported_username: 'name',
       source_ip: 'localhost',
       extras: '{"snake_key":{"innerCamel":1}}',
@@ -62,7 +62,7 @@ describe('canonical telemetry mapping', () => {
     expect(sameStatusContent(report, { ...input, sourceIp: 'another' })).toBe(
       true
     )
-    expect(sameStatusContent(report, { ...input, releaseSequence: 2001 })).toBe(
+    expect(sameStatusContent(report, { ...input, releaseSequence: 2 })).toBe(
       false
     )
     expect(

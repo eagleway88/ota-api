@@ -10,8 +10,8 @@ const col = (
   ...(type === 'varchar' ? { collation: 'utf8mb4_bin' } : {}),
   ...extra
 })
-const id = () =>
-  col('id', 'int', {
+const id = (name = 'id') =>
+  col(name, 'int', {
     isPrimary: true,
     isGenerated: true,
     generationStrategy: 'increment'
@@ -35,18 +35,18 @@ function table(
     indices
   })
 }
-export function createVersionTable(source: TableSource) {
+export function createReleaseTable(source: TableSource) {
   return table(
     source,
-    'version',
+    'release',
     [
-      id(),
+      id('release_sequence'),
       col('app_name', 'varchar', { length: '128' }),
       col('release_id', 'varchar', { length: '36', isUnique: true }),
       col('release_scope', 'varchar', { length: '16' }),
       col('policy_revision', 'int', { default: 1 }),
       col('target_version_code', 'int'),
-      col('compatible_base_version_codes', 'json'),
+      col('base_version_codes', 'json'),
       col('platforms', 'json'),
       col('architectures', 'json'),
       text('distribution_channel', '128'),
@@ -62,7 +62,7 @@ export function createVersionTable(source: TableSource) {
       date('created_at'),
       date('updated_at')
     ],
-    [{ columnNames: ['created_at', 'id'] }]
+    [{ columnNames: ['created_at', 'release_sequence'] }]
   )
 }
 function reportColumns() {

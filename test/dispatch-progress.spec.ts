@@ -6,7 +6,7 @@ describe('DispatchMetrics', () => {
     for (let index = 0; index < 102; index++) {
       const release = {
         releaseId: `release-${index}`,
-        releaseSequence: 2000 + index
+        releaseSequence: 1 + index
       }
       metrics.scan()
       metrics.count('eligible', release)
@@ -21,7 +21,7 @@ describe('DispatchMetrics', () => {
     })
     expect(result.releaseSummary.entries[0]).toEqual({
       releaseId: 'release-0',
-      releaseSequence: 2000,
+      releaseSequence: 1,
       eligible: 1,
       updated: 1,
       revoked: 0,
@@ -32,7 +32,7 @@ describe('DispatchMetrics', () => {
 
   it('returns detached snapshots for asynchronous persistence', () => {
     const metrics = new DispatchMetrics()
-    const release = { releaseId: 'release', releaseSequence: 2000 }
+    const release = { releaseId: 'release', releaseSequence: 1 }
     metrics.count('updated', release)
     metrics.skip('disconnected')
     const snapshot = metrics.snapshot()

@@ -154,7 +154,7 @@ export class ReleaseDraftService {
       const includeDraft = !query.status || query.status === 'draft'
       const hasPublished =
         includePublished &&
-        (await queryRunner.hasTable(application.tables.version))
+        (await queryRunner.hasTable(application.tables.release))
       const hasDraft =
         includeDraft &&
         (await queryRunner.hasTable(application.tables.releaseDraft))
@@ -166,14 +166,14 @@ export class ReleaseDraftService {
         const count = await queryRunner.manager
           .createQueryBuilder()
           .select('COUNT(*)', 'total')
-          .from(application.tables.version, 'version')
-          .where('version.app_name = :appName', { appName })
+          .from(application.tables.release, 'release')
+          .where('release.app_name = :appName', { appName })
           .getRawOne<{ total: string | number }>()
         total += Number(count?.total ?? 0)
         keyQueries.push(
           `SELECT 'published' AS record_kind, release_id AS record_key, ` +
             `updated_at AS sort_time ` +
-            `FROM \`${application.tables.version}\` WHERE app_name = ?`
+            `FROM \`${application.tables.release}\` WHERE app_name = ?`
         )
         keyParameters.push(appName)
       }
@@ -213,8 +213,8 @@ export class ReleaseDraftService {
         const records = await queryRunner.manager
           .createQueryBuilder()
           .select('*')
-          .from(application.tables.version, 'version')
-          .where('version.release_id IN (:...releaseIds)', {
+          .from(application.tables.release, 'release')
+          .where('release.release_id IN (:...releaseIds)', {
             releaseIds: publishedIds
           })
           .getRawMany<Record<string, unknown>>()
@@ -328,12 +328,12 @@ export class ReleaseDraftService {
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     try {
-      if (await queryRunner.hasTable(application.tables.version)) {
+      if (await queryRunner.hasTable(application.tables.release)) {
         const published = await queryRunner.manager
           .createQueryBuilder()
           .select('*')
-          .from(application.tables.version, 'version')
-          .where('version.release_id = :releaseId', { releaseId })
+          .from(application.tables.release, 'release')
+          .where('release.release_id = :releaseId', { releaseId })
           .getRawOne<Record<string, unknown>>()
         if (published) {
           return apiUtil.data(this.toPublished(published))
@@ -372,8 +372,7 @@ export class ReleaseDraftService {
         context,
         releaseId,
         action: 'publish',
-        targetType: 'release',
-        changeSummary: { source: 'v1' }
+        targetType: 'release'
       },
       async queryRunner => {
         const draft = await this.lockDraft(queryRunner, application, releaseId)
@@ -505,9 +504,7 @@ export class ReleaseDraftService {
   ): CreateReleaseDraftDto {
     const platforms = Array.from(new Set(body.platforms))
     const architectures = Array.from(new Set(body.architectures ?? []))
-    const compatibleBaseVersionCodes = Array.from(
-      new Set(body.compatibleBaseVersionCodes)
-    )
+    const baseVersionCodes = Array.from(new Set(body.baseVersionCodes))
     let audience: ReturnType<typeof normalizeReleaseAudience>
     try {
       audience = normalizeReleaseAudience({
@@ -519,13 +516,8 @@ export class ReleaseDraftService {
     } catch {
       throw new BadRequestException('Release audience is invalid')
     }
-    if (
-      body.updateType === UpdateType.Hot &&
-      !compatibleBaseVersionCodes.length
-    ) {
-      throw new BadRequestException(
-        'Hot updates require compatibleBaseVersionCodes'
-      )
+    if (body.updateType === UpdateType.Hot && !baseVersionCodes.length) {
+      throw new BadRequestException('Hot updates require baseVersionCodes')
     }
     if (!body.artifactId && !body.installerSourceUrl && !body.bundleUrl) {
       throw new BadRequestException('A release artifact or URL is required')
@@ -534,7 +526,7 @@ export class ReleaseDraftService {
       ...body,
       platforms,
       architectures,
-      compatibleBaseVersionCodes,
+      baseVersionCodes,
       userIds: audience.userIds,
       releaseScope: audience.releaseScope as ReleaseScopeType
     }
@@ -675,7 +667,7 @@ export class ReleaseDraftService {
       releaseSequence: release.releaseSequence,
       appName: release.appName,
       targetVersionCode: release.targetVersionCode,
-      compatibleBaseVersionCodes: release.compatibleBaseVersionCodes,
+      baseVersionCodes: release.baseVersionCodes,
       platforms: release.platforms,
       architectures: release.architectures,
       distributionChannel: release.distributionChannel,

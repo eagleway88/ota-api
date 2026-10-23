@@ -80,10 +80,10 @@ export class ReleaseCatalogService {
         throw new ConflictException(
           'Application is not ready; prepare it using the CLI'
         )
-      const { version, releaseUser } = application.tables
+      const { release, releaseUser } = application.tables
       const revision = application.catalogRevision
       if (
-        !(await queryRunner.hasTable(version)) ||
+        !(await queryRunner.hasTable(release)) ||
         !(await queryRunner.hasTable(releaseUser))
       )
         throw new ConflictException('Application release schema is incomplete')
@@ -91,8 +91,8 @@ export class ReleaseCatalogService {
       const records = await queryRunner.manager
         .createQueryBuilder()
         .select('*')
-        .from(version, 'version')
-        .where('version.app_name = :name', { name: appName })
+        .from(release, 'release')
+        .where('release.app_name = :name', { name: appName })
         .getRawMany<Record<string, unknown>>()
 
       const releases = records.map(mapStoredReleaseRecord)

@@ -6,7 +6,7 @@ import { resolve } from 'path'
 import { DataSource } from 'typeorm'
 import { ApiKeyService } from '@/auth/api-key.service'
 
-const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
+const socketPath = process.env.OTA_TEST_MYSQL_SOCKET
 const mysql = socketPath ? describe : describe.skip
 mysql('operational CLI with real subprocesses and isolated MySQL', () => {
   let control: DataSource,
@@ -55,14 +55,14 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
     })
   beforeAll(async () => {
     if (
-      !/^\/(?:private\/)?tmp\/ota-migration-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
+      !/^\/(?:private\/)?tmp\/ota-test-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
         socketPath ?? ''
       )
     )
       throw new Error('Use only an isolated temporary MySQL socket')
     control = new DataSource(connection)
     await control.initialize()
-    database = 'ota_migration_test_' + randomUUID().replaceAll('-', '')
+    database = 'ota_test_' + randomUUID().replaceAll('-', '')
     user = 'ota_cli_' + randomUUID().replaceAll('-', '').slice(0, 12)
     password = randomUUID()
     await control.query(`CREATE DATABASE \`${database}\``)
@@ -157,13 +157,6 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
       new ApiKeyService(source).authenticate(key.accessKey)
     ).rejects.toThrow('Invalid access key')
     expect(await source.runMigrations()).toEqual([])
-    const runner = source.createQueryRunner()
-    try {
-      expect(await runner.hasTable('admins')).toBe(false)
-      expect(await runner.hasTable('ota_admin_sessions')).toBe(false)
-    } finally {
-      await runner.release()
-    }
   }, 30000)
   it('never initializes ungranted/unprepared apps implicitly or writes to a mismatched database', async () => {
     const args = [

@@ -1,48 +1,42 @@
 import { ConfigService } from '@nestjs/config'
 import AliOSS from 'ali-oss'
-import { join } from 'path'
+import { posix } from 'path'
 import { Injectable } from '@nestjs/common'
 import { to } from '@/utils'
-import { createHash } from 'crypto'
+import { randomUUID } from 'crypto'
 
 @Injectable()
 export class OssArtifactStorage {
-  private oss?: AliOSS
-  constructor(private readonly configService: ConfigService) {
-    const opts = this.fetchOSSOptions()
-    if (opts) this.oss = new AliOSS(opts)
+  private readonly oss?: AliOSS
+  constructor(private readonly config: ConfigService) {
+    const bucket = config.get<string>('OSS_BUCKET'),
+      accessKeyId = config.get<string>('OSS_ACCESS_KEY_ID'),
+      accessKeySecret = config.get<string>('OSS_ACCESS_KEY_SECRET'),
+      region = config.get<string>('OSS_REGION')
+    if (bucket && accessKeyId && accessKeySecret && region)
+      this.oss = new AliOSS({ bucket, accessKeyId, accessKeySecret, region })
   }
-
-  private fetchOSSOptions(): AliOSS.Options | undefined {
-    const bucket = this.configService.get<string>('OSS_BUCKER')
-    const accessKeyId = this.configService.get<string>('OSS_KEY')
-    const accessKeySecret = this.configService.get<string>('OSS_SECRET')
-    const region = this.configService.get<string>('OSS_REGION')
-    if (bucket && accessKeyId && accessKeySecret && region) {
-      return { bucket, accessKeyId, accessKeySecret, region }
-    }
-  }
-
   async put(
-    dir: string,
+    directory: string,
     file: Express.Multer.File
   ): Promise<{ err?: string; url?: string }> {
-    if (!this.oss) {
-      return { err: 'OSS initialization failed' }
-    }
-    const suffix = file.originalname.split('.').pop()
-    const filrName = `${createHash('md5').update(`${Date.now()}`).digest('hex')}.${suffix}`
-    const ossDir = this.configService.get<string>('OSS_DIR') || ''
-    const ossUrl = this.configService.get<string>('OSS_URL') || ''
-    const ossPath = join(ossDir, dir, filrName)
-    const [err, res] = await to<AliOSS.PutObjectResult>(
-      this.oss.put(ossPath, file.buffer, { timeout: 600000 })
+    if (!this.oss) return { err: 'OSS initialization failed' }
+    const prefix = this.config.get<string>('OSS_KEY_PREFIX') ?? ''
+    const publicBaseUrl = this.config.get<string>('OSS_PUBLIC_BASE_URL')
+    const filename =
+      randomUUID() + posix.extname(file.originalname).toLowerCase()
+    const objectKey = posix
+      .join(prefix, directory, filename)
+      .replace(/^\/+/, '')
+    const [error, result] = await to<AliOSS.PutObjectResult>(
+      this.oss.put(objectKey, file.buffer, { timeout: 600000 })
     )
-    if (err || res?.res.status !== 200) {
-      let msg = err?.message
-      if (!msg && res) msg = JSON.stringify(res)
-      return { err: msg }
+    if (error || !result || result.res.status < 200 || result.res.status >= 300)
+      return { err: error?.message ?? 'Upload failed' }
+    return {
+      url: publicBaseUrl
+        ? publicBaseUrl.replace(/\/+$/, '') + '/' + objectKey
+        : result.url
     }
-    return { url: `${ossUrl}/${ossPath}` }
   }
 }

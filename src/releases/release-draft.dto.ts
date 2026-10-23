@@ -25,7 +25,7 @@ export class CreateReleaseDraftDto {
 
   @IsArray()
   @IsInt({ each: true })
-  compatibleBaseVersionCodes: number[]
+  baseVersionCodes: number[]
 
   @IsArray()
   @IsEnum(PlatformType, { each: true })

@@ -5,9 +5,9 @@ const requiredKeys = [
   'ORM_USERNAME',
   'ORM_PASSWORD',
   'ORM_DATABASE',
-  'OSS_BUCKER',
-  'OSS_KEY',
-  'OSS_SECRET',
+  'OSS_BUCKET',
+  'OSS_ACCESS_KEY_ID',
+  'OSS_ACCESS_KEY_SECRET',
   'OSS_REGION'
 ] as const
 

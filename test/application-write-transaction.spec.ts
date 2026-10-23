@@ -51,9 +51,9 @@ describe('application write transaction', () => {
     const f = fixture()
     const result = await withApplicationWrite(f.source, application, () => {
       f.order.push('insert')
-      return Promise.resolve(2000)
+      return Promise.resolve(1)
     })
-    expect(result).toBe(2000)
+    expect(result).toBe(1)
     expect(f.order).toEqual([
       'SELECT GET_LOCK(?, 30) AS acquired',
       'begin',

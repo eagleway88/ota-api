@@ -19,7 +19,12 @@ export class TaskQueryService {
     const window = normalizeAdminQuery(query)
     return this.read.withApplication(appName, async (runner, app) => {
       const result = await this.listTasks(runner, app, query, window)
-      return adminPage(result.rows, result.total, window, this.history())
+      return adminPage(
+        result.rows,
+        result.total,
+        window,
+        this.retentionMetadata()
+      )
     })
   }
 
@@ -61,20 +66,20 @@ export class TaskQueryService {
         'log.attempt_no',
         window
       )
-      return adminPage(rows, total, window, this.history())
+      return adminPage(rows, total, window, this.retentionMetadata())
     })
   }
 
   delivery(appName: string, releaseId: string, query: AdminTimeQueryDto) {
     const window = normalizeAdminQuery(query)
     return this.read.withApplication(appName, async (runner, app) => {
-      await this.read.requireTable(runner, app.tables.version)
+      await this.read.requireTable(runner, app.tables.release)
       const release = await runner.manager
         .createQueryBuilder()
-        .select('version.release_id', 'releaseId')
-        .from(app.tables.version, 'version')
+        .select('release.release_id', 'releaseId')
+        .from(app.tables.release, 'release')
         .where(
-          'version.app_name = :appName AND version.release_id = :releaseId',
+          'release.app_name = :appName AND release.release_id = :releaseId',
           {
             appName,
             releaseId
@@ -124,7 +129,7 @@ export class TaskQueryService {
           countSemantics:
             'application-dispatch-attempts-not-release-recipients',
           note: 'A task can dispatch other eligible releases. Counts are neither unique recipients nor installations.',
-          ...this.history()
+          ...this.retentionMetadata()
         }
       }
     })
@@ -176,10 +181,9 @@ export class TaskQueryService {
     )
   }
 
-  private history() {
+  private retentionMetadata() {
     return {
-      historyNotice:
-        'Records are retained indefinitely by this service. Query time windows and pagination limit each response, not retention.'
+      retention: 'permanent' as const
     }
   }
 }

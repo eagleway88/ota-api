@@ -3,7 +3,7 @@ import { createHash } from 'crypto'
 
 export type ApplicationTables = {
   prefix: string
-  version: string
+  release: string
   releaseUser: string
   releaseDraft: string
   artifact: string
@@ -57,7 +57,7 @@ export class ApplicationTableResolver {
 
     return {
       prefix,
-      version: `${prefix}_version`,
+      release: `${prefix}_release`,
       releaseUser: `${prefix}_release_user`,
       releaseDraft: `${prefix}_release_draft`,
       artifact: `${prefix}_artifact`,

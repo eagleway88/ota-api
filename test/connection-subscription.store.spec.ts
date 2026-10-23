@@ -4,11 +4,11 @@ describe('ConnectionSubscriptionStore', () => {
   it('keeps application contexts independent and filters userIds exactly', () => {
     const store = new ConnectionSubscriptionStore()
     store.connect('socket-1')
-    store.subscribeUserId('socket-1', 'eagleway-network:windows:1')
-    store.subscribeUserId('socket-1', 'eagleway-network:ios:1')
+    store.subscribeUserId('socket-1', 'sample-app:windows:1')
+    store.subscribeUserId('socket-1', 'sample-app:ios:1')
     store.subscribeUserId('socket-1', 'other:windows:1')
     store.subscribeApplication('socket-1', {
-      appName: 'eagleway-network',
+      appName: 'sample-app',
       platform: 'windows',
       architecture: 'x64',
       nativeVersionCode: 100,
@@ -17,9 +17,9 @@ describe('ConnectionSubscriptionStore', () => {
 
     expect(
       Array.from(
-        store.getApplicationSubscriber('socket-1', 'eagleway-network')!.userIds
+        store.getApplicationSubscriber('socket-1', 'sample-app')!.userIds
       )
-    ).toEqual(['eagleway-network:windows:1'])
+    ).toEqual(['sample-app:windows:1'])
   })
 
   it('invalidates an in-flight subscriber snapshot when identity changes', () => {

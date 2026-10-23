@@ -63,7 +63,7 @@ function reader(
           getRawMany: () => {
             expect(runner.isTransactionActive).toBe(true)
             queries.push(table)
-            if (table.endsWith('_version')) {
+            if (table.endsWith('_release')) {
               started.resolve()
               return pending?.promise ?? Promise.resolve([{ ...release }])
             }
@@ -106,7 +106,7 @@ describe('ReleaseCatalogService snapshots', () => {
     )
     expect(read.queries).toEqual([
       'ota_applications',
-      'app_123a_version',
+      'app_123a_release',
       'app_123a_release_user'
     ])
     expect(read.runner.startTransaction).toHaveBeenCalledWith('REPEATABLE READ')
@@ -185,10 +185,10 @@ describe('ReleaseCatalogService snapshots', () => {
     expect((await service.loadCatalog('app')).available.revision).toBe(11)
   })
 
-  it('rejects missing release tables instead of serving a compatibility fallback', async () => {
+  it('rejects incomplete release storage', async () => {
     const read = reader(42)
     read.runner.hasTable.mockImplementation((name: string) =>
-      Promise.resolve(!name.endsWith('_version'))
+      Promise.resolve(!name.endsWith('_release'))
     )
     const { service } = serviceFor(read)
     await expect(service.loadCatalog('app')).rejects.toThrow(

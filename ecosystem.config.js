@@ -3,18 +3,9 @@ module.exports = {
     {
       name: 'ota-api', // 应用名称
       script: './dist/main.js', // 编译后的 NestJS 入口文件
-      instances: 1, // 开启集群模式，'max'代表使用所有 CPU 核心，`1`代表单列
-      // 不能启用`cluster`，因为用到了ws.id
+      instances: 1, // 开启集群模式，'max'代表使用所有 CPU 核心，`1`代表单实例
+      // 连接订阅索引位于进程内存，使用单实例。
       exec_mode: 'fork', // 模式：cluster（集群）或 fork（单实例）
-
-      // // 环境变量
-      // env: {
-      //   NODE_ENV: 'development' // 默认开发环境
-      // },
-      // env_production: {
-      //   NODE_ENV: 'production', // 生产环境
-      //   PORT: 3000 // 应用端口
-      // },
 
       // 进程管理
       autorestart: true, // 应用崩溃后自动重启

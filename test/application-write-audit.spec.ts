@@ -168,9 +168,9 @@ describe('application failure audit', () => {
     const f = fixture()
     await expect(
       withAuditedApplicationWrite(f.source, application, audit, () =>
-        Promise.resolve(2000)
+        Promise.resolve(1)
       )
-    ).resolves.toBe(2000)
+    ).resolves.toBe(1)
     expect(f.createQueryRunner).toHaveBeenCalledTimes(1)
     expect(f.rows).toEqual([])
   })
@@ -215,7 +215,7 @@ describe('application failure audit', () => {
       if (stage === 'cleanup') f.business.release.mockRejectedValueOnce(error)
       await expect(
         withAuditedApplicationWrite(f.source, application, audit, () =>
-          stage === 'rollback' ? Promise.reject(error) : Promise.resolve(2000)
+          stage === 'rollback' ? Promise.reject(error) : Promise.resolve(1)
         )
       ).rejects.toBe(error)
       expect(f.createQueryRunner).toHaveBeenCalledTimes(1)

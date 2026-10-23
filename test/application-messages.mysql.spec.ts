@@ -7,7 +7,7 @@ import { DataSource } from 'typeorm'
 import { ApplicationMessage } from '@/entities/application-message.entity'
 import { LastMessageService } from '@/messaging/last-message.service'
 
-const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
+const socketPath = process.env.OTA_TEST_MYSQL_SOCKET
 const mysql = socketPath ? describe : describe.skip
 mysql('application messages on the fresh schema', () => {
   let control: DataSource, source: DataSource, database: string
@@ -20,7 +20,7 @@ mysql('application messages on the fresh schema', () => {
   }
   beforeAll(async () => {
     if (
-      !/^\/(?:private\/)?tmp\/ota-migration-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
+      !/^\/(?:private\/)?tmp\/ota-test-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
         socketPath ?? ''
       )
     )
@@ -29,7 +29,7 @@ mysql('application messages on the fresh schema', () => {
     await control.initialize()
   })
   beforeEach(async () => {
-    database = 'ota_migration_test_' + randomUUID().replaceAll('-', '')
+    database = 'ota_test_' + randomUUID().replaceAll('-', '')
     await control.query(`CREATE DATABASE \`${database}\``)
     source = new DataSource({
       ...connection,
@@ -47,7 +47,7 @@ mysql('application messages on the fresh schema', () => {
   afterAll(async () => {
     if (control?.isInitialized) await control.destroy()
   })
-  it('initializes global tables and canonical application columns without extra installation metadata', async () => {
+  it('initializes global tables and application release storage', async () => {
     const runner = source.createQueryRunner()
     try {
       expect(
@@ -69,18 +69,16 @@ mysql('application messages on the fresh schema', () => {
       )
       const app = await registry.prepare('fresh-app-123')
       expect(app.tablePrefix).toContain('123')
-      const schema = await runner.getTable(app.tables.version)
+      const schema = await runner.getTable(app.tables.release)
       expect(schema?.columns.map(c => c.name)).toEqual(
         expect.arrayContaining([
+          'release_sequence',
           'app_name',
           'target_version_code',
+          'base_version_codes',
           'is_enabled'
         ])
       )
-      for (const old of ['name', 'ver', 'enable', 'create_time'])
-        expect(schema?.findColumnByName(old)).toBeUndefined()
-      const audit = await runner.getTable(app.tables.auditLog)
-      expect(audit?.findColumnByName('actor_admin_id')).toBeUndefined()
       expect(await source.runMigrations({ transaction: 'each' })).toEqual([])
       await source.query(
         "INSERT INTO ota_messages VALUES ('fresh-app-123','device','expired','{}',?,UTC_TIMESTAMP(6),DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND))",

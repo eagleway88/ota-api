@@ -33,7 +33,7 @@ describe('telemetry write boundary', () => {
         appName: 'app',
         platform: 'windows',
         versionCode: 100,
-        releaseSequence: 2000
+        releaseSequence: 1
       }
       expect(await module.get(TelemetryWriteService).success(input)).toEqual({
         id: 1

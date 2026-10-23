@@ -9,10 +9,10 @@ import { resolveUpdate } from '@/updates/decision/resolve-update'
 function release(overrides: Partial<Release> = {}): Release {
   return {
     releaseId: 'release-1',
-    releaseSequence: 2000,
-    appName: 'eagleway-network',
+    releaseSequence: 1,
+    appName: 'sample-app',
     targetVersionCode: 110,
-    compatibleBaseVersionCodes: [100],
+    baseVersionCodes: [100],
     platforms: ['windows'],
     architectures: ['x64'],
     distributionChannel: 'stable',
@@ -28,7 +28,7 @@ function release(overrides: Partial<Release> = {}): Release {
 
 function context(overrides: Partial<ClientUpdateContext> = {}) {
   return {
-    appName: 'eagleway-network',
+    appName: 'sample-app',
     platform: 'windows',
     architecture: 'x64',
     distributionChannel: 'stable',
@@ -56,7 +56,7 @@ describe('resolveUpdate', () => {
     ['architecture_mismatch', { architectures: ['arm64'] }],
     ['channel_mismatch', { distributionChannel: 'beta' }],
     ['audience_mismatch', { scope: 'allowlist' }],
-    ['base_version_mismatch', { compatibleBaseVersionCodes: [999] }],
+    ['base_version_mismatch', { baseVersionCodes: [999] }],
     ['already_current', { updateType: 'full', targetVersionCode: 100 }]
   ] as Array<[string, Partial<Release>]>)(
     'diagnoses %s from the same selection rules',
@@ -72,19 +72,19 @@ describe('resolveUpdate', () => {
     }
   )
 
-  it('does not send a hot update to an incompatible native version', () => {
+  it('does not send a hot update outside its base-version set', () => {
     const decision = resolveUpdate(
       context(),
       {
         revision: 1,
-        releases: [release({ compatibleBaseVersionCodes: [110] })]
+        releases: [release({ baseVersionCodes: [110] })]
       },
       audience(),
       defaultApplicationUpdatePolicy
     )
 
     expect(decision.release).toBeNull()
-    expect(decision.reason).toBe('no-compatible-release')
+    expect(decision.reason).toBe('no-applicable-release')
   })
 
   it('selects an older public candidate when the latest private release is not allowed', () => {
@@ -95,13 +95,13 @@ describe('resolveUpdate', () => {
         releases: [
           release({
             releaseId: 'private',
-            releaseSequence: 2002,
+            releaseSequence: 3,
             scope: 'allowlist'
           }),
-          release({ releaseId: 'public', releaseSequence: 2001 })
+          release({ releaseId: 'public', releaseSequence: 2 })
         ]
       },
-      audience([['private', ['eagleway-network:windows:2']]]),
+      audience([['private', ['sample-app:windows:2']]]),
       defaultApplicationUpdatePolicy
     )
 
@@ -116,18 +116,18 @@ describe('resolveUpdate', () => {
         releases: [
           release({
             releaseId: 'private',
-            releaseSequence: 2002,
+            releaseSequence: 3,
             scope: 'allowlist',
             mandatory: true
           }),
           release({
             releaseId: 'public',
-            releaseSequence: 2001,
+            releaseSequence: 2,
             mandatory: false
           })
         ]
       },
-      audience([['private', ['eagleway-network:windows:2']]]),
+      audience([['private', ['sample-app:windows:2']]]),
       defaultApplicationUpdatePolicy
     )
 
@@ -135,7 +135,7 @@ describe('resolveUpdate', () => {
   })
 
   it('accepts a private release for an exact full userId match', () => {
-    const userId = 'eagleway-network:windows:1'
+    const userId = 'sample-app:windows:1'
     const decision = resolveUpdate(
       context({ userIds: new Set([userId]) }),
       {
@@ -187,6 +187,25 @@ describe('resolveUpdate', () => {
     expect(decision.release).toBeNull()
   })
 
+  it('requires an explicit matching client channel for channel-scoped releases', () => {
+    const decision = resolveUpdate(
+      context({ distributionChannel: undefined }),
+      { revision: 1, releases: [release({ distributionChannel: 'beta' })] },
+      audience(),
+      defaultApplicationUpdatePolicy
+    )
+    expect(decision.release).toBeNull()
+    expect(decision.skipReason).toBe('channel_mismatch')
+  })
+  it('allows releases without a channel constraint for any client channel', () => {
+    const decision = resolveUpdate(
+      context({ distributionChannel: 'beta' }),
+      { revision: 1, releases: [release({ distributionChannel: undefined })] },
+      audience(),
+      defaultApplicationUpdatePolicy
+    )
+    expect(decision.release?.releaseId).toBe('release-1')
+  })
   it.each(['arm64', 'x64'])(
     'matches a macOS universal release to %s clients',
     architecture => {
@@ -211,7 +230,7 @@ describe('resolveUpdate', () => {
 
   it('does not expose a release with an empty allowlist', () => {
     const decision = resolveUpdate(
-      context({ userIds: new Set(['eagleway-network:windows:1']) }),
+      context({ userIds: new Set(['sample-app:windows:1']) }),
       {
         revision: 1,
         releases: [release({ scope: 'allowlist' })]
@@ -225,7 +244,7 @@ describe('resolveUpdate', () => {
 
   it('does not resend an installed hot release', () => {
     const decision = resolveUpdate(
-      context({ installedReleaseSequence: 2000 }),
+      context({ installedReleaseSequence: 1 }),
       { revision: 1, releases: [release()] },
       audience(),
       defaultApplicationUpdatePolicy

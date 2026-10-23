@@ -221,19 +221,22 @@ export class SqlTelemetryRepository extends TelemetryWriteRepository {
     app: RegisteredApplication,
     sequence: number
   ) {
-    if (!(await runner.hasTable(app.tables.version)))
-      throw new BadRequestException('Version does not exist')
+    if (!(await runner.hasTable(app.tables.release)))
+      throw new BadRequestException('Release does not exist')
     const release = await runner.manager
       .createQueryBuilder()
-      .select('version.id', 'id')
-      .from(app.tables.version, 'version')
+      .select('release.release_sequence', 'releaseSequence')
+      .from(app.tables.release, 'release')
       .setLock('pessimistic_read')
-      .where('version.id = :sequence AND version.app_name = :appName', {
-        sequence,
-        appName: app.appName
-      })
-      .getRawOne<{ id: number | string }>()
-    if (!release) throw new BadRequestException('Version does not exist')
+      .where(
+        'release.release_sequence = :sequence AND release.app_name = :appName',
+        {
+          sequence,
+          appName: app.appName
+        }
+      )
+      .getRawOne<{ releaseSequence: number | string }>()
+    if (!release) throw new BadRequestException('Release does not exist')
   }
 
   private async insert(

@@ -18,7 +18,7 @@ src/
   infrastructure/
     persistence/         规范字段 SQL 仓储、表结构定义与锁
     oss/                 上传策略与 OSS 资源适配
-  migrations/            全新基线初始化；不包含旧库升级链
+  migrations/            数据库初始结构与结构版本
   scripts/               db init、app prepare、key、audit 本地 CLI
   config/                环境校验、HTTP 与 Swagger
   contracts/             跨模块正式值对象与协议
@@ -31,14 +31,14 @@ test/
 docs/                    接口、接入、部署与运维说明
 ~~~
 
-只保留 /api/v1/app 与 /api/v1/manage；没有 compat/legacy、旧 DTO、宽松检查路由或 legacyPayload。Swagger 只分 App/Manage，全部 HTTP 使用严格 DTO。永久 Key 显式授权应用，平台运维只走 CLI。
+HTTP 分为 /api/v1/app 与 /api/v1/manage；Swagger 提供 App/Manage 分组，全部请求使用严格 DTO。API Key 显式授权应用，平台运维只走 CLI。
 
-ReleaseWriteRepository / TelemetryWriteRepository 保留可替换端口，实际实现为 SqlReleaseRepository / SqlTelemetryRepository，直接写规范字段；application-schema.ts 定义版本及上报表，不放在通用 utils，也不维护新旧字段双写。
+ReleaseWriteRepository / TelemetryWriteRepository 保留可替换端口，实际实现为 SqlReleaseRepository / SqlTelemetryRepository，直接写规范字段；application-schema.ts 定义版本及上报表，不放在通用 utils，字段与领域模型一一对应。
 
 全局表保存应用注册、Key/授权、运维审计和待确认消息。应用表保存发布、名单、草稿、资源、任务、执行记录和应用审计。app prepare 仅用于已初始化的新结构，运行时不自动注册应用或修表。
 
-发布和策略修改在应用级锁及事务内更新业务、目录修订、任务与审计。目录采用同一 REPEATABLE READ 快照，缓存与在途读取失效隔离；HTTP、订阅补发与后台推送复用纯决策函数。目录缺表或应用未就绪时拒绝读取，不回退旧存储。
+发布和策略修改在应用级锁及事务内更新业务、目录修订、任务与审计。目录采用同一 REPEATABLE READ 快照，缓存与在途读取失效隔离；HTTP、订阅补发与后台推送复用纯决策函数。目录缺表或应用未就绪时拒绝读取。
 
 Worker 随服务启动运行，使用数据库租约、修订校验与分批 checkpoint 防止迟到覆盖。任务/执行记录/审计永久保存；消息只有当前待确认状态，按 TTL/ACK 处理。
 
-尚待改进事项与真实环境验收见 [进度报告](REFACTOR_PROGRESS.md)，目录整理本身不代表生产容量或全链路验收通过。
+尚待改进事项与真实环境验收见 [进度报告](STATUS.md)，目录整理本身不代表生产容量或全链路验收通过。

@@ -6,7 +6,7 @@ function list(row: Record<string, unknown>, key: string): unknown[] {
   return value
 }
 export function mapStoredReleaseRecord(row: Record<string, unknown>): Release {
-  const sequence = Number(row.id),
+  const sequence = Number(row.release_sequence),
     revision = Number(row.policy_revision),
     target = Number(row.target_version_code)
   if (
@@ -25,7 +25,7 @@ export function mapStoredReleaseRecord(row: Record<string, unknown>): Release {
     !['full', 'hot'].includes(String(row.update_type))
   )
     throw new Error('Invalid release policy')
-  const bases = list(row, 'compatible_base_version_codes'),
+  const bases = list(row, 'base_version_codes'),
     platforms = list(row, 'platforms'),
     architectures = list(row, 'architectures')
   if (
@@ -53,7 +53,7 @@ export function mapStoredReleaseRecord(row: Record<string, unknown>): Release {
     releaseSequence: sequence,
     appName: row.app_name,
     targetVersionCode: target,
-    compatibleBaseVersionCodes: bases as number[],
+    baseVersionCodes: bases as number[],
     platforms: platforms,
     architectures: architectures,
     distributionChannel:

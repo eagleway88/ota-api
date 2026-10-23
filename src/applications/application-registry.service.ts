@@ -9,7 +9,7 @@ import {
   createAppErrorLogTable,
   createErrorTable,
   createSuccessTable,
-  createVersionTable
+  createReleaseTable
 } from '@/infrastructure/persistence/application-schema'
 import { randomUUID } from 'crypto'
 import { GlobalAuditContext, insertGlobalAudit } from '@/audit/global-audit'
@@ -182,7 +182,7 @@ export class ApplicationRegistryService {
         throw new Error('Application table prefix was not allocated')
       }
       const tables = this.tableResolver.resolve(appName, tablePrefix)
-      await this.ensureVersionTable(queryRunner, tables)
+      await this.ensureReleaseTable(queryRunner, tables)
       await this.ensureApplicationTables(queryRunner, tables)
       await queryRunner.startTransaction()
       try {
@@ -491,11 +491,11 @@ export class ApplicationRegistryService {
     `)
   }
 
-  private async ensureVersionTable(
+  private async ensureReleaseTable(
     runner: QueryRunner,
     tables: ApplicationTables
   ) {
-    const desired = createVersionTable({ tablePrefix: tables.prefix })
+    const desired = createReleaseTable({ tablePrefix: tables.prefix })
     const existing = await runner.getTable(desired.name)
     if (existing) {
       this.assertSchema(
@@ -505,17 +505,10 @@ export class ApplicationRegistryService {
       return
     }
     await runner.createTable(desired)
-    await runner.query(
-      'ALTER TABLE ' +
-        runner.connection.driver.escape(tables.version) +
-        ' AUTO_INCREMENT = 2000'
-    )
   }
   private assertSchema(actual: string[], expected: string[]) {
     if (expected.some(n => !actual.includes(n)))
-      throw new ConflictException(
-        'Unsupported database schema; use a fresh database'
-      )
+      throw new ConflictException('Application schema is incomplete')
   }
   private async ensureReportingTable(
     runner: QueryRunner,

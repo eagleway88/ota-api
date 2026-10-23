@@ -10,13 +10,13 @@
 Authorization: Bearer ota_ak_<keyId>.<secret>
 ```
 
-Key 必须显式授权路径中的应用；observer 可读统计、上报、任务、审计及发布详情，full 包含这些和写入权限，但不能访问未授权应用。消息订阅查询需 messages:read（messenger/full）。无效、到期或撤销返回 401；应用/权限不足返回 403。每次查库，不缓存授权状态，旧 JWT 无效。
+Key 必须显式授权路径中的应用；observer 可读统计、上报、任务、审计及发布详情，full 包含这些和写入权限，但不能访问未授权应用。消息订阅查询需 messages:read（messenger/full）。无效、到期或撤销返回 401；应用/权限不足返回 403。每次查库，不缓存授权状态。
 
-没有全局数据查询 HTTP 接口；平台级审计由运维运行 `yarn ota audit list`。业务 userId 和设备 uniqueId 均不能替代 API Key 认证；IPS 来源 IP 允许列表已删除。详细签发、多应用授权和轮换步骤见 [认证手册](AUTHENTICATION.md)。
+没有全局数据查询 HTTP 接口；平台级审计由运维运行 `yarn ota audit list`。业务 userId 和设备 uniqueId 均不能替代 API Key 认证。详细签发、多应用授权和轮换步骤见 [认证手册](AUTHENTICATION.md)。
 
 ## 接口清单
 
-下表中的路径都包含 `/api` 前缀。查询均为 `GET`，不会准备表、补列或迁移数据库。
+下表中的路径都包含 `/api` 前缀。查询均为 `GET`，不会准备表或补列。
 
 | 路径 | 数据 | 额外筛选 |
 | --- | --- | --- |
@@ -39,8 +39,8 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
 - `page` 默认 `1`，允许 `1–999999`；`pageSize` 默认 `20`，允许 `1–100`。
 - `from` 为包含边界，`to` 为不包含边界，均使用带时区的 ISO 8601 时间，例如 `2026-10-01T00:00:00Z`。
 - 省略 `to` 使用当前时间；省略 `from` 使用 `to` 前 30 天；单次区间必须大于 0 且不超过 90 天。
-- 任务、执行记录及应用/全局审计永久保存。查询跨度限制不限制记录年龄，可指定更早时间段分段读取；不会按旧保留期删除。
-- 统计汇总使用同样的时间区间，但不分页。已存在的任务和审计查询路由现在也应用此默认时间区间，历史查询需显式传参。
+- 任务、执行记录及应用/全局审计永久保存。查询跨度限制不限制记录年龄，可指定更早时间段分段读取。
+- 统计汇总使用同样的时间区间，但不分页。任务和审计查询也使用此时间区间，查询更早记录时显式传参。
 - 参数错误、未知筛选字段、重复参数形成的数组、超出分页/时间上限均返回 `400`。
 - 成功/失败上报按创建时间筛选；任务按创建时间；执行日志按开始时间；审计按发生时间；客户端错误聚合按最后发生时间。
 - 列表采用时间与 ID 两级排序，查询条件中的普通值使用 SQL 参数绑定。
@@ -71,7 +71,7 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
 {
   "code": 0,
   "data": {
-    "appName": "eagleway-network",
+    "appName": "sample-app",
     "from": "2026-10-01T00:00:00.000Z",
     "to": "2026-10-20T00:00:00.000Z",
     "successCount": 5,
@@ -84,13 +84,13 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
 
 `successCount/errorCount` 保持上报记录次数的含义，不是去重用户数；无键失败记录按 ID 更新不会新增一条记录。发送尝试和普通消息 ACK 不属于安装成功上报。
 
-统计写入使用独立上报服务与规范字段存储端口；管理员 GET 查询采用 API Key 认证。客户端通过正式 /api/v1/app POST 上报，使用 `versionCode/releaseSequence/reportedUsername`，不再调用 `/version/success|error|app-error`。可选 `reportId` 同内容重试只产生一条记录，不同内容复用键返回 `409`；无键逐次计数，`recordId` 更新不改变条数和原发布关联。完整规则见 [SDK 上报说明](SDK_INTEGRATION.md#安装与错误上报)。公开 POST 不能查询统计或日志；这些 GET 仍需按应用授权的 API Key。
+统计写入使用独立上报服务与规范字段存储端口；管理员 GET 查询采用 API Key 认证。客户端通过正式 /api/v1/app POST 上报，使用 `versionCode/releaseSequence/reportedUsername`。可选 `reportId` 同内容重试只产生一条记录，不同内容复用键返回 `409`；无键逐次计数，`recordId` 更新不改变条数和原发布关联。完整规则见 [SDK 上报说明](SDK_INTEGRATION.md#安装与错误上报)。公开 POST 不能查询统计或日志；这些 GET 仍需按应用授权的 API Key。
 
 客户端错误表保存的是聚合记录。`telemetry/app-errors` 的 `total` 是符合条件的错误组数；每组的 `reportCount` 是该组累计次数，不能解读为查询窗口内发生次数。响应通过 `windowBasis: "lastSeenAt"` 和 `reportCountSemantics` 明确这一点。由于错误表只保存聚合，不保存逐次事件，当前无法精确还原每个时间段的错误次数。
 
 `delivery` 返回 `tasks` 分页列表及各任务的 `latestLog`。任务可能因统一重算向不同连接下发其他适用版本，所以执行计数属于应用分发尝试，不能全部归为触发版本的接收人数。`receiveConfirmationAvailable: false` 表示当前协议没有 OTA 接收确认。`metrics_complete: 0` 的执行记录必须展示为不完整统计。
 
-日志响应中的 `historyNotice` 说明本服务永久保存任务、执行记录和审计；不导入旧系统数据，也不补造从未采集的记录。没有记录不表示操作从未发生。当前审计写入仍有缺口，详见 [完成度报告](REFACTOR_PROGRESS.md)。其他消息 TTL、内存缓存及外部清理边界见 [数据保存核对](DATA_LIFECYCLE.md)。
+日志响应中的 `retention: "permanent"` 声明任务、执行记录和审计永久保存。没有记录不表示操作从未发生。当前审计写入仍有缺口，详见 [完成度报告](STATUS.md)。其他消息 TTL、内存缓存及外部清理边界见 [数据保存核对](DATA_LIFECYCLE.md)。
 
 ## 发布操作失败审计
 
@@ -99,7 +99,7 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
 覆盖已进入应用写入边界的发布、启用/停用、已发布名单替换/范围修改、重新分发，以及草稿创建/编辑/名单修改。非法应用/平台标识返回 `400` 并记录固定错误分类，不将完整名单或异常正文写入失败摘要。成功审计与业务变更、修订及任务同事务提交。
 
 - 业务确认回滚后，用独立连接/事务追加 `result=failed`；`task_id`、`revision_before`、`revision_after` 为空，不关联已回滚的任务，也不声称修订已生效。`release_id/target_id` 是尝试操作的对象，可能不存在（包括发布回滚和跨应用 ID 请求）。
-- `change_summary` 只保留允许的意图字段：启用状态、范围、人数、重推标记或入口来源。它不是已生效的差异；失败审计不保存请求正文、URL、名单、SQL、原始异常或堆栈。
+- `change_summary` 只保留允许的意图字段：启用状态、范围、人数、或重推标记。它不是已生效的差异；失败审计不保存请求正文、URL、名单、SQL、原始异常或堆栈。
 - `error_code` 使用 `INVALID_OPERATION`、`RELEASE_NOT_FOUND`、`OPERATION_CONFLICT`、`DATABASE_WRITE_FAILED` 或 `APPLICATION_OPERATION_FAILED`，不透出数据库错误详情。
 - 每次管理请求尝试生成独立 `operation_id`；失败后重试不会覆盖失败记录。草稿重复发布仍复用原序号，不重复创建成功审计。启停/名单/重推尚无通用幂等键，不应在响应异常后盲目重放。
 - 提交后的 Worker 错误不转为失败管理审计。提交响应丢失、回滚失败等结果未知情况也不伪造 `failed`；先查询版本、草稿、任务和成功审计，核实实际结果。
@@ -135,7 +135,7 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
 - 请求去重前最多 5,000 个标识，每个最多 191 字符；5,000 人全部替换为另 5,000 人最多产生 50 段。正文使用 JSON 数组，重复 ID 不能绕过限额。HTTP 请求体/网关大小限制仍独立生效。
 - 已存名单异常超过 5,000 人时，名单/范围修改返回 `409`，不截断差异、不部分修改。应先受控核对；需要立即停止推送时可使用停用接口，它不修改名单。失败审计不保存成功差异，`change_detail` 仍为空。
 
-完整差异写入受管理员认证保护的数据库审计；新增差异计算和审计 helper 不输出名单到运行日志。所有段使用现有 `change_summary/change_detail/part_no` 字段，无新增表列，也不为历史审计补造差异。
+完整差异写入受管理员认证保护的数据库审计；新增差异计算和审计 helper 不输出名单到运行日志。所有段使用 `change_summary/change_detail/part_no` 字段表示差异与分段序号。
 
 ## 发布任务运行进度
 
@@ -153,7 +153,7 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
 | `metrics_complete` | 只有本轮完整成功提交时为 1；运行中、失败和租约过期为 0 |
 | `request_id` | 当前执行的关联标识；恢复执行没有原请求时生成新的 UUID，不冒充原管理请求 ID |
 
-无候选时按启用→应用→平台→架构→渠道→名单→基础版本→是否已有更新的顺序，记录第一个清空候选集合的阶段。原因键为 `no_enabled_release/application_mismatch/platform_mismatch/architecture_mismatch/channel_mismatch/audience_mismatch/base_version_mismatch/already_current`。连接状态另有 `subscription_changed/disconnected`，重复内容与撤销失败阻止新发送分别为 `unchanged/revoke_emit_failed`。无可用新版本时仍可能撤销旧版本，因此跳过计数与发送尝试数不能直接相加还原检查数。
+无候选时按启用→应用→平台→架构→渠道→名单→基础版本→是否已有更新的顺序，记录第一个清空候选集合的阶段。原因键为 `no_enabled_release/application_mismatch/platform_mismatch/architecture_mismatch/channel_mismatch/audience_mismatch/base_version_mismatch/already_current`。连接状态另有 `subscription_changed/disconnected`，重复内容与撤销失败阻止新发送分别为 `unchanged/revoke_emit_failed`。无可用新版本时仍可能撤销之前已推送的发布，因此跳过计数与发送尝试数不能直接相加还原检查数。
 
 `release_summary` 示例（字段使用 JSON 对象，不是逐连接列表）：
 
@@ -163,14 +163,14 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
   "complete": true,
   "omittedCounts": { "eligible": 0, "updated": 0, "revoked": 0, "emitErrors": 0 },
   "entries": [
-    { "releaseId": "发布 UUID", "releaseSequence": 2000, "eligible": 100, "updated": 100, "revoked": 0, "emitErrors": 0 }
+    { "releaseId": "发布 UUID", "releaseSequence": 1, "eligible": 100, "updated": 100, "revoked": 0, "emitErrors": 0 }
   ]
 }
 ```
 
 最多保存最先遇到的 100 个实际版本，后续不同版本的计数进入 `omittedCounts` 并设置 `complete: false`，总计数仍正常累计。已列版本的计数会继续更新；摘要不含连接 ID、userId 或完整发布内容。`release_summary.complete` 只表示已持久化计数的版本归类是否截断，与执行是否完成的 `metrics_complete` 独立：完整成功的任务也可能有截断的逐版本摘要。
 
-即时发送错误会令本轮进入重试；重试可能再次发送，因此不能将不同执行记录累加为独立接收人数。修订变化或进程异常后保留最后已提交 checkpoint，未提交的末批可能缺失。过期接管建立新的执行记录，旧执行者不能覆盖新结果。零目标可以成功完成，仍不代表客户端安装成功。
+即时发送错误会令本轮进入重试；重试可能再次发送，因此不能将不同执行记录累加为独立接收人数。修订变化或进程异常后保留最后已提交 checkpoint，未提交的末批可能缺失。过期接管建立新的执行记录，先前执行者不能覆盖接管后的结果。零目标可以成功完成，仍不代表客户端安装成功。
 
 日志的 `skip_summary/release_summary` 为 null 时表示未采集，不是空结果；错误摘要采用固定脱敏分类，不通过管理 API 暴露原 SQL/传输异常中的业务数据。
 
@@ -179,10 +179,10 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
 以下为接入示例，域名和 Token 由调用方填写：
 
 ```bash
-curl --get 'https://ota.example.com/api/v1/manage/apps/eagleway-network/statistics/summary' \
+curl --get 'https://ota.example.com/api/v1/manage/apps/sample-app/statistics/summary' \
   -H "Authorization: Bearer $OTA_ACCESS_KEY" \
   --data-urlencode 'platform=windows' \
-  --data-urlencode 'releaseSequence=2000' \
+  --data-urlencode 'releaseSequence=1' \
   --data-urlencode 'from=2026-10-01T00:00:00Z' \
   --data-urlencode 'to=2026-10-20T00:00:00Z'
 ```

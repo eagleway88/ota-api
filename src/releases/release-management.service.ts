@@ -78,21 +78,21 @@ export class ReleaseManagementService {
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     try {
-      if (!(await queryRunner.hasTable(application.tables.version))) {
+      if (!(await queryRunner.hasTable(application.tables.release))) {
         return apiUtil.page([], 0)
       }
       const count = await queryRunner.manager
         .createQueryBuilder()
         .select('COUNT(*)', 'total')
-        .from(application.tables.version, 'version')
-        .where('version.app_name = :appName', { appName })
+        .from(application.tables.release, 'release')
+        .where('release.app_name = :appName', { appName })
         .getRawOne<{ total: string | number }>()
       const records = await queryRunner.manager
         .createQueryBuilder()
         .select('*')
-        .from(application.tables.version, 'version')
-        .where('version.app_name = :appName', { appName })
-        .orderBy('version.id', 'DESC')
+        .from(application.tables.release, 'release')
+        .where('release.app_name = :appName', { appName })
+        .orderBy('release.release_sequence', 'DESC')
         .skip((page - 1) * pageSize)
         .take(pageSize)
         .getRawMany<Record<string, unknown>>()
@@ -115,13 +115,13 @@ export class ReleaseManagementService {
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     try {
-      if (await queryRunner.hasTable(application.tables.version)) {
+      if (await queryRunner.hasTable(application.tables.release)) {
         const published = await queryRunner.manager
           .createQueryBuilder()
-          .select('version.release_id', 'releaseId')
-          .from(application.tables.version, 'version')
-          .where('version.release_id = :releaseId', { releaseId })
-          .andWhere('version.app_name = :appName', { appName })
+          .select('release.release_id', 'releaseId')
+          .from(application.tables.release, 'release')
+          .where('release.release_id = :releaseId', { releaseId })
+          .andWhere('release.app_name = :appName', { appName })
           .getRawOne<{ releaseId: string }>()
         if (published) {
           if (!(await queryRunner.hasTable(application.tables.releaseUser))) {
@@ -260,7 +260,7 @@ export class ReleaseManagementService {
         })
         await queryRunner.manager
           .createQueryBuilder()
-          .update(application.tables.version)
+          .update(application.tables.release)
           .set({ release_scope: body.releaseScope })
           .where('release_id = :releaseId', { releaseId })
           .execute()
@@ -351,7 +351,7 @@ export class ReleaseManagementService {
         revisionAfter = revisionBefore + 1
         await queryRunner.manager
           .createQueryBuilder()
-          .update(application.tables.version)
+          .update(application.tables.release)
           .set({ policy_revision: revisionAfter, updated_at: new Date() })
           .where('release_id = :releaseId', { releaseId })
           .execute()
@@ -535,15 +535,15 @@ export class ReleaseManagementService {
     const queryRunner = this.dataSource.createQueryRunner()
     await queryRunner.connect()
     try {
-      if (!(await queryRunner.hasTable(application.tables.version))) {
+      if (!(await queryRunner.hasTable(application.tables.release))) {
         throw new NotFoundException('Release does not exist')
       }
       const release = await queryRunner.manager
         .createQueryBuilder()
         .select('*')
-        .from(application.tables.version, 'version')
-        .where('version.release_id = :releaseId', { releaseId })
-        .andWhere('version.app_name = :appName', { appName })
+        .from(application.tables.release, 'release')
+        .where('release.release_id = :releaseId', { releaseId })
+        .andWhere('release.app_name = :appName', { appName })
         .getRawOne<Record<string, unknown>>()
       if (!release) {
         throw new NotFoundException('Release does not exist')
@@ -562,10 +562,10 @@ export class ReleaseManagementService {
     const release = await queryRunner.manager
       .createQueryBuilder()
       .select('*')
-      .from(application.tables.version, 'version')
+      .from(application.tables.release, 'release')
       .setLock('pessimistic_write')
-      .where('version.release_id = :releaseId', { releaseId })
-      .andWhere('version.app_name = :appName', { appName: application.appName })
+      .where('release.release_id = :releaseId', { releaseId })
+      .andWhere('release.app_name = :appName', { appName: application.appName })
       .getRawOne<Record<string, unknown>>()
     if (!release) {
       throw new NotFoundException('Release does not exist')
@@ -633,7 +633,7 @@ export class ReleaseManagementService {
       releaseSequence: release.releaseSequence,
       appName: release.appName,
       targetVersionCode: release.targetVersionCode,
-      compatibleBaseVersionCodes: release.compatibleBaseVersionCodes,
+      baseVersionCodes: release.baseVersionCodes,
       platforms: release.platforms,
       architectures: release.architectures,
       distributionChannel: release.distributionChannel,

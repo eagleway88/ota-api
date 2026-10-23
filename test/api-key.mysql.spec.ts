@@ -7,7 +7,7 @@ import { ApiKeyService } from '@/auth/api-key.service'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
 
-const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
+const socketPath = process.env.OTA_TEST_MYSQL_SOCKET
 const mysql = socketPath ? describe : describe.skip
 mysql('API key lifecycle on the fresh schema on isolated MySQL', () => {
   let control: DataSource, source: DataSource, database: string
@@ -38,7 +38,7 @@ mysql('API key lifecycle on the fresh schema on isolated MySQL', () => {
     source.query<Array<Record<string, unknown>>>(sql, args)
   beforeAll(async () => {
     if (
-      !/^\/(?:private\/)?tmp\/ota-migration-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
+      !/^\/(?:private\/)?tmp\/ota-test-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
         socketPath ?? ''
       )
     )
@@ -47,7 +47,7 @@ mysql('API key lifecycle on the fresh schema on isolated MySQL', () => {
     await control.initialize()
   })
   beforeEach(async () => {
-    database = 'ota_migration_test_' + randomUUID().replaceAll('-', '')
+    database = 'ota_test_' + randomUUID().replaceAll('-', '')
     await control.query(`CREATE DATABASE \`${database}\``)
     source = new DataSource({ ...connection, database })
     await source.initialize()
@@ -90,10 +90,10 @@ mysql('API key lifecycle on the fresh schema on isolated MySQL', () => {
     expect(await keys.inspect(key.keyId)).not.toHaveProperty('secret_hash')
     expect(JSON.stringify(await keys.list())).not.toContain(key.accessKey)
   })
-  it('rejects unknown, wrong-secret, malformed and old JWT credentials', async () => {
+  it('rejects unknown, malformed and wrong-secret credentials', async () => {
     const key = await create()
     for (const value of [
-      'old.jwt.token',
+      'invalid-credential',
       key.accessKey + 'x',
       key.accessKey.replace(/\.[^.]+$/, '.' + 'a'.repeat(43)),
       'ota_ak_bad'

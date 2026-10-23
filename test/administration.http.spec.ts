@@ -38,7 +38,7 @@ function resultRows(query: string) {
         app_name: 'app-a',
         platform: 'windows',
         version_code: 110,
-        release_sequence: 2000,
+        release_sequence: 1,
         reported_username: 'tester',
         created_at: '2026-10-01T00:00:00.000Z',
         extras_json: '{"business_key":"unchanged"}',
@@ -69,7 +69,7 @@ function resultRows(query: string) {
     ]
   if (query.includes('publish_task'))
     return [{ task_id: 'task-a', status: 'failed' }]
-  if (query.includes('_version')) return [{ releaseId: 'release-a' }]
+  if (query.includes('_release')) return [{ releaseId: 'release-a' }]
   return [{ audit_id: 'audit-a', result: 'failed' }]
 }
 
@@ -197,8 +197,12 @@ describe('external application APIs with access keys', () => {
     }
   )
 
-  it('rejects tampered, unknown and obsolete credentials', async () => {
-    const tokens = [`${token}bad`, generateApiKey().accessKey, 'old.jwt.token']
+  it('rejects tampered, unknown and malformed credentials', async () => {
+    const tokens = [
+      `${token}bad`,
+      generateApiKey().accessKey,
+      'invalid-credential'
+    ]
     for (const bearer of tokens) {
       await request(app.getHttpServer())
         .get('/api/v1/manage/apps/app-a/audit-logs')
@@ -208,11 +212,11 @@ describe('external application APIs with access keys', () => {
     expect(sql).toHaveLength(0)
   })
 
-  it('rejects old username-only tokens, and parameterizes filters for valid keys', async () => {
-    const oldToken = 'obsolete.username.token'
+  it('parameterizes filters for authenticated requests', async () => {
+    const invalidToken = 'invalid-credential'
     await request(app.getHttpServer())
       .get('/api/v1/manage/apps/app-a/audit-logs')
-      .set('Authorization', `Bearer ${oldToken}`)
+      .set('Authorization', `Bearer ${invalidToken}`)
       .expect(401)
     const action = "publish' OR 1=1 --"
     await request(app.getHttpServer())
@@ -233,7 +237,7 @@ describe('external application APIs with access keys', () => {
     const response = await request(app.getHttpServer())
       .get('/api/v1/manage/apps/app-a/statistics/summary')
       .set('Authorization', `Bearer ${token}`)
-      .query({ ...range, platform: 'windows', releaseSequence: '2000' })
+      .query({ ...range, platform: 'windows', releaseSequence: '1' })
       .expect(200)
     expect(response.body).toMatchObject({
       code: 0,
@@ -247,7 +251,7 @@ describe('external application APIs with access keys', () => {
     expect(sql).toHaveLength(2)
     for (const call of sql) {
       expect(call.parameters).toEqual(
-        expect.arrayContaining(['app-a', 'windows', 2000])
+        expect.arrayContaining(['app-a', 'windows', 1])
       )
       expect(call.query).not.toContain('COALESCE(')
     }
@@ -268,7 +272,7 @@ describe('external application APIs with access keys', () => {
         data: [
           {
             id: 7,
-            releaseSequence: 2000,
+            releaseSequence: 1,
             extras: { business_key: 'unchanged' }
           }
         ]
@@ -317,9 +321,7 @@ describe('external application APIs with access keys', () => {
         .expect(200)
       expect(response.body).toMatchObject({
         data: {
-          historyNotice: expect.stringContaining(
-            'retained indefinitely'
-          ) as unknown
+          retention: 'permanent'
         }
       })
       expect(JSON.stringify(response.body)).not.toContain('beyond retention')

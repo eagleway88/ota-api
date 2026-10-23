@@ -88,7 +88,7 @@ describe('UpdateQueryService', () => {
       })
     ).resolves.toEqual(
       expect.objectContaining({
-        releaseSequence: 2000,
+        releaseSequence: 1,
         appName: 'app',
         bundleUrl: 'https://example.test/update.zip'
       })

@@ -52,18 +52,11 @@ function matchesArchitecture(
   )
 }
 
-function matchesChannel(
-  release: Release,
-  context: ClientUpdateContext,
-  policy: ApplicationUpdatePolicy
-) {
-  if (!release.distributionChannel) {
-    return policy.emptyChannelMatchesAny
-  }
-  if (!context.distributionChannel) {
-    return true
-  }
-  return release.distributionChannel === context.distributionChannel
+function matchesChannel(release: Release, context: ClientUpdateContext) {
+  return (
+    !release.distributionChannel ||
+    release.distributionChannel === context.distributionChannel
+  )
 }
 
 function selectFullRelease(releases: readonly Release[]) {
@@ -100,7 +93,7 @@ export function resolveUpdate(
       'architecture_mismatch',
       release => matchesArchitecture(release, context, policy)
     ],
-    ['channel_mismatch', release => matchesChannel(release, context, policy)],
+    ['channel_mismatch', release => matchesChannel(release, context)],
     [
       'audience_mismatch',
       release => matchesAudience(release, context, audience)
@@ -109,7 +102,7 @@ export function resolveUpdate(
       'base_version_mismatch',
       release =>
         release.updateType === 'full' ||
-        release.compatibleBaseVersionCodes.includes(context.nativeVersionCode)
+        release.baseVersionCodes.includes(context.nativeVersionCode)
     ]
   ]
   let eligible = enabled
@@ -132,7 +125,7 @@ export function resolveUpdate(
     return (
       release.updateType === 'hot' &&
       release.releaseSequence > context.installedReleaseSequence &&
-      release.compatibleBaseVersionCodes.includes(context.nativeVersionCode)
+      release.baseVersionCodes.includes(context.nativeVersionCode)
     )
   })
 
@@ -146,7 +139,7 @@ export function resolveUpdate(
       release: null,
       mandatory: false,
       showUpdateDialog: false,
-      reason: enabled.length ? 'no-compatible-release' : 'no-enabled-release',
+      reason: enabled.length ? 'no-applicable-release' : 'no-enabled-release',
       skipReason,
       revision: Math.max(available.revision, audience.revision)
     }

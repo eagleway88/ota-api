@@ -26,7 +26,7 @@ function deferred() {
   const promise = new Promise<void>(done => (resolve = done))
   return { promise, resolve }
 }
-const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
+const socketPath = process.env.OTA_TEST_MYSQL_SOCKET
 const mysql = socketPath ? describe : describe.skip
 mysql('publication transactions on isolated MySQL', () => {
   let control: DataSource
@@ -58,7 +58,7 @@ mysql('publication transactions on isolated MySQL', () => {
         targetAppName,
         {
           targetVersionCode: 120,
-          compatibleBaseVersionCodes: [100],
+          baseVersionCodes: [100],
           platforms: [PlatformType.Windows],
           updateType: UpdateType.Full,
           releaseScope: userIds.length
@@ -74,7 +74,7 @@ mysql('publication transactions on isolated MySQL', () => {
 
   beforeAll(async () => {
     if (
-      !/^\/(?:private\/)?tmp\/ota-migration-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
+      !/^\/(?:private\/)?tmp\/ota-test-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
         socketPath ?? ''
       )
     )
@@ -83,7 +83,7 @@ mysql('publication transactions on isolated MySQL', () => {
     await control.initialize()
   })
   beforeEach(async () => {
-    database = `ota_migration_test_${randomUUID().replaceAll('-', '')}`
+    database = `ota_test_${randomUUID().replaceAll('-', '')}`
     await control.query(`CREATE DATABASE \`${database}\``)
     source = new DataSource({ ...connection, database })
     await source.initialize()
@@ -117,7 +117,7 @@ mysql('publication transactions on isolated MySQL', () => {
   afterEach(async () => {
     jest.restoreAllMocks()
     if (source?.isInitialized) await source.destroy()
-    if (/^ota_migration_test_[a-f0-9]{32}$/.test(database))
+    if (/^ota_test_[a-f0-9]{32}$/.test(database))
       await control.query(`DROP DATABASE \`${database}\``)
   })
   afterAll(async () => {
@@ -151,7 +151,7 @@ mysql('publication transactions on isolated MySQL', () => {
           : await execute(sql, args)
         if (
           !paused &&
-          sql.startsWith(`INSERT INTO \`${application.tables.version}\``)
+          sql.startsWith(`INSERT INTO \`${application.tables.release}\``)
         ) {
           paused = true
           inserted.resolve()
@@ -170,24 +170,30 @@ mysql('publication transactions on isolated MySQL', () => {
       second = drafts.publish(appName, releaseId, context)
       await competitor.promise
       expect(
-        await query(`SELECT id FROM \`${application.tables.version}\``)
+        await query(
+          `SELECT release_sequence FROM \`${application.tables.release}\``
+        )
       ).toEqual([])
-      expect(
-        (await drafts.publish('other-app', otherReleaseId, context)).code
-      ).toBe(0)
+      const independent = await drafts.publish(
+        'other-app',
+        otherReleaseId,
+        context
+      )
+      expect(independent.code).toBe(0)
+      expect(independent.data.releaseSequence).toBe(1)
       resume.resolve()
       const [a, b] = await Promise.all([first, second])
-      expect(Number(a.data.releaseSequence)).toBeGreaterThanOrEqual(2000)
+      expect(Number(a.data.releaseSequence)).toBe(1)
       expect(Number(a.data.releaseSequence)).toBeLessThan(
         b.data.releaseSequence
       )
       expect(
         await query(
-          `SELECT id FROM \`${application.tables.version}\` ORDER BY id`
+          `SELECT release_sequence FROM \`${application.tables.release}\` ORDER BY release_sequence`
         )
       ).toEqual([
-        { id: a.data.releaseSequence },
-        { id: b.data.releaseSequence }
+        { release_sequence: a.data.releaseSequence },
+        { release_sequence: b.data.releaseSequence }
       ])
       expect(
         await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
@@ -206,7 +212,9 @@ mysql('publication transactions on isolated MySQL', () => {
     ])
     expect(a.data.releaseSequence).toBe(b.data.releaseSequence)
     expect(
-      await query(`SELECT id FROM \`${application.tables.version}\``)
+      await query(
+        `SELECT release_sequence FROM \`${application.tables.release}\``
+      )
     ).toHaveLength(1)
     expect(
       await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
@@ -224,7 +232,9 @@ mysql('publication transactions on isolated MySQL', () => {
     const publish = async () => drafts.publish(appName, releaseId, context)
     await expect(publish()).rejects.toThrow('injected publication failure')
     expect(
-      await query(`SELECT id FROM \`${application.tables.version}\``)
+      await query(
+        `SELECT release_sequence FROM \`${application.tables.release}\``
+      )
     ).toHaveLength(0)
     expect(
       await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
@@ -251,7 +261,9 @@ mysql('publication transactions on isolated MySQL', () => {
     await query('DROP TRIGGER publication_fail')
     await publish()
     expect(
-      await query(`SELECT id FROM \`${application.tables.version}\``)
+      await query(
+        `SELECT release_sequence FROM \`${application.tables.release}\``
+      )
     ).toHaveLength(1)
   })
 
@@ -267,7 +279,9 @@ mysql('publication transactions on isolated MySQL', () => {
       'not ready'
     )
     expect(
-      await query(`SELECT id FROM \`${application.tables.version}\``)
+      await query(
+        `SELECT release_sequence FROM \`${application.tables.release}\``
+      )
     ).toHaveLength(0)
   })
 
@@ -294,7 +308,9 @@ mysql('publication transactions on isolated MySQL', () => {
       'injected secret SQL payload'
     )
     expect(
-      await query(`SELECT id FROM \`${application.tables.version}\``)
+      await query(
+        `SELECT release_sequence FROM \`${application.tables.release}\``
+      )
     ).toEqual([])
     expect(
       await query(`SELECT task_id FROM \`${application.tables.publishTask}\``)
@@ -318,7 +334,7 @@ mysql('publication transactions on isolated MySQL', () => {
       task_id: null,
       revision_before: null,
       revision_after: null,
-      change_summary: { source: 'v1' }
+      change_summary: {}
     })
     expect(JSON.stringify(rows)).not.toMatch(/secret|payload|example\.test/)
 
@@ -347,7 +363,7 @@ mysql('publication transactions on isolated MySQL', () => {
       const releaseId = await draft()
       await drafts.publish(appName, releaseId, context)
       const before = (
-        await query(`SELECT * FROM \`${application.tables.version}\``)
+        await query(`SELECT * FROM \`${application.tables.release}\``)
       )[0]
       catalog.invalidate.mockClear()
       const operationContext = {
@@ -383,7 +399,7 @@ mysql('publication transactions on isolated MySQL', () => {
       await rejectSuccessAudit()
       await expect(mutate()).rejects.toThrow('injected secret SQL payload')
       expect(
-        (await query(`SELECT * FROM \`${application.tables.version}\``))[0]
+        (await query(`SELECT * FROM \`${application.tables.release}\``))[0]
       ).toEqual(before)
       expect(
         await query(`SELECT * FROM \`${application.tables.releaseUser}\``)
@@ -481,7 +497,7 @@ mysql('publication transactions on isolated MySQL', () => {
     expect(
       (
         await query(
-          `SELECT policy_revision FROM \`${application.tables.version}\``
+          `SELECT policy_revision FROM \`${application.tables.release}\``
         )
       )[0].policy_revision
     ).toBe(1)
@@ -546,7 +562,7 @@ mysql('publication transactions on isolated MySQL', () => {
     expect(
       (
         await query(
-          `SELECT is_enabled, policy_revision FROM \`${application.tables.version}\``
+          `SELECT is_enabled, policy_revision FROM \`${application.tables.release}\``
         )
       )[0]
     ).toEqual({ is_enabled: 0, policy_revision: 2 })
@@ -588,7 +604,9 @@ mysql('publication transactions on isolated MySQL', () => {
           SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'publication second part failed'; END IF; END`)
     await expect(publish()).rejects.toThrow('publication second part failed')
     expect(
-      await query(`SELECT id FROM \`${application.tables.version}\``)
+      await query(
+        `SELECT release_sequence FROM \`${application.tables.release}\``
+      )
     ).toEqual([])
     expect(
       await query(`SELECT user_id FROM \`${application.tables.releaseUser}\``)
@@ -751,7 +769,7 @@ mysql('publication transactions on isolated MySQL', () => {
     expect(
       (
         await query(
-          `SELECT policy_revision FROM \`${application.tables.version}\``
+          `SELECT policy_revision FROM \`${application.tables.release}\``
         )
       )[0].policy_revision
     ).toBe(1)
@@ -863,7 +881,7 @@ mysql('publication transactions on isolated MySQL', () => {
     expect(await partsFor('draft-part-retry')).toHaveLength(3)
   })
 
-  it('rejects oversized requests and historical lists without partially replacing or clearing them', async () => {
+  it('rejects oversized requests and oversized stored lists without partially replacing or clearing them', async () => {
     const releaseId = await draft()
     await drafts.publish(appName, releaseId, context)
     await expect(
@@ -884,7 +902,7 @@ mysql('publication transactions on isolated MySQL', () => {
         'created_at'
       ])
       .values(
-        audienceIds('historical', 5001).map(userId => ({
+        audienceIds('existing', 5001).map(userId => ({
           release_id: releaseId,
           user_id: userId,
           created_at: new Date()
@@ -913,7 +931,7 @@ mysql('publication transactions on isolated MySQL', () => {
     expect(
       (
         await query(
-          `SELECT policy_revision FROM \`${application.tables.version}\``
+          `SELECT policy_revision FROM \`${application.tables.release}\``
         )
       )[0].policy_revision
     ).toBe(1)
@@ -979,7 +997,7 @@ mysql('publication transactions on isolated MySQL', () => {
           const result: unknown = structured
             ? await execute(sql, args, true)
             : await execute(sql, args)
-          if (sql.startsWith(`INSERT INTO \`${application.tables.version}\``))
+          if (sql.startsWith(`INSERT INTO \`${application.tables.release}\``))
             wroteRelease = true
           if (
             !injected &&

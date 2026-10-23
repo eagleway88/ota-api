@@ -20,11 +20,11 @@ import { ReleaseCatalogService } from '@/updates/catalog/release-catalog.service
 import { CreateReleaseDraftDto } from '@/releases/release-draft.dto'
 import { ReleaseDraftService } from '@/releases/release-draft.service'
 
-const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
+const socketPath = process.env.OTA_TEST_MYSQL_SOCKET
 const mysql = socketPath ? describe : describe.skip
 
 mysql('draft creation and editing audits on isolated MySQL', () => {
-  it('attributes API-key draft writes and audit filters to the credential, never a fake administrator', async () => {
+  it('attributes draft writes and audit filters to the authenticated key', async () => {
     const keyId = randomUUID()
     await drafts.createDraft(appName, body(), undefined, {
       requestId: 'key-draft',
@@ -72,7 +72,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
     )
   const body = (userIds: string[] = []): CreateReleaseDraftDto => ({
     targetVersionCode: 120,
-    compatibleBaseVersionCodes: [100],
+    baseVersionCodes: [100],
     platforms: [PlatformType.Windows],
     updateType: UpdateType.Full,
     releaseScope: userIds.length
@@ -110,7 +110,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
 
   beforeAll(async () => {
     if (
-      !/^\/(?:private\/)?tmp\/ota-migration-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
+      !/^\/(?:private\/)?tmp\/ota-test-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
         socketPath ?? ''
       )
     )
@@ -119,7 +119,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
     await control.initialize()
   })
   beforeEach(async () => {
-    database = `ota_migration_test_${randomUUID().replaceAll('-', '')}`
+    database = `ota_test_${randomUUID().replaceAll('-', '')}`
     await control.query(`CREATE DATABASE \`${database}\``)
     source = new DataSource({ ...connection, database })
     await source.initialize()
@@ -145,7 +145,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
   afterEach(async () => {
     jest.restoreAllMocks()
     if (source?.isInitialized) await source.destroy()
-    if (/^ota_migration_test_[a-f0-9]{32}$/.test(database))
+    if (/^ota_test_[a-f0-9]{32}$/.test(database))
       await control.query(`DROP DATABASE \`${database}\``)
   })
   afterAll(async () => {
@@ -500,7 +500,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
       else
         await query(
           `UPDATE \`${application.tables.releaseDraft}\` SET user_ids = ?`,
-          [JSON.stringify(members('historical', 1))]
+          [JSON.stringify(members('existing', 1))]
         )
       const before = await rows()
       await expect(

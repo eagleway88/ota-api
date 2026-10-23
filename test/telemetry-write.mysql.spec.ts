@@ -24,7 +24,7 @@ import { TelemetryWriteService } from '@/telemetry/telemetry-write.service'
 import { TelemetryQueryService } from '@/manage/statistics/statistics.service'
 import { StatusReportInput } from '@/telemetry/ports/telemetry-write.repository'
 
-const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
+const socketPath = process.env.OTA_TEST_MYSQL_SOCKET
 const mysql = socketPath ? describe : describe.skip
 mysql('telemetry writes on isolated MySQL', () => {
   let control: DataSource
@@ -52,7 +52,7 @@ mysql('telemetry writes on isolated MySQL', () => {
     appName,
     platform: 'windows',
     versionCode: 110,
-    releaseSequence: 2000,
+    releaseSequence: 1,
     reportedUsername: 'reporter',
     extras: { device_id: 'one', innerCamel: { nested_key: 1 } },
     ...overrides
@@ -65,7 +65,7 @@ mysql('telemetry writes on isolated MySQL', () => {
         appName: application.appName,
         releaseId: randomUUID(),
         targetVersionCode: 110,
-        compatibleBaseVersionCodes: [100],
+        baseVersionCodes: [100],
         platforms: ['windows'],
         architectures: [],
         updateType: 'full',
@@ -80,7 +80,7 @@ mysql('telemetry writes on isolated MySQL', () => {
 
   beforeAll(async () => {
     if (
-      !/^\/(?:private\/)?tmp\/ota-migration-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
+      !/^\/(?:private\/)?tmp\/ota-test-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
         socketPath ?? ''
       )
     )
@@ -89,7 +89,7 @@ mysql('telemetry writes on isolated MySQL', () => {
     await control.initialize()
   })
   beforeEach(async () => {
-    database = `ota_migration_test_${randomUUID().replaceAll('-', '')}`
+    database = `ota_test_${randomUUID().replaceAll('-', '')}`
     await control.query(`CREATE DATABASE \`${database}\``)
     source = new DataSource({ ...connection, database })
     await source.initialize()
@@ -115,14 +115,14 @@ mysql('telemetry writes on isolated MySQL', () => {
   })
   afterEach(async () => {
     if (source?.isInitialized) await source.destroy()
-    if (/^ota_migration_test_[a-f0-9]{32}$/.test(database))
+    if (/^ota_test_[a-f0-9]{32}$/.test(database))
       await control.query(`DROP DATABASE \`${database}\``)
   })
   afterAll(async () => {
     if (control?.isInitialized) await control.destroy()
   })
 
-  it('serves canonical update checks and reports while rejecting all retired routes', async () => {
+  it('serves update checks and telemetry with strict request validation', async () => {
     const module = await Test.createTestingModule({
       controllers: [UpdateCheckController, TelemetryWriteController],
       providers: [
@@ -150,7 +150,7 @@ mysql('telemetry writes on isolated MySQL', () => {
       expect(check.body).toMatchObject({
         code: 0,
         data: {
-          releaseSequence: 2000,
+          releaseSequence: 1,
           appName,
           targetVersionCode: 110,
           enabled: true,
@@ -158,10 +158,8 @@ mysql('telemetry writes on isolated MySQL', () => {
           installerSourceUrl: 'https://example.test/installer.exe'
         }
       })
-      for (const key of ['id', 'name', 'ver', 'enable', 'type', 'downloadUrl'])
-        expect((check.body as { data: unknown }).data).not.toHaveProperty(key)
       for (const bad of [
-        { platform: 'windows', ver: 100 },
+        { platform: 'windows', nativeVersionCode: 100, unexpected: true },
         { platform: 'windows', nativeVersionCode: '100' },
         {
           platform: 'windows',
@@ -178,32 +176,15 @@ mysql('telemetry writes on isolated MySQL', () => {
         .send({
           platform: 'windows',
           nativeVersionCode: 110,
-          installedReleaseSequence: 2000
+          installedReleaseSequence: 1
         })
         .expect(201)
       expect(noUpdate.body).toEqual({ code: 0, data: null })
-      await request(http.getHttpServer())
-        .post('/api/version/check')
-        .send({ name: appName, platform: 'windows', ver: 100 })
-        .expect(404)
-      for (const path of [
-        'create',
-        'upload',
-        'list/app',
-        'success',
-        'error',
-        'app-error'
-      ]) {
-        await request(http.getHttpServer())
-          .post('/api/version/' + path)
-          .send({})
-          .expect(404)
-      }
       const base = '/api/v1/app/apps/' + appName + '/telemetry/'
       const body = {
         platform: 'windows',
         versionCode: 110,
-        releaseSequence: 2000,
+        releaseSequence: 1,
         reportedUsername: 'reporter',
         extras: { device_id: 'one', innerCamel: { nested_key: 1 } }
       }
@@ -221,14 +202,11 @@ mysql('telemetry writes on isolated MySQL', () => {
           id: 1,
           appName,
           versionCode: 110,
-          releaseSequence: 2000,
+          releaseSequence: 1,
           reportedUsername: 'reporter',
           extras: body.extras
         }
       })
-      expect((success.body as { data: unknown }).data).not.toHaveProperty(
-        'verId'
-      )
       for (const extras of [
         '123',
         '{"device_id":"text-not-an-object"}',
@@ -263,7 +241,7 @@ mysql('telemetry writes on isolated MySQL', () => {
       expect((updated.body as { data: unknown }).data).toMatchObject({
         id: 1,
         message: 'updated',
-        releaseSequence: 2000
+        releaseSequence: 1
       })
       const crash = await request(http.getHttpServer())
         .post(base + 'app-errors')
@@ -295,7 +273,7 @@ mysql('telemetry writes on isolated MySQL', () => {
       expect(summary.data).toMatchObject({ successCount: 1, errorCount: 1 })
       expect((await rows('success'))[0]).toMatchObject({
         app_name: appName,
-        release_sequence: 2000,
+        release_sequence: 1,
         extras: report().extras
       })
       expect(app.tablePrefix).toBe('telemetry_123a')
@@ -328,7 +306,7 @@ mysql('telemetry writes on isolated MySQL', () => {
   })
 
   it.each([
-    { releaseSequence: 2001 },
+    { releaseSequence: 2 },
     { platform: 'linux' },
     { versionCode: 120 },
     { reportedUsername: 'different' },
@@ -350,7 +328,7 @@ mysql('telemetry writes on isolated MySQL', () => {
   it('updates unkeyed failure details without changing creation time or release association', async () => {
     await publish()
     await query(
-      `INSERT INTO \`${app.tables.error}\` (id, app_name, platform, version_code, release_sequence, message, reported_username, created_at, updated_at) VALUES (41, ?, 'windows', 110, 2000, 'old', 'old-user', '2020-01-01 00:00:00', '2020-01-01 00:00:00')`,
+      `INSERT INTO \`${app.tables.error}\` (id, app_name, platform, version_code, release_sequence, message, reported_username, created_at, updated_at) VALUES (41, ?, 'windows', 110, 1, 'initial failure', 'initial-reporter', '2020-01-01 00:00:00', '2020-01-01 00:00:00')`,
       [appName]
     )
     const updated = await writes.failure({
@@ -360,18 +338,18 @@ mysql('telemetry writes on isolated MySQL', () => {
     })
     expect(updated).toMatchObject({
       id: 41,
-      releaseSequence: 2000,
+      releaseSequence: 1,
       message: 'new details',
       createdAt: '2020-01-01 00:00:00.000'
     })
     const [stored] = await rows('error')
     expect(stored).toMatchObject({
-      release_sequence: 2000,
+      release_sequence: 1,
       reported_username: 'reporter'
     })
     await expect(
       writes.failure({
-        ...report({ releaseSequence: 2001 }),
+        ...report({ releaseSequence: 2 }),
         recordId: 41,
         message: 'move'
       })
@@ -416,10 +394,10 @@ mysql('telemetry writes on isolated MySQL', () => {
     expect(a.id).toBe(b.id)
     expect(a.appName).not.toBe(b.appName)
     await query(
-      `UPDATE \`${app.tables.version}\` SET app_name = 'other-app' WHERE id = 2000`
+      `UPDATE \`${app.tables.release}\` SET app_name = 'other-app' WHERE release_sequence = 1`
     )
     await expect(writes.success(report())).rejects.toThrow(
-      'Version does not exist'
+      'Release does not exist'
     )
     expect(await rows('success')).toHaveLength(1)
   })
@@ -460,7 +438,7 @@ mysql('telemetry writes on isolated MySQL', () => {
     expect((await writes.applicationError(input)).reportCount).toBe(14)
   })
 
-  it('does not merge different tuples sharing the old delimiter-based fingerprint', async () => {
+  it('keeps distinct error identity tuples in separate groups', async () => {
     const input = { ...report(), kind: 'crash', message: 'a|b', stack: 'c' }
     await writes.applicationError(input)
     await writes.applicationError({ ...input, message: 'a', stack: 'b|c' })

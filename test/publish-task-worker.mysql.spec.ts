@@ -26,7 +26,7 @@ function deferred() {
   return { promise, resolve }
 }
 
-const socketPath = process.env.OTA_MIGRATION_TEST_SOCKET
+const socketPath = process.env.OTA_TEST_MYSQL_SOCKET
 const mysql = socketPath ? describe : describe.skip
 mysql('publish task checkpoints on isolated MySQL', () => {
   let control: DataSource
@@ -63,12 +63,12 @@ mysql('publish task checkpoints on isolated MySQL', () => {
   const candidate: Release = {
     appName: 'task-app',
     releaseId: randomUUID(),
-    releaseSequence: 2000,
+    releaseSequence: 1,
     enabled: true,
     mandatory: false,
     showUpdateDialog: true,
     targetVersionCode: 110,
-    compatibleBaseVersionCodes: [100],
+    baseVersionCodes: [100],
     platforms: ['windows'],
     architectures: [],
     updateType: 'hot',
@@ -140,7 +140,7 @@ mysql('publish task checkpoints on isolated MySQL', () => {
 
   beforeAll(async () => {
     if (
-      !/^\/(?:private\/)?tmp\/ota-migration-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
+      !/^\/(?:private\/)?tmp\/ota-test-mysql\.[A-Za-z0-9]+\/mysql\.sock$/.test(
         socketPath ?? ''
       )
     )
@@ -149,7 +149,7 @@ mysql('publish task checkpoints on isolated MySQL', () => {
     await control.initialize()
   })
   beforeEach(async () => {
-    database = `ota_migration_test_${randomUUID().replaceAll('-', '')}`
+    database = `ota_test_${randomUUID().replaceAll('-', '')}`
     await control.query(`CREATE DATABASE \`${database}\``)
     source = new DataSource({ ...connection, database })
     await source.initialize()
@@ -196,7 +196,7 @@ mysql('publish task checkpoints on isolated MySQL', () => {
   })
   afterEach(async () => {
     if (source?.isInitialized) await source.destroy()
-    if (/^ota_migration_test_[a-f0-9]{32}$/.test(database))
+    if (/^ota_test_[a-f0-9]{32}$/.test(database))
       await control.query(`DROP DATABASE \`${database}\``)
   })
   afterAll(async () => {

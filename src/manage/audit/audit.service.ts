@@ -67,8 +67,7 @@ export class AuditQueryService {
       window
     )
     return adminPage(rows, total, window, {
-      historyNotice:
-        'Records are retained indefinitely by this service. Query time windows and pagination limit each response, not retention.'
+      retention: 'permanent' as const
     })
   }
 }
