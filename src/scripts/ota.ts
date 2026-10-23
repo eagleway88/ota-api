@@ -1,8 +1,4 @@
 import { createHash } from 'crypto'
-import {
-  assertInitializableDatabase,
-  assertInstalledDatabase
-} from '@/infrastructure/persistence/installation-guard'
 import { InitialSchema1792713600000 } from '@/migrations/1792713600000-InitialSchema'
 import 'reflect-metadata'
 import * as dotenv from 'dotenv'
@@ -60,7 +56,6 @@ async function main() {
         ])) as Array<{ acquired: number | string }>
         acquired = Number(rows[0]?.acquired) === 1
         if (!acquired) throw new Error('Database initialization is busy')
-        await assertInitializableDatabase(runner, true)
         const migrations = await source.runMigrations({ transaction: 'each' })
         process.stdout.write(
           JSON.stringify({
@@ -76,13 +71,6 @@ async function main() {
         }
       }
       return
-    }
-    const installation = source.createQueryRunner()
-    try {
-      await installation.connect()
-      await assertInstalledDatabase(installation)
-    } finally {
-      await installation.release()
     }
     // Never start application DDL before initialization is complete.
     await source.query('SELECT key_id FROM ota_api_keys LIMIT 0')

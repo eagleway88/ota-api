@@ -7,7 +7,7 @@ for (const file of [
   'main.js',
   'app.js',
   'app/updates/update-check.controller.js',
-  'infrastructure/persistence/installation-guard.js',
+  'infrastructure/persistence/application-schema.js',
   'auth/api-key.service.js'
 ]) {
   assert.ok(

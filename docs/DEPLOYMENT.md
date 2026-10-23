@@ -1,12 +1,12 @@
 # 全新安装上线手册
 
-当前方案是：停止旧服务 → 新建独立空库 → 初始化新版结构 → 创建应用与 Key → 部署并验证新版。旧数据不要迁移，旧 SQL 不要导入新库。
+当前方案是：准备新服务器 → 创建空数据库 → 初始化新版结构 → 创建应用与 Key → 部署并验证新版 → 切换调用方入口。新旧系统分开部署，旧数据和旧 SQL 不导入新服务器。
 
-本仓库不会自动删除原数据库、导入数据或备份文件。是否保留旧库/备份由运维单独决定；不能直接把含旧数据的 .env 目标用于初始化。
+新服务器不连接旧库，也不执行旧系统迁移或退役脚本。旧服务器及其数据的保留或下线由运维安排。
 
-## 1. 准备与停服
+## 1. 准备新服务器
 
-准备当前 refactoring 版本源码和依赖，用于执行运维 CLI。CLI 需要 TypeScript 开发依赖，不在 dist 中；初始化期间不启动 HTTP、Socket 或 Worker。停止全部旧实例及自动拉起进程，避免旧客户端继续连接旧协议。需要归档旧系统时可以先备份，但新系统不读取它。
+在新服务器准备当前 refactoring 版本源码和依赖，用于执行运维 CLI。CLI 需要 TypeScript 开发依赖，不在 dist 中；初始化期间不启动 HTTP、Socket 或 Worker。旧服务器不参与新版初始化，待新服务验收及调用方切换后再按运维安排下线。
 
 创建独立空 MySQL 数据库，例如：
 
@@ -25,7 +25,7 @@ yarn ota key create --apps app-a,app-b --name "release CI" --preset publisher --
 yarn ota key create --apps app-a,app-b --name "external dashboard" --preset observer --no-expiry --database ota_new
 ~~~
 
-db:init 只接受空库或本版可识别的初始化重试，拒绝旧表与未知安装标记；不会执行旧数据迁移或清库。成功时输出库名和本次执行的初始化名称，重复运行已初始化库输出空列表。MySQL DDL 不是整套原子回滚；中断后核对目标库并重试，不要手工伪造安装标记。
+db:init 创建新版全局表，由 ota_schema_history 记录执行结果。成功时输出库名和本次执行的初始化名称，重复运行已初始化库输出空列表；已创建的应用和 Key 保持不变。MySQL DDL 不是整套原子回滚，初始化中断后核对并重试。
 
 应用也可以单独准备：
 
@@ -44,7 +44,7 @@ yarn build
 yarn start:prod
 ~~~
 
-也可在完成初始化后使用项目现有 PM2 入口 yarn pm2。启动不建表或导入旧数据；安装标记/初始化历史缺失时拒绝运行。Worker 随服务启动自动工作，没有 PUBLISH_TASKS_PAUSED 开关。
+也可在完成初始化后使用项目现有 PM2 入口 yarn pm2。启动不自动建表；须先完成 db:init 与应用准备。Worker 随服务启动自动工作，没有 PUBLISH_TASKS_PAUSED 开关。
 
 运行账号应只保留业务需要的数据库权限；初始化和 app prepare 需要 DDL 权限，可以使用独立运维配置。所有 CLI 支持 --env-file PATH，修改命令必须提供与配置一致的 --database。
 

@@ -1,15 +1,7 @@
-import { assertInitializableDatabase } from '@/infrastructure/persistence/installation-guard'
 import { MigrationInterface, QueryRunner } from 'typeorm'
 export class InitialSchema1792713600000 implements MigrationInterface {
   name = 'InitialSchema1792713600000'
   async up(runner: QueryRunner): Promise<void> {
-    await assertInitializableDatabase(runner)
-    await runner.query(
-      'CREATE TABLE IF NOT EXISTS ota_installation (schema_id VARCHAR(32) NOT NULL PRIMARY KEY) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin'
-    )
-    await runner.query(
-      "INSERT IGNORE INTO ota_installation (schema_id) VALUES ('ota-v1')"
-    )
     await runner.query(`
       CREATE TABLE IF NOT EXISTS ota_applications (
         app_name VARCHAR(128) NOT NULL,

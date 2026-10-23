@@ -4,7 +4,7 @@ HTTP 按调用方、业务按领域、适配器按基础设施分层。测试统
 
 ~~~text
 src/
-  app.ts                 根装配、配置与数据库启动校验
+  app.ts                 根装配、配置与数据库连接
   app/                   公开客户端检查更新与上报
   manage/                第三方后端的发布、统计、任务、审计、消息接口
   auth/                  API Key 校验、权限预设、本地凭证管理服务
@@ -16,7 +16,7 @@ src/
   jobs/                  发布任务轮询、租约、checkpoint、重试
   audit/                 同事务成功审计与独立失败审计
   infrastructure/
-    persistence/         规范字段 SQL 仓储、表结构定义、锁、安装保护
+    persistence/         规范字段 SQL 仓储、表结构定义与锁
     oss/                 上传策略与 OSS 资源适配
   migrations/            全新基线初始化；不包含旧库升级链
   scripts/               db init、app prepare、key、audit 本地 CLI
@@ -35,7 +35,7 @@ docs/                    接口、接入、部署与运维说明
 
 ReleaseWriteRepository / TelemetryWriteRepository 保留可替换端口，实际实现为 SqlReleaseRepository / SqlTelemetryRepository，直接写规范字段；application-schema.ts 定义版本及上报表，不放在通用 utils，也不维护新旧字段双写。
 
-全局表保存安装标记、应用注册、Key/授权、运维审计和待确认消息。应用表保存发布、名单、草稿、资源、任务、执行记录和应用审计。app prepare 仅用于已初始化的新结构，运行时不自动注册应用或修表。
+全局表保存应用注册、Key/授权、运维审计和待确认消息。应用表保存发布、名单、草稿、资源、任务、执行记录和应用审计。app prepare 仅用于已初始化的新结构，运行时不自动注册应用或修表。
 
 发布和策略修改在应用级锁及事务内更新业务、目录修订、任务与审计。目录采用同一 REPEATABLE READ 快照，缓存与在途读取失效隔离；HTTP、订阅补发与后台推送复用纯决策函数。目录缺表或应用未就绪时拒绝读取，不回退旧存储。
 

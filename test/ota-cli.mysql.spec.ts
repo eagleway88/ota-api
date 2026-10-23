@@ -21,7 +21,7 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
     synchronize: false,
     logging: false
   }
-  const run = (args: string[], targetDatabase = database) =>
+  const run = (args: string[]) =>
     new Promise<{ stdout: string; stderr: string; code: number }>(done => {
       execFile(
         process.execPath,
@@ -47,7 +47,7 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
             ORM_PORT: '3306',
             ORM_USERNAME: user,
             ORM_PASSWORD: password,
-            ORM_DATABASE: targetDatabase
+            ORM_DATABASE: database
           }
         },
         (error, stdout, stderr) => done({ stdout, stderr, code: error ? 1 : 0 })
@@ -104,41 +104,6 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
       await control.destroy()
     }
   })
-  it('refuses a nonempty database before writing initialization history or touching its data', async () => {
-    const oldDatabase = 'ota_migration_test_' + randomUUID().replaceAll('-', '')
-    await control.query('CREATE DATABASE ' + oldDatabase)
-    try {
-      await control.query(
-        'CREATE TABLE ' +
-          oldDatabase +
-          '.old_versions (id INT PRIMARY KEY, payload TEXT)'
-      )
-      await control.query(
-        'INSERT INTO ' +
-          oldDatabase +
-          ".old_versions VALUES (1,'keep-old-data')"
-      )
-      await control.query(
-        'GRANT ALL ON ' + oldDatabase + ".* TO '" + user + "'@'localhost'"
-      )
-      const result = await run(
-        ['db', 'init', '--database', oldDatabase],
-        oldDatabase
-      )
-      expect(result.code).toBe(1)
-      expect(result.stderr).toContain('fresh empty database')
-      expect(
-        await control.query('SELECT * FROM ' + oldDatabase + '.old_versions')
-      ).toEqual([{ id: 1, payload: 'keep-old-data' }])
-      const tables: unknown = await control.query(
-        'SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA=?',
-        [oldDatabase]
-      )
-      expect(tables).toEqual([{ name: 'old_versions' }])
-    } finally {
-      await control.query('DROP DATABASE ' + oldDatabase)
-    }
-  })
 
   it('prepares multiple applications, issues a full key once, lists/inspects without secrets and revokes it', async () => {
     const created = await run([
@@ -167,6 +132,15 @@ mysql('operational CLI with real subprocesses and isolated MySQL', () => {
     expect([...principal.applications].sort()).toEqual(['cli-a', 'cli-b'])
     expect(principal.preset).toBe('full')
     expect(created.stderr).not.toContain(key.accessKey)
+    const reinitialized = await run(['db', 'init', '--database', database])
+    expect(reinitialized.code === 0 ? null : reinitialized.stderr).toBeNull()
+    expect(JSON.parse(reinitialized.stdout)).toEqual({
+      database,
+      migrations: []
+    })
+    expect(
+      await new ApiKeyService(source).authenticate(key.accessKey)
+    ).toMatchObject({ keyId: key.keyId })
     const listing = await run(['key', 'list', '--app', 'cli-a'])
     const inspected = await run(['key', 'inspect', '--id', key.keyId])
     for (const result of [listing, inspected]) {

@@ -2,7 +2,7 @@
 
 NestJS + TypeORM + MySQL + Socket.IO 的 OTA 与普通消息服务，无内置管理后台。
 
-本版按全新安装交付：不迁移旧数据、不兼容旧数据库结构，也不保留任何旧接口（包括旧检查更新接口）。请新建独立空库，不要向新库导入旧 SQL。当前实现与尚待验证事项见 [进度报告](docs/REFACTOR_PROGRESS.md)。
+本版按全新安装交付：不迁移旧数据、不兼容旧数据库结构，也不保留任何旧接口（包括旧检查更新接口）。在新服务器创建空库并部署，不导入旧 SQL。当前实现与尚待验证事项见 [进度报告](docs/REFACTOR_PROGRESS.md)。
 
 ## 初始化与启动
 
@@ -18,7 +18,7 @@ yarn start:prod
 
 db:init 创建全局结构；key create --prepare-apps 在签发前准备应用分表。HTTP 请求不会建表、补列或迁移。永久 Key 只输出一次明文，请安全保存；第三方后端直接使用 Authorization: Bearer <accessKey>，无需登录。
 
-初始化拒绝旧库，不清表、不覆盖旧数据。服务启动也校验安装标记与初始化历史；错误目标不会启动业务 Worker。正式部署见 [部署手册](docs/DEPLOYMENT.md)。
+在新服务器完成数据库初始化和应用准备后再启动服务。正式部署见 [部署手册](docs/DEPLOYMENT.md)。
 
 ## 接口与能力
 

@@ -1,6 +1,5 @@
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { ApplicationTableResolver } from '@/infrastructure/persistence/application-table-resolver'
-import { assertInstalledDatabase } from '@/infrastructure/persistence/installation-guard'
 import { InitialSchema1792713600000 } from '@/migrations/1792713600000-InitialSchema'
 import 'reflect-metadata'
 import { randomUUID } from 'crypto'
@@ -48,50 +47,22 @@ mysql('application messages on the fresh schema', () => {
   afterAll(async () => {
     if (control?.isInitialized) await control.destroy()
   })
-
-  it.each(['admins', 'unique_id_message', 'app_version', 'business_sentinel'])(
-    'refuses pre-existing %s without changing any data or creating tables',
-    async table => {
-      await source.query(
-        'CREATE TABLE ' + table + ' (id INT PRIMARY KEY, content TEXT)'
-      )
-      await source.query('INSERT INTO ' + table + " VALUES (1,'preserve-me')")
-      const runner = source.createQueryRunner()
-      try {
-        await expect(
-          new InitialSchema1792713600000().up(runner)
-        ).rejects.toThrow('fresh empty database')
-        expect(await source.query('SELECT * FROM ' + table)).toEqual([
-          { id: 1, content: 'preserve-me' }
-        ])
-        expect(await runner.hasTable('ota_installation')).toBe(false)
-        expect(await runner.hasTable('ota_messages')).toBe(false)
-      } finally {
-        await runner.release()
-      }
-    }
-  )
-  it('rejects an unknown installation marker without repairing or overwriting it', async () => {
-    await source.query('CREATE TABLE ota_installation (schema_id VARCHAR(32))')
-    await source.query("INSERT INTO ota_installation VALUES ('unknown')")
+  it('initializes global tables and canonical application columns without extra installation metadata', async () => {
     const runner = source.createQueryRunner()
     try {
-      await expect(new InitialSchema1792713600000().up(runner)).rejects.toThrow(
-        'Unknown database installation'
-      )
-      expect(await runner.hasTable('ota_messages')).toBe(false)
-    } finally {
-      await runner.release()
-    }
-  })
-  it('validates initialized storage and creates only canonical app columns', async () => {
-    const runner = source.createQueryRunner()
-    try {
-      await expect(assertInstalledDatabase(runner)).rejects.toThrow(
-        'not initialized'
-      )
-      await source.runMigrations({ transaction: 'each' })
-      await assertInstalledDatabase(runner)
+      expect(
+        (await source.runMigrations({ transaction: 'each' })).map(m => m.name)
+      ).toEqual(['InitialSchema1792713600000'])
+      const globals =
+        await source.query<Array<Record<string, string>>>('SHOW TABLES')
+      expect(globals.flatMap(row => Object.values(row)).sort()).toEqual([
+        'ota_api_key_applications',
+        'ota_api_keys',
+        'ota_applications',
+        'ota_audit_log',
+        'ota_messages',
+        'ota_schema_history'
+      ])
       const registry = new ApplicationRegistryService(
         source,
         new ApplicationTableResolver()
