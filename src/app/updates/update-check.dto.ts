@@ -1,8 +1,10 @@
+import { APP_VERSION_PATTERN } from '@/contracts/version'
 import {
   IsEnum,
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min
@@ -11,7 +13,10 @@ import { PlatformType } from '@/contracts/release-values'
 
 export class UpdateCheckDto {
   @IsEnum(PlatformType) platform: PlatformType
-  @IsInt() @Min(0) @Max(2147483647) nativeVersionCode: number
+  @IsString()
+  @Matches(APP_VERSION_PATTERN)
+  @MaxLength(128)
+  currentVersion: string
   @IsOptional()
   @IsInt()
   @Min(0)

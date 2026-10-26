@@ -1,3 +1,4 @@
+import { isAppVersion } from '@/contracts/version'
 import { PlatformType } from '@/contracts/release-values'
 import { parseUserId } from '@/contracts/user-id'
 import { validDeviceTarget } from '@/realtime/protocol.dto'
@@ -29,7 +30,7 @@ type ApplicationSubscription = {
   platform: string
   architecture?: string
   distributionChannel?: string
-  nativeVersionCode: number
+  currentVersion: string
   installedReleaseSequence?: number
 }
 
@@ -298,7 +299,7 @@ export class RealtimeGateway {
       'platform',
       'architecture',
       'distributionChannel',
-      'nativeVersionCode',
+      'currentVersion',
       'installedReleaseSequence'
     ]
     const integer = (v: unknown) =>
@@ -309,7 +310,7 @@ export class RealtimeGateway {
       typeof data.appName !== 'string' ||
       !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(data.appName) ||
       !Object.values(PlatformType).includes(data.platform as PlatformType) ||
-      !integer(data.nativeVersionCode) ||
+      !isAppVersion(data.currentVersion) ||
       (data.installedReleaseSequence !== undefined &&
         !integer(data.installedReleaseSequence)) ||
       [data.architecture, data.distributionChannel].some(
@@ -318,13 +319,13 @@ export class RealtimeGateway {
     )
       return { error: 'Invalid application subscription' }
     await client.join(this.getApplicationRoom(data.appName))
-    const nativeVersionCode = data.nativeVersionCode
+    const currentVersion = data.currentVersion
     const subscriber = this.subscriptions.subscribeApplication(client.id, {
       appName: data.appName,
       platform: data.platform,
       architecture: data.architecture,
       distributionChannel: data.distributionChannel,
-      nativeVersionCode,
+      currentVersion,
       installedReleaseSequence: Number(data.installedReleaseSequence) || 0
     })
 
@@ -449,7 +450,7 @@ export class RealtimeGateway {
           platform: application.platform,
           architecture: application.architecture,
           distributionChannel: application.distributionChannel,
-          nativeVersionCode: application.nativeVersionCode,
+          currentVersion: application.currentVersion,
           installedReleaseSequence: application.installedReleaseSequence,
           userIds: Array.from(subscriber.userIds)
         },

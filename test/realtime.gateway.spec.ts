@@ -55,11 +55,16 @@ describe('RealtimeGateway OTA dispatch', () => {
 
   it.each([
     { appName: 'app', platform: 'windows' },
-    { appName: 'app', platform: 'windows', nativeVersionCode: '100' },
-    { appName: 'app', platform: 'windows', nativeVersionCode: -1 },
-    { appName: '../app', platform: 'windows', nativeVersionCode: 100 },
-    { appName: 'app', platform: 'invalid', nativeVersionCode: 100 },
-    { appName: 'app', platform: 'windows', nativeVersionCode: 100, extra: true }
+    { appName: 'app', platform: 'windows', currentVersion: '100' },
+    { appName: 'app', platform: 'windows', currentVersion: -1 },
+    { appName: '../app', platform: 'windows', currentVersion: '1.3.10' },
+    { appName: 'app', platform: 'invalid', currentVersion: '1.3.10' },
+    {
+      appName: 'app',
+      platform: 'windows',
+      currentVersion: '1.3.10',
+      extra: true
+    }
   ])(
     'rejects invalid subscription input before joining rooms: %j',
     async body => {
@@ -84,7 +89,7 @@ describe('RealtimeGateway OTA dispatch', () => {
       subscriptions.subscribeApplication(id, {
         appName: 'app',
         platform: 'windows',
-        nativeVersionCode: index,
+        currentVersion: `1.0.${index}`,
         installedReleaseSequence: 0
       })
       sockets.set(id, { ...createClient(), id })
@@ -105,8 +110,8 @@ describe('RealtimeGateway OTA dispatch', () => {
           .fn()
           .mockResolvedValue({ available: { revision: 1 } }),
         resolveAvailableDecision: jest.fn(
-          (query: { nativeVersionCode: number }) =>
-            query.nativeVersionCode === 5
+          (query: { currentVersion: string }) =>
+            query.currentVersion === '1.0.5'
               ? {
                   payload: null,
                   decision: { release: null, skipReason: 'platform_mismatch' }
@@ -157,7 +162,7 @@ describe('RealtimeGateway OTA dispatch', () => {
     subscriptions.subscribeApplication('socket-1', {
       appName: 'app',
       platform: 'windows',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.10',
       installedReleaseSequence: 0
     })
     const query = {
@@ -256,7 +261,7 @@ describe('RealtimeGateway OTA dispatch', () => {
     const oldReplay = service.handleApplicationSubscribe(client as never, {
       appName: 'app',
       platform: 'windows',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.10',
       installedReleaseSequence: 0
     })
     await started
@@ -266,7 +271,7 @@ describe('RealtimeGateway OTA dispatch', () => {
     await service.handleApplicationSubscribe(client as never, {
       appName: 'app',
       platform: 'ios',
-      nativeVersionCode: 200,
+      currentVersion: '1.3.11',
       installedReleaseSequence: 0
     })
     finishOld(catalog)
@@ -305,7 +310,7 @@ describe('RealtimeGateway OTA dispatch', () => {
     await service.handleApplicationSubscribe(client as never, {
       appName: 'app',
       platform: 'windows',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.10',
       installedReleaseSequence: 0
     })
     await service.handleUserIdSubscribe(client as never, {
@@ -335,7 +340,7 @@ describe('RealtimeGateway OTA dispatch', () => {
       subscriptions.subscribeApplication(socketId, {
         appName: 'app',
         platform: 'windows',
-        nativeVersionCode: 100,
+        currentVersion: '1.3.10',
         installedReleaseSequence: 0
       })
     }
@@ -434,7 +439,7 @@ describe('RealtimeGateway OTA dispatch', () => {
     subscriptions.subscribeApplication('socket-1', {
       appName: 'app',
       platform: 'windows',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.10',
       installedReleaseSequence: 0
     })
     const queryService = {

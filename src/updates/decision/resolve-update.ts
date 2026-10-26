@@ -1,3 +1,4 @@
+import { compareVersions } from '@/contracts/version'
 import {
   ApplicationUpdatePolicy,
   AudienceSnapshot,
@@ -62,7 +63,7 @@ function matchesChannel(release: Release, context: ClientUpdateContext) {
 function selectFullRelease(releases: readonly Release[]) {
   return [...releases].sort((left, right) => {
     return (
-      right.targetVersionCode - left.targetVersionCode ||
+      compareVersions(right.targetVersion, left.targetVersion) ||
       right.releaseSequence - left.releaseSequence
     )
   })[0]
@@ -97,12 +98,6 @@ export function resolveUpdate(
     [
       'audience_mismatch',
       release => matchesAudience(release, context, audience)
-    ],
-    [
-      'base_version_mismatch',
-      release =>
-        release.updateType === 'full' ||
-        release.baseVersionCodes.includes(context.nativeVersionCode)
     ]
   ]
   let eligible = enabled
@@ -118,14 +113,14 @@ export function resolveUpdate(
   const fullCandidates = eligible.filter(release => {
     return (
       release.updateType === 'full' &&
-      release.targetVersionCode > context.nativeVersionCode
+      compareVersions(release.targetVersion, context.currentVersion) > 0
     )
   })
   const hotCandidates = eligible.filter(release => {
     return (
       release.updateType === 'hot' &&
-      release.releaseSequence > context.installedReleaseSequence &&
-      release.baseVersionCodes.includes(context.nativeVersionCode)
+      release.targetVersion === context.currentVersion &&
+      release.releaseSequence > context.installedReleaseSequence
     )
   })
 

@@ -21,7 +21,7 @@ const table = (name: string) =>
       'id',
       'app_name',
       'platform',
-      'version_code',
+      'version',
       'release_sequence',
       'created_at',
       'updated_at'
@@ -37,7 +37,7 @@ function resultRows(query: string) {
         id: 7,
         app_name: 'app-a',
         platform: 'windows',
-        version_code: 110,
+        version: '1.3.10',
         release_sequence: 1,
         reported_username: 'tester',
         created_at: '2026-10-01T00:00:00.000Z',

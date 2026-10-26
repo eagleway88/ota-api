@@ -23,17 +23,17 @@ describe('canonical release storage', () => {
     expect(release).toMatchObject({
       appName: 'app',
       releaseSequence: 1,
-      targetVersionCode: 110,
+      targetVersion: '1.3.10',
       enabled: true,
       releaseScope: 'public'
     })
     expect(release).not.toHaveProperty('scope')
   })
-  it.each([-1, 1.5, 2147483648, NaN])(
-    'rejects invalid native version %s',
-    targetVersionCode =>
+  it.each(['', '68', '1.03.10', '1.3.10-beta'])(
+    'rejects invalid display version %s',
+    targetVersion =>
       expect(() =>
-        releaseWriteValues({ ...releaseInput, targetVersionCode })
+        releaseWriteValues({ ...releaseInput, targetVersion })
       ).toThrow()
   )
   it('only updates canonical enabled state', () =>

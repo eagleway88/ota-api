@@ -14,7 +14,7 @@ Swagger：/api/docs、/api/docs/app、/api/docs/manage。接口方法与参数�
 
 发布流程：可选 multipart file 上传 ZIP → JSON 创建草稿 → 显式发布。全量安装包也可通过 installerSourceUrl 引用下载源。releases 支持列表、详情、草稿编辑、名单、范围、启停和重推。
 
-releaseId 是 UUID，releaseSequence 是应用内从 1 开始的递增序号；baseVersionCodes 是热更新适用的原生基础版本集合。
+releaseId 是 UUID，releaseSequence 是应用内从 1 开始的递增序号；热更新以 releaseSequence 判断新旧。
 
 凭证签发/撤销、应用准备和全局审计只通过本地 CLI。第三方后台后端保管 Key，并自行认证其后台用户。
 

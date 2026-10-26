@@ -32,7 +32,7 @@ describe('telemetry write boundary', () => {
       const input = {
         appName: 'app',
         platform: 'windows',
-        versionCode: 100,
+        version: '1.3.10',
         releaseSequence: 1
       }
       expect(await module.get(TelemetryWriteService).success(input)).toEqual({
@@ -57,7 +57,7 @@ describe('telemetry write boundary', () => {
         service.success({
           appName: 'app',
           platform: 'windows',
-          versionCode: 100,
+          version: '1.3.10',
           releaseSequence: value
         })
       ).toThrow('Invalid report or release ID')

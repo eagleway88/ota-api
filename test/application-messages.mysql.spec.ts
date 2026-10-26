@@ -74,8 +74,7 @@ mysql('application messages on the fresh schema', () => {
         expect.arrayContaining([
           'release_sequence',
           'app_name',
-          'target_version_code',
-          'base_version_codes',
+          'target_version',
           'is_enabled'
         ])
       )

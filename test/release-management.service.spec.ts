@@ -119,7 +119,7 @@ function fixture() {
   const updateQuery = {
     appName: 'app',
     platform: 'windows',
-    nativeVersionCode: 100,
+    currentVersion: '1.3.9',
     installedReleaseSequence: 0
   }
   return {
@@ -145,7 +145,7 @@ describe('ReleaseManagementService enabled policy', () => {
     await f.ws.handleApplicationSubscribe(f.client as never, {
       appName: 'app',
       platform: 'windows',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.9',
       installedReleaseSequence: 0
     })
     expect(f.client.emit).toHaveBeenLastCalledWith(
@@ -173,7 +173,7 @@ describe('ReleaseManagementService enabled policy', () => {
     await f.ws.handleApplicationSubscribe(newcomer as never, {
       appName: 'app',
       platform: 'windows',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.9',
       installedReleaseSequence: 0
     })
     expect(newcomer.emit).not.toHaveBeenCalled()

@@ -51,7 +51,7 @@ mysql('telemetry writes on isolated MySQL', () => {
   ): StatusReportInput => ({
     appName,
     platform: 'windows',
-    versionCode: 110,
+    version: '1.3.10',
     releaseSequence: 1,
     reportedUsername: 'reporter',
     extras: { device_id: 'one', innerCamel: { nested_key: 1 } },
@@ -64,8 +64,7 @@ mysql('telemetry writes on isolated MySQL', () => {
       new SqlReleaseRepository().insert(runner, application, {
         appName: application.appName,
         releaseId: randomUUID(),
-        targetVersionCode: 110,
-        baseVersionCodes: [100],
+        targetVersion: '1.3.10',
         platforms: ['windows'],
         architectures: [],
         updateType: 'full',
@@ -145,25 +144,25 @@ mysql('telemetry writes on isolated MySQL', () => {
       const checkPath = '/api/v1/app/apps/' + appName + '/updates/check'
       const check = await request(http.getHttpServer())
         .post(checkPath)
-        .send({ platform: 'windows', nativeVersionCode: 100 })
+        .send({ platform: 'windows', currentVersion: '1.3.9' })
         .expect(201)
       expect(check.body).toMatchObject({
         code: 0,
         data: {
           releaseSequence: 1,
           appName,
-          targetVersionCode: 110,
+          targetVersion: '1.3.10',
           enabled: true,
           mandatory: false,
           installerSourceUrl: 'https://example.test/installer.exe'
         }
       })
       for (const bad of [
-        { platform: 'windows', nativeVersionCode: 100, unexpected: true },
-        { platform: 'windows', nativeVersionCode: '100' },
+        { platform: 'windows', currentVersion: '1.3.10', unexpected: true },
+        { platform: 'windows', currentVersion: '100' },
         {
           platform: 'windows',
-          nativeVersionCode: 100,
+          currentVersion: '1.3.10',
           userId: 'other:windows:1'
         }
       ])
@@ -175,7 +174,7 @@ mysql('telemetry writes on isolated MySQL', () => {
         .post(checkPath)
         .send({
           platform: 'windows',
-          nativeVersionCode: 110,
+          currentVersion: '1.3.10',
           installedReleaseSequence: 1
         })
         .expect(201)
@@ -183,7 +182,7 @@ mysql('telemetry writes on isolated MySQL', () => {
       const base = '/api/v1/app/apps/' + appName + '/telemetry/'
       const body = {
         platform: 'windows',
-        versionCode: 110,
+        version: '1.3.10',
         releaseSequence: 1,
         reportedUsername: 'reporter',
         extras: { device_id: 'one', innerCamel: { nested_key: 1 } }
@@ -201,7 +200,7 @@ mysql('telemetry writes on isolated MySQL', () => {
         data: {
           id: 1,
           appName,
-          versionCode: 110,
+          version: '1.3.10',
           releaseSequence: 1,
           reportedUsername: 'reporter',
           extras: body.extras
@@ -216,7 +215,7 @@ mysql('telemetry writes on isolated MySQL', () => {
           .post(base + 'app-errors')
           .send({
             platform: 'windows',
-            versionCode: 110,
+            version: '1.3.10',
             kind: 'scalar-test',
             message: 'type preservation',
             extras
@@ -247,7 +246,7 @@ mysql('telemetry writes on isolated MySQL', () => {
         .post(base + 'app-errors')
         .send({
           platform: 'windows',
-          versionCode: 110,
+          version: '1.3.10',
           kind: 'crash',
           message: 'crash'
         })
@@ -262,7 +261,7 @@ mysql('telemetry writes on isolated MySQL', () => {
         .expect(400)
       await request(http.getHttpServer())
         .post(base + 'successes')
-        .send({ ...body, versionCode: '110' })
+        .send({ ...body, version: '110' })
         .expect(400)
       const summary = await new TelemetryQueryService(
         new AdminReadRepository(source, applications)
@@ -308,7 +307,7 @@ mysql('telemetry writes on isolated MySQL', () => {
   it.each([
     { releaseSequence: 2 },
     { platform: 'linux' },
-    { versionCode: 120 },
+    { version: '1.3.11' },
     { reportedUsername: 'different' },
     { extras: { changed: true } }
   ] as Array<Partial<StatusReportInput>>)(
@@ -328,7 +327,7 @@ mysql('telemetry writes on isolated MySQL', () => {
   it('updates unkeyed failure details without changing creation time or release association', async () => {
     await publish()
     await query(
-      `INSERT INTO \`${app.tables.error}\` (id, app_name, platform, version_code, release_sequence, message, reported_username, created_at, updated_at) VALUES (41, ?, 'windows', 110, 1, 'initial failure', 'initial-reporter', '2020-01-01 00:00:00', '2020-01-01 00:00:00')`,
+      `INSERT INTO \`${app.tables.error}\` (id, app_name, platform, version, release_sequence, message, reported_username, created_at, updated_at) VALUES (41, ?, 'windows', '1.3.10', 1, 'initial failure', 'initial-reporter', '2020-01-01 00:00:00', '2020-01-01 00:00:00')`,
       [appName]
     )
     const updated = await writes.failure({

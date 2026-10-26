@@ -11,16 +11,16 @@ Content-Type: application/json
 {
   "platform": "windows",
   "architecture": "x64",
-  "nativeVersionCode": 100,
+  "currentVersion": "1.3.10",
   "installedReleaseSequence": 0,
   "distributionChannel": "stable",
   "userId": "app-a:windows:42"
 }
 ~~~
 
-platform 和数值整数 nativeVersionCode 必填；installedReleaseSequence 省略为 0。architecture、distributionChannel、userId 可选。userId 必须与路径应用和平台一致，不传仅匹配 public；uniqueId 不提供名单资格。平台枚举 ios/android/windows/linux/macos。指定 distributionChannel 的发布只匹配相同渠道的客户端；发布未指定渠道时不限制客户端渠道。
+platform 和显示版本字符串 currentVersion 必填；installedReleaseSequence 省略为 0。architecture、distributionChannel、userId 可选。userId 必须与路径应用和平台一致，不传仅匹配 public；uniqueId 不提供名单资格。平台枚举 ios/android/windows/linux/macos。指定 distributionChannel 的发布只匹配相同渠道的客户端；发布未指定渠道时不限制客户端渠道。
 
-nativeVersionCode 是实际原生安装基础版本，不是热更新后的展示版本，使用数值整数。installedReleaseSequence 是已实际加载的发布序号，不是发布 UUID。
+currentVersion 是原生安装包的显示版本字符串，例如 1.3.10。完整更新按数字分段比较 targetVersion 与 currentVersion，目标更高时优先；热更新必须满足 targetVersion === currentVersion，再按发布序号判断是否未安装。installedReleaseSequence 是已实际加载的发布序号，不是发布 UUID。
 
 ~~~json
 {
@@ -29,8 +29,7 @@ nativeVersionCode 是实际原生安装基础版本，不是热更新后的展�
     "appName": "app-a",
     "releaseId": "发布 UUID",
     "releaseSequence": 1,
-    "targetVersionCode": 110,
-    "baseVersionCodes": [100],
+    "targetVersion": "1.3.10",
     "platforms": ["windows"],
     "architectures": ["x64"],
     "distributionChannel": "stable",
@@ -54,7 +53,7 @@ nativeVersionCode 是实际原生安装基础版本，不是热更新后的展�
 {
   "appName": "app-a",
   "platform": "windows",
-  "nativeVersionCode": 100,
+  "currentVersion": "1.3.10",
   "installedReleaseSequence": 0,
   "architecture": "x64",
   "distributionChannel": "stable"
@@ -75,11 +74,11 @@ Socket 断线后重订阅。服务 emit、ACK 和下载完成都不代表 OTA �
 
 公开 POST /api/v1/app/apps/:appName/telemetry/ 下的 successes、failures、app-errors。应用由路径决定，sourceIp 由服务端决定，正文不能伪造这两个字段。响应使用正式字段，extras JSON 类型和业务键名保持原样。
 
-成功/失败必填 platform、整数 versionCode、正整数 releaseSequence；可选 reportedUsername、extras、UUID reportId。失败还需 message，可选 recordId 更新本应用原来的无键失败记录，不能修改其 releaseSequence 或创建时间。
+成功/失败必填 platform、显示版本字符串 version、正整数 releaseSequence；可选 reportedUsername、extras、UUID reportId。失败还需 message，可选 recordId 更新本应用原来的无键失败记录，不能修改其 releaseSequence 或创建时间。
 
 无 reportId 每次增加记录；同应用同种上报的相同 reportId 与相同内容重试返回原记录，内容变化返回 409。UUID 大小写等价；IP 和接收时间不参与幂等比较。有 reportId 的失败记录不可修改；成功/失败两类和各应用之间独立计数。
 
-运行错误使用 platform、versionCode、kind、message，可选 stack/reportedUsername/extras；不带 releaseSequence/reportId。错误按规范化上下文元组的 SHA-256 聚合，保留累计次数与最后时间。
+运行错误使用 platform、version、kind、message，可选 stack/reportedUsername/extras；不带 releaseSequence/reportId。错误按规范化上下文元组的 SHA-256 聚合，保留累计次数与最后时间。
 
 公开上报按不可信客户端数据处理，服务不将其视为可靠身份或送达凭据。
 
@@ -88,7 +87,7 @@ Socket 断线后重订阅。服务 emit、ACK 和下载完成都不代表 OTA �
 第三方受控后端持 API Key，无需登录，不能把 Key 放进 SDK：
 
 1. 可选 POST /api/v1/manage/apps/:appName/artifacts 上传 multipart file（ZIP）。
-2. POST 同应用 /releases 创建草稿，正文使用 targetVersionCode、baseVersionCodes、platforms、updateType、releaseScope、userIds 等正式 JSON 字段。
+2. POST 同应用 /releases 创建草稿，正文使用 targetVersion、platforms、updateType、releaseScope、userIds 等正式 JSON 字段。
 3. POST /releases/:releaseId/publish 显式发布；全量包可直接提供 installerSourceUrl。
 4. 使用统计、任务执行记录与审计接口展示到自有后台，见 [查询 API](ADMIN_API.md)。
 

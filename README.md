@@ -21,8 +21,8 @@ db:init 初始化全局表；key create --prepare-apps 准备应用分表并签�
 - 按应用授权 API Key，一个 Key 可显式授权多个应用，提供 publisher / observer / messenger / full 权限预设；CLI 可追加/移除应用授权，无需更换 Key。
 - 上传 ZIP、创建与编辑草稿、显式发布、定向名单、启停、重新分发。
 - 公开更新检查、安装结果上报与应用错误聚合；外部后台可查询统计、任务执行记录及审计。
-- 按平台、架构、渠道、原生基础版本和名单判断更新；HTTP 检查与 Socket 分发使用同一决策逻辑。
-- 发布采用 releaseId（UUID）和 releaseSequence（应用内从 1 开始的递增序号）。热更新通过 baseVersionCodes 声明适用的原生基础版本集合。
+- 按平台、架构、渠道和名单判断更新；HTTP 检查与 Socket 分发使用同一决策逻辑。
+- 发布采用 releaseId（UUID）和 releaseSequence（应用内从 1 开始的递增序号）。热更新要求 targetVersion 与客户端 currentVersion 完全一致，并匹配平台、架构、渠道、用户范围和 releaseSequence；适用的新版本全量包优先。
 - 发布、名单、草稿、资源、任务、执行记录和应用审计按应用分表，写入使用事务与应用级锁。
 - Worker 自动轮询，支持租约、接管、重试及进度 checkpoint。
 - 任务、执行记录与审计永久保存；用户/设备待确认消息支持 TTL、补发、匹配 ACK 删除和同目标覆盖。

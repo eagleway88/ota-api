@@ -1,3 +1,4 @@
+import { isAppVersion } from '@/contracts/version'
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { isUUID } from 'class-validator'
 import {
@@ -39,13 +40,7 @@ export class TelemetryWriteService {
   }
 
   private validateClient(input: ClientReport) {
-    if (
-      !input.appName ||
-      !input.platform ||
-      !Number.isSafeInteger(input.versionCode) ||
-      input.versionCode < 0 ||
-      input.versionCode > 2_147_483_647
-    )
+    if (!input.appName || !input.platform || !isAppVersion(input.version))
       throw new BadRequestException('Invalid client report context')
   }
 

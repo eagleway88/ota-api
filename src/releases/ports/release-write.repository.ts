@@ -5,8 +5,7 @@ import type { ReleaseScope, ReleaseUpdateType } from '@/contracts/releases'
 export type ReleaseWriteInput = {
   appName: string
   releaseId: string
-  targetVersionCode: number
-  baseVersionCodes: readonly number[]
+  targetVersion: string
   platforms: readonly string[]
   architectures: readonly string[]
   distributionChannel?: string | null

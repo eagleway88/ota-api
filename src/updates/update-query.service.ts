@@ -16,7 +16,7 @@ export type UpdateQuery = {
   platform: string
   architecture?: string
   distributionChannel?: string
-  nativeVersionCode: number
+  currentVersion: string
   installedReleaseSequence?: number
   userIds?: readonly string[]
 }
@@ -26,7 +26,7 @@ export class UpdateQueryService {
   constructor(private readonly catalog: ReleaseCatalogService) {}
 
   async findLatestAvailableVersion(query: UpdateQuery) {
-    if (!query.appName || !query.platform || query.nativeVersionCode == null) {
+    if (!query.appName || !query.platform || query.currentVersion == null) {
       return null
     }
 
@@ -55,7 +55,7 @@ export class UpdateQueryService {
       platform: query.platform,
       architecture: query.architecture,
       distributionChannel: query.distributionChannel,
-      nativeVersionCode: query.nativeVersionCode,
+      currentVersion: query.currentVersion,
       installedReleaseSequence: query.installedReleaseSequence ?? 0,
       userIds: new Set(query.userIds ?? [])
     }

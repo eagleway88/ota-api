@@ -57,8 +57,7 @@ mysql('publication transactions on isolated MySQL', () => {
       await drafts.createDraft(
         targetAppName,
         {
-          targetVersionCode: 120,
-          baseVersionCodes: [100],
+          targetVersion: '1.3.11',
           platforms: [PlatformType.Windows],
           updateType: UpdateType.Full,
           releaseScope: userIds.length

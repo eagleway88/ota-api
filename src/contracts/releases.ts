@@ -7,7 +7,7 @@ export type ClientUpdateContext = {
   platform: string
   architecture?: string
   distributionChannel?: string
-  nativeVersionCode: number
+  currentVersion: string
   installedReleaseSequence: number
   userIds: ReadonlySet<string>
 }
@@ -16,8 +16,7 @@ export type Release = {
   releaseId: string
   releaseSequence: number
   appName: string
-  targetVersionCode: number
-  baseVersionCodes: readonly number[]
+  targetVersion: string
   platforms: readonly string[]
   architectures: readonly string[]
   distributionChannel?: string
@@ -59,7 +58,6 @@ export type UpdateSkipReason =
   | 'architecture_mismatch'
   | 'channel_mismatch'
   | 'audience_mismatch'
-  | 'base_version_mismatch'
   | 'already_current'
 
 export type UpdateDecision = {

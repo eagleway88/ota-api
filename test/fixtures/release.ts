@@ -3,8 +3,7 @@ import { releaseWriteValues } from '@/infrastructure/persistence/release-write.m
 export const releaseInput: ReleaseWriteInput = {
   appName: 'app',
   releaseId: '10000000-0000-4000-8000-000000000000',
-  targetVersionCode: 110,
-  baseVersionCodes: [100],
+  targetVersion: '1.3.10',
   platforms: ['windows'],
   architectures: ['x64'],
   updateType: 'full',

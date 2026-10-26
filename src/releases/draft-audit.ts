@@ -1,8 +1,7 @@
 import type { CreateReleaseDraftDto } from '@/releases/release-draft.dto'
 
 const fields = [
-  'targetVersionCode',
-  'baseVersionCodes',
+  'targetVersion',
   'platforms',
   'architectures',
   'distributionChannel',

@@ -4,7 +4,7 @@ export type JsonValue =
 export type ClientReport = {
   appName: string
   platform: string
-  versionCode: number
+  version: string
   reportedUsername?: string | null
   extras?: JsonValue
   sourceIp?: string | null

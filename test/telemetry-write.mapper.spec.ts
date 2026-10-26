@@ -15,7 +15,7 @@ const at = new Date('2026-10-21T00:00:00Z')
 const input: StatusReportInput = {
   appName: 'app',
   platform: 'windows',
-  versionCode: 100,
+  version: '1.3.10',
   releaseSequence: 1,
   reportedUsername: 'name',
   extras: { snake_key: { innerCamel: 1 } },
@@ -36,7 +36,7 @@ describe('canonical telemetry mapping', () => {
     expect(values).toEqual({
       app_name: 'app',
       platform: 'windows',
-      version_code: 100,
+      version: '1.3.10',
       release_sequence: 1,
       reported_username: 'name',
       source_ip: 'localhost',

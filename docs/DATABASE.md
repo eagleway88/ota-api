@@ -30,8 +30,14 @@ db:init 使用 TypeORM 结构版本记录与 CREATE TABLE IF NOT EXISTS；重复
 
 每个应用使用登记的表前缀，例如 app_a_release、app_a_release_user、app_a_release_draft、app_a_artifact、app_a_success、app_a_error、app_a_error_log、app_a_publish_task、app_a_publish_task_log、app_a_audit_log。
 
-发布表使用 release_sequence 自增主键，起点为 1；release_id 是唯一 UUID。target_version_code 表示目标版本，base_version_codes 是热更新可应用的原生基础版本数组。范围、平台、架构、渠道、启用状态、提示策略和资源元数据各有独立字段。
+发布表使用 release_sequence 自增主键，起点为 1；release_id 是唯一 UUID。target_version 为 VARCHAR(128)，存储目标显示版本（如 1.3.10），报告表 version 同样使用 VARCHAR(128)。范围、平台、架构、渠道、启用状态、提示策略和资源元数据各有独立字段。
 
 报告通过 release_sequence 关联本应用发布；可选 report_id 负责请求重试幂等。错误组使用规范化元组的 SHA-256 标识，不按任意分隔符拼接。JSON 业务内容保持原始类型与键名。
 
 业务服务使用 synchronize=false；HTTP 请求不建表、补列或注册应用。请在启动服务前完成初始化和应用准备。任务/执行记录/审计永久保存，消息按 [数据生命周期](DATA_LIFECYCLE.md) 处理。
+
+## 首次部署
+
+OTA 尚未正式上线。部署时使用清理后的数据库，按上面的初始化流程创建全局表并准备应用表；不执行旧库数据升级或回填。HTTP 请求不负责建表。
+
+首次发布配套部署 OTA API、业务后端和管理端，并分发完整客户端安装包。后续热包按平台、架构、渠道和用户范围控制分发；原生资源或原生 API 变化继续发布完整安装包。

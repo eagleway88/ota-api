@@ -11,8 +11,7 @@ describe('resolveUpdate load baseline', () => {
       releaseId: `release-${index}`,
       releaseSequence: 1 + index,
       appName: 'app',
-      targetVersionCode: 110,
-      baseVersionCodes: [100],
+      targetVersion: '1.3.10',
       platforms: ['windows'],
       architectures: ['x64'],
       distributionChannel: 'stable',
@@ -32,7 +31,7 @@ describe('resolveUpdate load baseline', () => {
         platform: 'windows',
         architecture: 'x64',
         distributionChannel: 'stable',
-        nativeVersionCode: 100,
+        currentVersion: '1.3.10',
         installedReleaseSequence: index % 2 ? 0 : 2099,
         userIds: new Set()
       }

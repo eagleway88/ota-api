@@ -1,3 +1,4 @@
+import { isAppVersion } from '@/contracts/version'
 import { Release } from '@/contracts/releases'
 function list(row: Record<string, unknown>, key: string): unknown[] {
   const value: unknown =
@@ -8,14 +9,13 @@ function list(row: Record<string, unknown>, key: string): unknown[] {
 export function mapStoredReleaseRecord(row: Record<string, unknown>): Release {
   const sequence = Number(row.release_sequence),
     revision = Number(row.policy_revision),
-    target = Number(row.target_version_code)
+    target = row.target_version
   if (
     !Number.isSafeInteger(sequence) ||
     sequence < 1 ||
     !Number.isSafeInteger(revision) ||
     revision < 1 ||
-    !Number.isSafeInteger(target) ||
-    target < 0 ||
+    !isAppVersion(target) ||
     typeof row.app_name !== 'string' ||
     typeof row.release_id !== 'string'
   )
@@ -25,11 +25,9 @@ export function mapStoredReleaseRecord(row: Record<string, unknown>): Release {
     !['full', 'hot'].includes(String(row.update_type))
   )
     throw new Error('Invalid release policy')
-  const bases = list(row, 'base_version_codes'),
-    platforms = list(row, 'platforms'),
+  const platforms = list(row, 'platforms'),
     architectures = list(row, 'architectures')
   if (
-    !bases.every(v => Number.isSafeInteger(v) && Number(v) >= 0) ||
     !platforms.length ||
     !platforms.every(v => typeof v === 'string') ||
     !architectures.every(v => typeof v === 'string')
@@ -52,8 +50,7 @@ export function mapStoredReleaseRecord(row: Record<string, unknown>): Release {
     releaseId: row.release_id,
     releaseSequence: sequence,
     appName: row.app_name,
-    targetVersionCode: target,
-    baseVersionCodes: bases as number[],
+    targetVersion: target,
     platforms: platforms,
     architectures: architectures,
     distributionChannel:

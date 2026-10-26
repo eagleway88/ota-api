@@ -6,7 +6,7 @@ export type ApplicationSubscription = {
   platform: string
   architecture?: string
   distributionChannel?: string
-  nativeVersionCode: number
+  currentVersion: string
   installedReleaseSequence: number
   revision: number
 }

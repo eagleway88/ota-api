@@ -74,7 +74,7 @@ describe('UpdateQueryService', () => {
       appName: 'app',
       platform: 'windows',
       architecture: 'x64',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.10',
       installedReleaseSequence: 0
     }
 

@@ -13,7 +13,7 @@ export function clientReportValues(input: ClientReport) {
   return compact({
     app_name: input.appName,
     platform: input.platform,
-    version_code: input.versionCode,
+    version: input.version,
     reported_username: input.reportedUsername,
     extras:
       input.extras === undefined
@@ -76,7 +76,7 @@ export function applicationErrorIdentity(input: ApplicationErrorInput) {
   return [
     input.appName,
     input.platform,
-    String(input.versionCode),
+    String(input.version),
     input.kind,
     input.message,
     input.stack ?? ''
@@ -110,7 +110,7 @@ export function storedReport(row: Record<string, unknown>): ReportRecord {
     id: Number(row.id),
     appName: String(row.app_name),
     platform: String(row.platform),
-    versionCode: Number(row.version_code),
+    version: String(row.version),
     releaseSequence:
       row.release_sequence === undefined
         ? undefined
@@ -152,7 +152,7 @@ export function sameStatusContent(
   return (
     stored.appName === input.appName &&
     stored.platform === input.platform &&
-    stored.versionCode === input.versionCode &&
+    stored.version === input.version &&
     stored.releaseSequence === input.releaseSequence &&
     (stored.reportedUsername ?? null) === (input.reportedUsername ?? null) &&
     (stored.message ?? null) === (message ?? null) &&

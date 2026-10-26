@@ -11,8 +11,7 @@ function release(overrides: Partial<Release> = {}): Release {
     releaseId: 'release-1',
     releaseSequence: 1,
     appName: 'sample-app',
-    targetVersionCode: 110,
-    baseVersionCodes: [100],
+    targetVersion: '1.3.10',
     platforms: ['windows'],
     architectures: ['x64'],
     distributionChannel: 'stable',
@@ -32,7 +31,7 @@ function context(overrides: Partial<ClientUpdateContext> = {}) {
     platform: 'windows',
     architecture: 'x64',
     distributionChannel: 'stable',
-    nativeVersionCode: 100,
+    currentVersion: '1.3.10',
     installedReleaseSequence: 0,
     userIds: new Set<string>(),
     ...overrides
@@ -56,8 +55,7 @@ describe('resolveUpdate', () => {
     ['architecture_mismatch', { architectures: ['arm64'] }],
     ['channel_mismatch', { distributionChannel: 'beta' }],
     ['audience_mismatch', { scope: 'allowlist' }],
-    ['base_version_mismatch', { baseVersionCodes: [999] }],
-    ['already_current', { updateType: 'full', targetVersionCode: 100 }]
+    ['already_current', { updateType: 'full', targetVersion: '1.3.10' }]
   ] as Array<[string, Partial<Release>]>)(
     'diagnoses %s from the same selection rules',
     (reason, overrides) => {
@@ -72,20 +70,18 @@ describe('resolveUpdate', () => {
     }
   )
 
-  it('does not send a hot update outside its base-version set', () => {
-    const decision = resolveUpdate(
-      context(),
-      {
-        revision: 1,
-        releases: [release({ baseVersionCodes: [110] })]
-      },
-      audience(),
-      defaultApplicationUpdatePolicy
-    )
-
-    expect(decision.release).toBeNull()
-    expect(decision.reason).toBe('no-applicable-release')
-  })
+  it.each(['1.3.9', '1.3.11', '1.4.0'])(
+    'rejects a hot release for a different display version %s',
+    currentVersion => {
+      const decision = resolveUpdate(
+        context({ currentVersion }),
+        { revision: 1, releases: [release()] },
+        audience(),
+        defaultApplicationUpdatePolicy
+      )
+      expect(decision.release).toBeNull()
+    }
+  )
 
   it('selects an older public candidate when the latest private release is not allowed', () => {
     const decision = resolveUpdate(
@@ -160,7 +156,7 @@ describe('resolveUpdate', () => {
             releaseId: 'full',
             releaseSequence: 2100,
             updateType: 'full',
-            targetVersionCode: 120
+            targetVersion: '1.3.11'
           })
         ]
       },
@@ -251,5 +247,59 @@ describe('resolveUpdate', () => {
     )
 
     expect(decision.release).toBeNull()
+  })
+})
+
+describe('display version selection', () => {
+  it('orders full versions numerically and chooses the highest before release sequence', () => {
+    const decision = resolveUpdate(
+      context({ currentVersion: '1.3.9', installedReleaseSequence: 999 }),
+      {
+        revision: 1,
+        releases: [
+          release({
+            releaseId: 'patch',
+            updateType: 'full',
+            targetVersion: '1.3.10',
+            releaseSequence: 100
+          }),
+          release({
+            releaseId: 'minor',
+            updateType: 'full',
+            targetVersion: '1.10.0',
+            releaseSequence: 1
+          }),
+          release({
+            releaseId: 'older',
+            updateType: 'full',
+            targetVersion: '1.9.99',
+            releaseSequence: 200
+          })
+        ]
+      },
+      audience(),
+      defaultApplicationUpdatePolicy
+    )
+    expect(decision.release?.releaseId).toBe('minor')
+  })
+  it('does not inherit mandatory policy from a hot package for another display version', () => {
+    const decision = resolveUpdate(
+      context(),
+      {
+        revision: 1,
+        releases: [
+          release(),
+          release({
+            targetVersion: '1.3.11',
+            releaseSequence: 100,
+            mandatory: true
+          })
+        ]
+      },
+      audience(),
+      defaultApplicationUpdatePolicy
+    )
+    expect(decision.release?.releaseId).toBe('release-1')
+    expect(decision.mandatory).toBe(false)
   })
 })

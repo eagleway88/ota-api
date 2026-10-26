@@ -1,25 +1,18 @@
+import { isAppVersion } from '@/contracts/version'
 import { BadRequestException } from '@nestjs/common'
 import { ReleaseWriteInput } from '@/releases/ports/release-write.repository'
 export function enabledWriteValues(enabled: boolean) {
   return { is_enabled: enabled ? 1 : 0 }
 }
 export function releaseWriteValues(input: ReleaseWriteInput) {
-  if (
-    !Number.isSafeInteger(input.targetVersionCode) ||
-    input.targetVersionCode < 0 ||
-    input.targetVersionCode > 2147483647 ||
-    !input.baseVersionCodes.every(
-      v => Number.isSafeInteger(v) && v >= 0 && v <= 2147483647
-    )
-  )
-    throw new BadRequestException('Invalid version code')
+  if (!isAppVersion(input.targetVersion))
+    throw new BadRequestException('Invalid display version')
   return {
     app_name: input.appName,
     release_id: input.releaseId,
     release_scope: input.releaseScope,
     policy_revision: 1,
-    target_version_code: input.targetVersionCode,
-    base_version_codes: JSON.stringify(input.baseVersionCodes),
+    target_version: input.targetVersion,
     platforms: JSON.stringify(input.platforms),
     architectures: JSON.stringify(input.architectures),
     distribution_channel: input.distributionChannel,

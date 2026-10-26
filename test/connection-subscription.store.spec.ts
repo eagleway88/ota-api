@@ -11,7 +11,7 @@ describe('ConnectionSubscriptionStore', () => {
       appName: 'sample-app',
       platform: 'windows',
       architecture: 'x64',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.10',
       installedReleaseSequence: 0
     })
 
@@ -27,7 +27,7 @@ describe('ConnectionSubscriptionStore', () => {
     const subscriber = store.subscribeApplication('socket-1', {
       appName: 'app',
       platform: 'windows',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.10',
       installedReleaseSequence: 0
     })
 
@@ -41,7 +41,7 @@ describe('ConnectionSubscriptionStore', () => {
     store.subscribeApplication('socket-1', {
       appName: 'app',
       platform: 'windows',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.10',
       installedReleaseSequence: 0
     })
 
@@ -55,7 +55,7 @@ describe('ConnectionSubscriptionStore', () => {
     const input = {
       appName: 'app',
       platform: 'windows',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.10',
       installedReleaseSequence: 0
     }
     const old = store.subscribeApplication('socket-1', input)
@@ -64,7 +64,7 @@ describe('ConnectionSubscriptionStore', () => {
     const next = store.subscribeApplication('socket-1', {
       ...input,
       platform: 'ios',
-      nativeVersionCode: 200
+      currentVersion: '1.3.11'
     })
     expect(next.generation).toBe(old.generation)
     expect(next.application.revision).toBeGreaterThan(old.application.revision)
@@ -77,7 +77,7 @@ describe('ConnectionSubscriptionStore', () => {
     const input = {
       appName: 'app',
       platform: 'windows',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.10',
       installedReleaseSequence: 0
     }
     const first = store.subscribeApplication('socket-1', input)
@@ -104,7 +104,7 @@ describe('ConnectionSubscriptionStore', () => {
     const input = {
       appName: 'app',
       platform: 'windows',
-      nativeVersionCode: 100,
+      currentVersion: '1.3.10',
       installedReleaseSequence: 0
     }
     const old = store.subscribeApplication('socket-1', input)

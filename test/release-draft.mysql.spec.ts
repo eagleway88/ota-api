@@ -71,8 +71,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
       (_, i) => `${appName}:windows:${prefix}-${i.toString().padStart(4, '0')}`
     )
   const body = (userIds: string[] = []): CreateReleaseDraftDto => ({
-    targetVersionCode: 120,
-    baseVersionCodes: [100],
+    targetVersion: '1.3.11',
     platforms: [PlatformType.Windows],
     updateType: UpdateType.Full,
     releaseScope: userIds.length
@@ -233,7 +232,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
     await expect(
       drafts.createDraft(
         appName,
-        { ...input, targetVersionCode: 121 },
+        { ...input, targetVersion: '1.3.12' },
         'same-key',
         context('conflict')
       )
@@ -326,7 +325,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
       appName,
       releaseId,
       {
-        targetVersionCode: 121,
+        targetVersion: '1.3.12',
         userIds: after,
         releaseNotes: 'new-notes-secret',
         installerSourceUrl: 'https://example.test/new?secret=new-url-secret',
@@ -341,7 +340,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
       audience: Record<string, unknown>
     }
     expect(summary.changedFields).toEqual([
-      'targetVersionCode',
+      'targetVersion',
       'userIds',
       'releaseNotes',
       'installerSourceUrl'
@@ -393,7 +392,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
       drafts.updateDraft(
         appName,
         releaseId,
-        { userIds: members('after', 201), targetVersionCode: 999 },
+        { userIds: members('after', 201), targetVersion: '9.9.9' },
         context('failed-edit')
       )
     ).rejects.toThrow('second audit part failed')
@@ -430,7 +429,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
       drafts.updateDraft(
         appName,
         releaseId,
-        { targetVersionCode: 999 },
+        { targetVersion: '9.9.9' },
         context('published')
       )
     ).rejects.toMatchObject({ status: 409 })
@@ -454,9 +453,8 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
       await query(`SELECT result, error_code FROM \`${other.tables.auditLog}\``)
     ).toEqual([{ result: 'failed', error_code: 'RELEASE_NOT_FOUND' }])
     expect(
-      ((await rows())[0].payload as { targetVersionCode: number })
-        .targetVersionCode
-    ).toBe(120)
+      ((await rows())[0].payload as { targetVersion: string }).targetVersion
+    ).toBe('1.3.11')
   })
 
   it('serializes concurrent PATCH merges without losing metadata or audience updates', async () => {
@@ -471,16 +469,16 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
       drafts.updateDraft(
         appName,
         releaseId,
-        { targetVersionCode: 121 },
+        { targetVersion: '1.3.12' },
         context('metadata-edit')
       )
     ])
     expect((await rows())[0].payload).toMatchObject({
-      targetVersionCode: 121,
+      targetVersion: '1.3.12',
       userIds: members('after', 201)
     })
     expect((await audits('metadata-edit'))[0].change_summary).toMatchObject({
-      changedFields: ['targetVersionCode'],
+      changedFields: ['targetVersion'],
       audience: { addedCount: 0, removedCount: 0 }
     })
     expect((await audits('audience-edit'))[0].change_summary).toMatchObject({
@@ -507,7 +505,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
         drafts.updateDraft(
           appName,
           releaseId,
-          { targetVersionCode: 121 },
+          { targetVersion: '1.3.12' },
           context('inconsistent')
         )
       ).rejects.toMatchObject({ status: 409 })
@@ -538,7 +536,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
           ? drafts.updateDraft(
               appName,
               releaseId,
-              { targetVersionCode: 121 },
+              { targetVersion: '1.3.12' },
               context('unavailable')
             )
           : create()
@@ -575,7 +573,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
           : drafts.updateDraft(
               appName,
               releaseId,
-              { targetVersionCode: 999 },
+              { targetVersion: '9.9.9' },
               context('stale-edit')
             )
       ).rejects.toThrow('not ready')
@@ -632,7 +630,7 @@ mysql('draft creation and editing audits on isolated MySQL', () => {
           ? drafts.updateDraft(
               appName,
               releaseId,
-              { targetVersionCode: 121 },
+              { targetVersion: '1.3.12' },
               context('lost-edit')
             )
           : create([], 'lost-create-key')

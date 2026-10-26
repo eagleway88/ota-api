@@ -411,7 +411,7 @@ mysql('scoped API key authorization through real HTTP and MySQL', () => {
       .post('/api/v1/app/apps/app-a/updates/check')
       .send({
         platform: 'windows',
-        nativeVersionCode: 100,
+        currentVersion: '1.3.10',
         installedReleaseSequence: 0
       })
       .expect(201, { code: 0, data: null })

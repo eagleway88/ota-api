@@ -84,7 +84,7 @@ Key 必须显式授权路径中的应用；observer 可读统计、上报、任�
 
 `successCount/errorCount` 保持上报记录次数的含义，不是去重用户数；无键失败记录按 ID 更新不会新增一条记录。发送尝试和普通消息 ACK 不属于安装成功上报。
 
-统计写入使用独立上报服务与规范字段存储端口；管理员 GET 查询采用 API Key 认证。客户端通过正式 /api/v1/app POST 上报，使用 `versionCode/releaseSequence/reportedUsername`。可选 `reportId` 同内容重试只产生一条记录，不同内容复用键返回 `409`；无键逐次计数，`recordId` 更新不改变条数和原发布关联。完整规则见 [SDK 上报说明](SDK_INTEGRATION.md#安装与错误上报)。公开 POST 不能查询统计或日志；这些 GET 仍需按应用授权的 API Key。
+统计写入使用独立上报服务与规范字段存储端口；管理员 GET 查询采用 API Key 认证。客户端通过正式 /api/v1/app POST 上报，使用 `version/releaseSequence/reportedUsername`。可选 `reportId` 同内容重试只产生一条记录，不同内容复用键返回 `409`；无键逐次计数，`recordId` 更新不改变条数和原发布关联。完整规则见 [SDK 上报说明](SDK_INTEGRATION.md#安装与错误上报)。公开 POST 不能查询统计或日志；这些 GET 仍需按应用授权的 API Key。
 
 客户端错误表保存的是聚合记录。`telemetry/app-errors` 的 `total` 是符合条件的错误组数；每组的 `reportCount` 是该组累计次数，不能解读为查询窗口内发生次数。响应通过 `windowBasis: "lastSeenAt"` 和 `reportCountSemantics` 明确这一点。由于错误表只保存聚合，不保存逐次事件，当前无法精确还原每个时间段的错误次数。
 

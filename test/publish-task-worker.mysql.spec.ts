@@ -67,8 +67,7 @@ mysql('publish task checkpoints on isolated MySQL', () => {
     enabled: true,
     mandatory: false,
     showUpdateDialog: true,
-    targetVersionCode: 110,
-    baseVersionCodes: [100],
+    targetVersion: '1.3.10',
     platforms: ['windows'],
     architectures: [],
     updateType: 'hot',
@@ -188,7 +187,7 @@ mysql('publish task checkpoints on isolated MySQL', () => {
       subscriptions.subscribeApplication(id, {
         appName: application.appName,
         platform: 'windows',
-        nativeVersionCode: 100,
+        currentVersion: '1.3.10',
         installedReleaseSequence: 0
       })
       sockets.set(id, { emit: jest.fn().mockReturnValue(true) })

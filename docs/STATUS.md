@@ -4,7 +4,7 @@
 
 - App / Manage 接口、严格 DTO 与 Socket 应用订阅协议。
 - 数据库初始化、应用分表准备、release / release_sequence 发布存储；应用发布序号从 1 开始。
-- releaseId 标识发布，baseVersionCodes 声明热更新适用范围。
+- releaseId 标识发布，热更新通过平台、架构、渠道和用户范围筛选，并按 releaseSequence 排序。
 - 多应用 API Key、四种权限预设、到期/撤销及 CLI 运维；同一 Key 可追加/移除应用授权，含事务审计、并发控制与即时校验。
 - 发布/名单/任务/审计事务、目录一致快照与更新决策。
 - Worker 租约、checkpoint、接管、重试与聚合进度。

@@ -1,3 +1,4 @@
+import { APP_VERSION_PATTERN } from '@/contracts/version'
 import {
   Allow,
   IsEnum,
@@ -5,6 +6,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   IsUUID,
   Max,
   MaxLength,
@@ -17,10 +19,10 @@ export class ClientReportDto {
   @IsEnum(PlatformType)
   platform: PlatformType
 
-  @IsInt()
-  @Min(0)
-  @Max(2_147_483_647)
-  versionCode: number
+  @IsString()
+  @Matches(APP_VERSION_PATTERN)
+  @MaxLength(128)
+  version: string
 
   @IsOptional()
   @IsString()

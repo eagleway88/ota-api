@@ -504,7 +504,6 @@ export class ReleaseDraftService {
   ): CreateReleaseDraftDto {
     const platforms = Array.from(new Set(body.platforms))
     const architectures = Array.from(new Set(body.architectures ?? []))
-    const baseVersionCodes = Array.from(new Set(body.baseVersionCodes))
     let audience: ReturnType<typeof normalizeReleaseAudience>
     try {
       audience = normalizeReleaseAudience({
@@ -516,9 +515,6 @@ export class ReleaseDraftService {
     } catch {
       throw new BadRequestException('Release audience is invalid')
     }
-    if (body.updateType === UpdateType.Hot && !baseVersionCodes.length) {
-      throw new BadRequestException('Hot updates require baseVersionCodes')
-    }
     if (!body.artifactId && !body.installerSourceUrl && !body.bundleUrl) {
       throw new BadRequestException('A release artifact or URL is required')
     }
@@ -526,7 +522,6 @@ export class ReleaseDraftService {
       ...body,
       platforms,
       architectures,
-      baseVersionCodes,
       userIds: audience.userIds,
       releaseScope: audience.releaseScope as ReleaseScopeType
     }
@@ -666,8 +661,7 @@ export class ReleaseDraftService {
       releaseId: release.releaseId,
       releaseSequence: release.releaseSequence,
       appName: release.appName,
-      targetVersionCode: release.targetVersionCode,
-      baseVersionCodes: release.baseVersionCodes,
+      targetVersion: release.targetVersion,
       platforms: release.platforms,
       architectures: release.architectures,
       distributionChannel: release.distributionChannel,

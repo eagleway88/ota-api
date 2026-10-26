@@ -1,3 +1,4 @@
+import { APP_VERSION_PATTERN } from '@/contracts/version'
 import {
   ArrayMaxSize,
   IsArray,
@@ -6,6 +7,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   IsUrl,
   MaxLength,
   Min
@@ -19,13 +21,10 @@ import {
 } from '@/contracts/release-values'
 
 export class CreateReleaseDraftDto {
-  @IsInt()
-  @Min(0)
-  targetVersionCode: number
-
-  @IsArray()
-  @IsInt({ each: true })
-  baseVersionCodes: number[]
+  @IsString()
+  @Matches(APP_VERSION_PATTERN)
+  @MaxLength(128)
+  targetVersion: string
 
   @IsArray()
   @IsEnum(PlatformType, { each: true })
