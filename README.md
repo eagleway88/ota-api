@@ -22,6 +22,7 @@ db:init 初始化全局表；key create --prepare-apps 准备应用分表并签�
 - 上传 ZIP、创建与编辑草稿、显式发布、定向名单、启停、重新分发。
 - 公开更新检查、安装结果上报与应用错误聚合；外部后台可查询统计、任务执行记录及审计。
 - 按平台、架构、渠道和名单判断更新；HTTP 检查与 Socket 分发使用同一决策逻辑。
+- 支持 `web` 网页刷新提醒：仅面向 Web 的 `full` 发布无需更新包，网页按构建版本查更并自行弹窗刷新，见 [接入文档](docs/SDK_INTEGRATION.md#web-网页刷新提醒)。
 - 发布采用 releaseId（UUID）和 releaseSequence（应用内从 1 开始的递增序号）。热更新要求 targetVersion 与客户端 currentVersion 完全一致，并匹配平台、架构、渠道、用户范围和 releaseSequence；适用的新版本全量包优先。
 - 发布、名单、草稿、资源、任务、执行记录和应用审计按应用分表，写入使用事务与应用级锁。
 - Worker 自动轮询，支持租约、接管、重试及进度 checkpoint。

@@ -18,9 +18,9 @@ Content-Type: application/json
 }
 ~~~
 
-platform 和显示版本字符串 currentVersion 必填；installedReleaseSequence 省略为 0。architecture、distributionChannel、userId 可选。userId 必须与路径应用和平台一致，不传仅匹配 public；uniqueId 不提供名单资格。平台枚举 ios/android/windows/linux/macos。指定 distributionChannel 的发布只匹配相同渠道的客户端；发布未指定渠道时不限制客户端渠道。
+platform 和显示版本字符串 currentVersion 必填；installedReleaseSequence 省略为 0。architecture、distributionChannel、userId 可选。userId 必须与路径应用和平台一致，不传仅匹配 public；uniqueId 不提供名单资格。平台枚举 ios/android/windows/linux/macos/web。指定 distributionChannel 的发布只匹配相同渠道的客户端；发布未指定渠道时不限制客户端渠道。
 
-currentVersion 是原生安装包的显示版本字符串，例如 1.3.10。完整更新按数字分段比较 targetVersion 与 currentVersion，目标更高时优先；热更新必须满足 targetVersion === currentVersion，再按发布序号判断是否未安装。installedReleaseSequence 是已实际加载的发布序号，不是发布 UUID。
+currentVersion 是原生安装包的显示版本字符串，Web 则为当前页面实际加载的构建版本，例如 1.3.10。完整更新按数字分段比较 targetVersion 与 currentVersion，目标更高时优先；热更新必须满足 targetVersion === currentVersion，再按发布序号判断是否未安装。installedReleaseSequence 是已实际加载的发布序号，不是发布 UUID。
 
 ~~~json
 {
@@ -43,7 +43,30 @@ currentVersion 是原生安装包的显示版本字符串，例如 1.3.10。完�
 }
 ~~~
 
-响应还可包含发布说明、资源大小、安装源 URL、策略修订及时间。无更新时 data=null。全量使用 installerSourceUrl，热更新使用 bundleUrl；布尔字段使用 JSON 布尔值。
+响应还可包含发布说明、资源大小、安装源 URL、策略修订及时间。无更新时 data=null。原生全量使用 installerSourceUrl，热更新使用 bundleUrl；仅面向 Web 的 full 发布可没有资源 URL。布尔字段使用 JSON 布尔值。
+
+## Web 网页刷新提醒
+
+网页使用 `platform: 'web'`，发布使用 `platforms: ['web']` 和 `updateType: 'full'`。仅该组合允许省略 `artifactId`、`installerSourceUrl` 和 `bundleUrl`；混合原生平台的发布及 Web 热更新仍要求更新资源。现有存储可容纳 Web，无需迁移数据库。
+
+创建草稿示例，之后照常调用发布接口：
+
+~~~json
+{
+  "targetVersion": "1.3.11",
+  "platforms": ["web"],
+  "updateType": "full",
+  "releaseScope": "public",
+  "userIds": [],
+  "mandatory": false,
+  "showUpdateDialog": true,
+  "releaseNotes": "页面已更新，请刷新后使用。"
+}
+~~~
+
+先部署新网页，再发布刷新通知。网页通过 HTTP 检查或 Socket 订阅，`currentVersion` 必须来自当前已加载的构建产物；目标版本高于该值时返回更新。收到后由业务网页根据 `mandatory`、`showUpdateDialog` 展示交互，用户确认后执行 `location.reload()`。强制更新由业务页面阻止继续操作并提供刷新按钮；服务端和 SDK 不自动刷新页面。
+
+刷新后应实际加载新构建再使用其版本检查；相同或更高版本不会再次命中该 full 发布。不要在确认弹窗或刷新前把待更新版本记作当前版本。网页 HTML 与缓存策略应保证刷新能获取新构建；API 和 Socket 可通过网页同源代理访问。
 
 ## Socket.IO
 

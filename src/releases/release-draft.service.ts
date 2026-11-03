@@ -8,7 +8,11 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { randomUUID } from 'crypto'
 import { DataSource, QueryRunner } from 'typeorm'
 import { apiUtil } from '@/utils/api'
-import { ReleaseScopeType, UpdateType } from '@/contracts/release-values'
+import {
+  PlatformType,
+  ReleaseScopeType,
+  UpdateType
+} from '@/contracts/release-values'
 import { ApplicationRegistryService } from '@/applications/application-registry.service'
 import { RegisteredApplication } from '@/applications/application-registry.service'
 import { normalizeReleaseAudience } from './release-audience'
@@ -515,7 +519,12 @@ export class ReleaseDraftService {
     } catch {
       throw new BadRequestException('Release audience is invalid')
     }
-    if (!body.artifactId && !body.installerSourceUrl && !body.bundleUrl) {
+    if (
+      !this.isWebRefresh(body) &&
+      !body.artifactId &&
+      !body.installerSourceUrl &&
+      !body.bundleUrl
+    ) {
       throw new BadRequestException('A release artifact or URL is required')
     }
     return {
@@ -534,7 +543,7 @@ export class ReleaseDraftService {
     const artifactUrl = artifact?.url
     if (payload.updateType === UpdateType.Full) {
       const installerSourceUrl = payload.installerSourceUrl ?? artifactUrl
-      if (!installerSourceUrl) {
+      if (!installerSourceUrl && !this.isWebRefresh(payload)) {
         throw new BadRequestException('Full updates require an installer URL')
       }
       return { installerSourceUrl, bundleUrl: payload.bundleUrl }
@@ -544,6 +553,14 @@ export class ReleaseDraftService {
       throw new BadRequestException('Hot updates require a bundle URL')
     }
     return { installerSourceUrl: payload.installerSourceUrl, bundleUrl }
+  }
+
+  private isWebRefresh(payload: CreateReleaseDraftDto) {
+    return (
+      payload.updateType === UpdateType.Full &&
+      payload.platforms.length > 0 &&
+      payload.platforms.every(platform => platform === PlatformType.Web)
+    )
   }
 
   private async lockDraft(
